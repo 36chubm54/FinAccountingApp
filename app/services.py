@@ -2,7 +2,6 @@ from typing import Optional, Dict
 from domain.currency import CurrencyService as DomainCurrencyService
 from pathlib import Path
 import json
-import re
 
 
 class CurrencyService:
@@ -10,7 +9,7 @@ class CurrencyService:
 
     По умолчанию использует локальные дефолтные курсы (совместимо с тестами).
     Если требуется — можно разрешить попытку получить актуальные курсы с
-    https://nationalbank.kz/ru/exchangerates/ezhednevnye-oficialnye-rynochnye-kursy-valyut/
+    https://www.nationalbank.kz/rss/rates_all.xml
     установив `use_online=True` при создании. В этом случае курсы кэшируются
     в `project/currency_rates.json` и будут использованы при отсутствии сети.
     """
@@ -21,7 +20,7 @@ class CurrencyService:
         self,
         rates: Optional[Dict[str, float]] = None,
         base: str = "KZT",
-        use_online: bool = False,
+        use_online: bool = False,  # connect to online source if no rates provided
     ):
         # If explicit rates provided, use them.
         if rates is not None:
@@ -46,11 +45,11 @@ class CurrencyService:
             raise ValueError(f"Unsupported currency: {currency}")
 
     def _fetch_and_cache_rates(self) -> Optional[Dict[str, float]]:
-        """Попытаться получить курсы с сайта НБРК и сохранить в кеш.
+        """Попытаться получить курсы с RSS-фида НБРК и сохранить в кеш.
 
         Возвращает словарь rates или None при ошибке.
         """
-        url = "https://nationalbank.kz/ru/exchangerates/ezhednevnye-oficialnye-rynochnye-kursy-valyut/"
+        url = "https://www.nationalbank.kz/rss/rates_all.xml"
         try:
             import requests
             from bs4 import BeautifulSoup
@@ -60,52 +59,22 @@ class CurrencyService:
         try:
             resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
             resp.raise_for_status()
-            soup = BeautifulSoup(resp.text, "html.parser")
+            soup = BeautifulSoup(resp.text, "xml")
 
             rates: Dict[str, float] = {}
 
-            # 1) Try parsing table rows
-            for tr in soup.find_all("tr"):
-                cols = [
-                    td.get_text(strip=True)
-                    for td in tr.find_all(["td", "th"])
-                    if td.get_text(strip=True)
-                ]
-                if not cols:
-                    continue
-                code = None
-                value = None
-                for i, col in enumerate(cols):
-                    token = col.replace("\u00a0", "").strip()
-                    if re.fullmatch(r"[A-Z]{3}", token):
-                        code = token
-                        # look for numeric value after code
-                        for j in range(i + 1, len(cols)):
-                            cand = cols[j].replace("\u00a0", "").replace(",", ".")
-                            if re.match(r"^[0-9]+(\.[0-9]+)?$", cand):
-                                try:
-                                    value = float(cand)
-                                    break
-                                except Exception:
-                                    continue
-                        break
-                if code and value is not None:
-                    rates[code] = value
-
-            # 2) Fallback: search whole text for patterns like 'USD 470'
-            if not rates:
-                text = soup.get_text(" ", strip=True)
-                pattern = re.compile(
-                    r"\b([A-Z]{3})\b[^0-9\n\r]{0,30}([0-9]+(?:[.,][0-9]+)?)"
-                )
-                for m in pattern.finditer(text):
-                    code = m.group(1)
-                    cand = m.group(2).replace("\u00a0", "").replace(",", ".")
+            # Parse RSS items
+            for item in soup.find_all("item"):
+                title = item.find("title")
+                description = item.find("description")
+                if title and description:
+                    code = title.get_text(strip=True)
+                    rate_text = description.get_text(strip=True)
                     try:
-                        val = float(cand)
-                    except Exception:
+                        rate = float(rate_text.replace(",", "."))
+                        rates[code] = rate
+                    except ValueError:
                         continue
-                    rates.setdefault(code, val)
 
             if rates:
                 self._save_cache(rates)

@@ -2,11 +2,25 @@ import sys
 import calendar
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox, simpledialog, Toplevel, Listbox, Scrollbar, VERTICAL, filedialog
+from tkinter import (
+    messagebox,
+    simpledialog,
+    Toplevel,
+    Listbox,
+    Scrollbar,
+    VERTICAL,
+    filedialog,
+)
 import os
 
 from infrastructure.repositories import JsonFileRecordRepository
-from app.use_cases import CreateIncome, CreateExpense, GenerateReport, DeleteRecord
+from app.use_cases import (
+    CreateIncome,
+    CreateExpense,
+    GenerateReport,
+    DeleteRecord,
+    DeleteAllRecords,
+)
 from domain.records import IncomeRecord
 from app.services import CurrencyService
 
@@ -26,25 +40,38 @@ class FinancialApp(tk.Tk):
         self.currency = CurrencyService()
 
         # Buttons
+        button_width = 15  # Set uniform width for all buttons
+
         self.add_income_btn = tk.Button(
-            self, text="Add Income", command=self.add_income
+            self, text="Add Income", command=self.add_income, width=button_width
         )
         self.add_income_btn.pack(pady=10)
 
         self.add_expense_btn = tk.Button(
-            self, text="Add Expense", command=self.add_expense
+            self, text="Add Expense", command=self.add_expense, width=button_width
         )
         self.add_expense_btn.pack(pady=10)
 
         self.report_btn = tk.Button(
-            self, text="Generate Report", command=self.generate_report
+            self,
+            text="Generate Report",
+            command=self.generate_report,
+            width=button_width,
         )
         self.report_btn.pack(pady=10)
 
         self.delete_btn = tk.Button(
-            self, text="Delete Record", command=self.delete_record
+            self, text="Delete Record", command=self.delete_record, width=button_width
         )
         self.delete_btn.pack(pady=10)
+
+        self.delete_all_btn = tk.Button(
+            self,
+            text="Delete All Records",
+            command=self.delete_all_records,
+            width=button_width,
+        )
+        self.delete_all_btn.pack(pady=10)
 
     def add_income(self):
         self._add_record("Income", CreateIncome)
@@ -162,7 +189,7 @@ class FinancialApp(tk.Tk):
             filepath = filedialog.asksaveasfilename(
                 defaultextension=".csv",
                 filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-                title="Save Report as CSV"
+                title="Save Report as CSV",
             )
             if filepath:
                 try:
@@ -223,6 +250,17 @@ class FinancialApp(tk.Tk):
 
         delete_btn = tk.Button(delete_window, text="Delete Selected", command=delete)
         delete_btn.pack(pady=10)
+
+    def delete_all_records(self):
+        # Confirmation dialog
+        confirm = messagebox.askyesno(
+            "Confirm Delete All",
+            "Are you sure you want to delete ALL records? This action cannot be undone.",
+        )
+        if confirm:
+            delete_all_use_case = DeleteAllRecords(self.repository)
+            delete_all_use_case.execute()
+            messagebox.showinfo("Success", "All records have been deleted.")
 
 
 def main() -> None:

@@ -1,5 +1,11 @@
 from unittest.mock import Mock
-from app.use_cases import CreateIncome, CreateExpense, GenerateReport, DeleteRecord
+from app.use_cases import (
+    CreateIncome,
+    CreateExpense,
+    GenerateReport,
+    DeleteRecord,
+    DeleteAllRecords,
+)
 from domain.records import IncomeRecord, ExpenseRecord
 from infrastructure.repositories import RecordRepository
 
@@ -128,3 +134,17 @@ class TestGenerateReport:
         # Assert
         mock_repo.delete_by_index.assert_called_once_with(99)
         assert result is False
+
+
+class TestDeleteAllRecords:
+    def test_execute_calls_delete_all_on_repository(self):
+        # Arrange
+        mock_repo = Mock(spec=RecordRepository)
+
+        use_case = DeleteAllRecords(repository=mock_repo)
+
+        # Act
+        use_case.execute()
+
+        # Assert
+        mock_repo.delete_all.assert_called_once()

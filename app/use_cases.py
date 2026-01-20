@@ -45,3 +45,12 @@ class DeleteRecord:
     def execute(self, index: int) -> bool:
         """Delete record by index. Returns True if deleted successfully."""
         return self._repository.delete_by_index(index)
+
+
+class DeleteAllRecords:
+    def __init__(self, repository: RecordRepository):
+        self._repository = repository
+
+    def execute(self) -> None:
+        """Delete all records."""
+        self._repository.delete_all()

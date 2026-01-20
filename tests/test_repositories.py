@@ -174,3 +174,29 @@ class TestJsonFileRecordRepository:
         # Try to delete from empty repository
         result = self.repo.delete_by_index(0)
         assert result is False
+
+    def test_delete_all(self):
+        # Setup: add some records
+        income1 = IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")
+        expense1 = ExpenseRecord(date="2025-01-02", amount=30.0, category="Food")
+        income2 = IncomeRecord(date="2025-01-03", amount=50.0, category="Bonus")
+
+        self.repo.save(income1)
+        self.repo.save(expense1)
+        self.repo.save(income2)
+
+        # Verify we have 3 records
+        records = self.repo.load_all()
+        assert len(records) == 3
+
+        # Delete all records
+        self.repo.delete_all()
+
+        # Verify repository is empty
+        records = self.repo.load_all()
+        assert len(records) == 0
+
+        # Verify JSON file contains empty list
+        with open(self.temp_file.name, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        assert data == []

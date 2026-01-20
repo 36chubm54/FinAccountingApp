@@ -17,6 +17,11 @@ class RecordRepository(ABC):
         """Delete record by index. Returns True if deleted, False if index out of range."""
         pass
 
+    @abstractmethod
+    def delete_all(self) -> None:
+        """Delete all records."""
+        pass
+
 
 class JsonFileRecordRepository(RecordRepository):
     def __init__(self, file_path: str = "records.json"):
@@ -78,3 +83,8 @@ class JsonFileRecordRepository(RecordRepository):
                 json.dump(data, f, indent=2, ensure_ascii=False)
             return True
         return False
+
+    def delete_all(self) -> None:
+        """Delete all records."""
+        with open(self._file_path, "w", encoding="utf-8") as f:
+            json.dump([], f, indent=2, ensure_ascii=False)
