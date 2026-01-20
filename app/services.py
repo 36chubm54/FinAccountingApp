@@ -20,7 +20,7 @@ class CurrencyService:
         self,
         rates: Optional[Dict[str, float]] = None,
         base: str = "KZT",
-        use_online: bool = False,  # connect to online source if no rates provided
+        use_online: bool = True,  # connect to online source if no rates provided
     ):
         # If explicit rates provided, use them.
         if rates is not None:
@@ -52,24 +52,29 @@ class CurrencyService:
         url = "https://www.nationalbank.kz/rss/rates_all.xml"
         try:
             import requests
-            from bs4 import BeautifulSoup
+            import xml.etree.ElementTree as ET
         except Exception:
             return self._load_cached()
 
         try:
             resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
             resp.raise_for_status()
-            soup = BeautifulSoup(resp.text, "xml")
+            root = ET.fromstring(resp.text)
 
             rates: Dict[str, float] = {}
 
             # Parse RSS items
-            for item in soup.find_all("item"):
+            for item in root.findall(".//item"):
                 title = item.find("title")
                 description = item.find("description")
-                if title and description:
-                    code = title.get_text(strip=True)
-                    rate_text = description.get_text(strip=True)
+                if (
+                    title is not None
+                    and description is not None
+                    and title.text
+                    and description.text
+                ):
+                    code = title.text.strip()
+                    rate_text = description.text.strip()
                     try:
                         rate = float(rate_text.replace(",", "."))
                         rates[code] = rate

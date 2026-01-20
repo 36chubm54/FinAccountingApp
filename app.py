@@ -36,7 +36,9 @@ class FinancialApp(tk.Tk):
         self.title("Financial Accounting")
         self.geometry("400x300")
 
-        self.repository = JsonFileRecordRepository("Проект ФУ/project/records.json")
+        self.repository = JsonFileRecordRepository(
+            str(Path(__file__).parent / "records.json")
+        )
         self.currency = CurrencyService()
 
         # Buttons
