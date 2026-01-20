@@ -6,7 +6,7 @@ A graphical application for personal financial accounting with support for multi
 
 - [Quick start](#-quick-start)
 - [Using the application](#️-using-the-application)
-- [Web application](#-web application)
+- [Web application](#-web-application)
 - [Project architecture](#️-project-architecture)
 - [Software API](#-software-api)
 - [File structure](#-file-structure)
@@ -226,22 +226,22 @@ The project follows the principles of **Clean Architecture**:
 ┌────────────────────────────────────────────────────────────────┐
 │                     PRESENTATION LAYER                         │
 │                        app.py (GUI)                            │
-│   Графический интерфейс пользователя на Tkinter                │
+│             Graphical user interface on Tkinter                │
 ├────────────────────────────────────────────────────────────────┤
-│                     APPLICATION LAYER                          │
-│                    app/use_cases.py                            │
-│   CreateIncome, CreateExpense, GenerateReport, DeleteRecord    │
-│                    app/services.py                             │
-│   CurrencyService (адаптер с кэшированием курсов)              │
+│                      APPLICATION LAYER                         │
+│                      app/use_cases.py                          │
+│    CreateIncome, CreateExpense, GenerateReport, DeleteRecord   │
+│                       app/services.py                          │
+│         CurrencyService (adapter with course caching)          │
 ├────────────────────────────────────────────────────────────────┤
-│                       DOMAIN LAYER                             │
-│   domain/records.py  - Record, IncomeRecord, ExpenseRecord     │
-│   domain/reports.py  - Report (фильтрация, группировка)        │
-│   domain/currency.py - CurrencyService (конвертация)           │
+│                        DOMAIN LAYER                            │
+│    domain/records.py - Record, IncomeRecord, ExpenseRecord     │
+│        domain/reports.py - Report (filtering, grouping)        │
+│       domain/currency.py - CurrencyService (conversion)        │
 ├────────────────────────────────────────────────────────────────┤
-│                   INFRASTRUCTURE LAYER                         │
+│                    INFRASTRUCTURE LAYER                        │
 │              infrastructure/repositories.py                    │
-│   RecordRepository (абстракция), JsonFileRecordRepository      │
+│   RecordRepository (abstraction), JsonFileRecordRepository      │
 └────────────────────────────────────────────────────────────────┘
 ```
 
