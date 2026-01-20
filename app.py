@@ -82,18 +82,18 @@ class FinancialApp(tk.Tk):
         self._add_record("Expense", CreateExpense)
 
     def _add_record(self, record_type, use_case_class):
-        date = simpledialog.askstring("Date", "Enter date (YYYY-MM-DD):", parent=self)
+        date = simpledialog.askstring("Date", "Enter date (YYYY.MM.DD):", parent=self)
         if not date:
             return
         try:
             # Basic validation
-            year, month, day = map(int, date.split("-"))
+            year, month, day = map(int, date.split("."))
             if not (
                 1 <= month <= 12 and 1 <= day <= calendar.monthrange(year, month)[1]
             ):
                 raise ValueError
         except ValueError:
-            messagebox.showerror("Error", "Invalid date format. Use YYYY-MM-DD.")
+            messagebox.showerror("Error", "Invalid date format. Use YYYY.MM.DD.")
             return
 
         amount_str = simpledialog.askstring("Amount", "Enter amount:", parent=self)
@@ -133,7 +133,7 @@ class FinancialApp(tk.Tk):
         current_report = None
 
         # Filters
-        tk.Label(report_window, text="Period (e.g., 2025-03):").grid(
+        tk.Label(report_window, text="Period (e.g., 2025.03):").grid(
             row=0, column=0, sticky="w"
         )
         period_entry = tk.Entry(report_window)
