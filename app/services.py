@@ -20,7 +20,7 @@ class CurrencyService:
         self,
         rates: Optional[Dict[str, float]] = None,
         base: str = "KZT",
-        use_online: bool = True,  # connect to online source if no rates provided
+        use_online: bool = False,  # connect to online source if no rates provided
     ):
         # If explicit rates provided, use them.
         if rates is not None:
@@ -53,41 +53,54 @@ class CurrencyService:
         try:
             import requests
             import xml.etree.ElementTree as ET
-        except Exception:
+        except ImportError as e:
+            print(f"Missing dependencies for online fetching: {e}")
             return self._load_cached()
 
         try:
             resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
             resp.raise_for_status()
             root = ET.fromstring(resp.text)
-
-            rates: Dict[str, float] = {}
-
-            # Parse RSS items
-            for item in root.findall(".//item"):
-                title = item.find("title")
-                description = item.find("description")
-                if (
-                    title is not None
-                    and description is not None
-                    and title.text
-                    and description.text
-                ):
-                    code = title.text.strip()
-                    rate_text = description.text.strip()
-                    try:
-                        rate = float(rate_text.replace(",", "."))
-                        rates[code] = rate
-                    except ValueError:
-                        continue
-
-            if rates:
-                self._save_cache(rates)
-                return rates
-        except Exception:
+        except requests.RequestException as e:
+            print(f"Network error fetching rates: {e}")
+            return self._load_cached()
+        except ET.ParseError as e:
+            print(f"XML parsing error: {e}")
+            return self._load_cached()
+        except Exception as e:
+            print(f"Unexpected error fetching rates: {e}")
             return self._load_cached()
 
-        return self._load_cached()
+        rates: Dict[str, float] = {}
+
+        # Parse RSS items
+        for item in root.findall(".//item"):
+            title = item.find("title")
+            description = item.find("description")
+            if (
+                title is not None
+                and description is not None
+                and title.text
+                and description.text
+            ):
+                code = title.text.strip()
+                rate_text = description.text.strip()
+                try:
+                    rate = float(rate_text.replace(",", "."))
+                    rates[code] = rate
+                except ValueError as e:
+                    print(f"Invalid rate value for {code}: {rate_text} ({e})")
+                    continue
+
+        if rates:
+            try:
+                self._save_cache(rates)
+            except Exception as e:
+                print(f"Failed to save cache: {e}")
+            return rates
+        else:
+            print("No valid rates found in XML")
+            return self._load_cached()
 
     def _load_cached(self) -> Optional[Dict[str, float]]:
         try:

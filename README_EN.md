@@ -57,12 +57,14 @@ After launch, the graphical window of the Financial Accounting application will 
 
 ### Main window
 
-After running `python app.py`, a window with four buttons will open:
+After running `python app.py`, a window with six buttons will open:
 
 - **Add Income** - Adding income
-- **Add Expense** - Adding an expense  
+- **Add Expense** - Adding an expense
 - **Generate Report** — Report generation
 - **Delete Record** - Delete a record
+- **Delete All Records** - Delete all records
+- **Import from CSV** - Import data from CSV file
 
 ### Adding income/expense
 
@@ -94,6 +96,37 @@ The result will be displayed in the text field. For tables, a formatted table wi
 2. In the list, select the entry to be deleted (by clicking the mouse).
 3. Click "Delete Selected".
 4. Confirm the deletion in the dialog box.
+
+### Deleting all records
+
+1. Click "Delete All Records".
+2. Confirm deletion in the dialog (this action is irreversible).
+3. All financial records will be deleted from the `records.json` file.
+
+### Import from CSV
+
+1. Click "Import from CSV".
+2. Select a CSV file in the file opening dialog.
+3. Confirm the import in the dialog (all existing records will be replaced).
+4. The application will show the number of successfully imported records.
+
+**CSV file format:**
+
+```csv
+Date,Type,Category,Amount (KZT)
+2025-01-01,Income,Salary,100000.00
+2025-01-02,Expense,Food,15000.00
+2025-01-03,Income,Bonus,50000.00
+TOTAL,,,-2000.00
+```
+
+**Import rules:**
+
+- The first line must contain headers: `Date,Type,Category,Amount (KZT)`
+- Supported types: `Income` (income) and `Expense` (expense)
+- Amounts can be both positive and negative (in parentheses for expenses)
+- The row with `TOTAL` in the date field is ignored
+- All existing data will be replaced with new data from CSV
 
 ### Data storage
 
@@ -231,6 +264,7 @@ The project follows the principles of **Clean Architecture**:
 │                      APPLICATION LAYER                         │
 │                      app/use_cases.py                          │
 │    CreateIncome, CreateExpense, GenerateReport, DeleteRecord   │
+│                      ImportFromCSV                             │
 │                       app/services.py                          │
 │         CurrencyService (adapter with course caching)          │
 ├────────────────────────────────────────────────────────────────┤
@@ -241,7 +275,7 @@ The project follows the principles of **Clean Architecture**:
 ├────────────────────────────────────────────────────────────────┤
 │                    INFRASTRUCTURE LAYER                        │
 │              infrastructure/repositories.py                    │
-│   RecordRepository (abstraction), JsonFileRecordRepository      │
+│   RecordRepository (abstraction), JsonFileRecordRepository     │
 └────────────────────────────────────────────────────────────────┘
 ```
 

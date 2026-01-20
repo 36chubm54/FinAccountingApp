@@ -54,3 +54,22 @@ class DeleteAllRecords:
     def execute(self) -> None:
         """Delete all records."""
         self._repository.delete_all()
+
+
+class ImportFromCSV:
+    def __init__(self, repository: RecordRepository):
+        self._repository = repository
+
+    def execute(self, filepath: str) -> int:
+        """Import records from CSV file, replace all existing records in repository. Returns number of imported records."""
+        report = Report.from_csv(filepath)
+
+        # Delete all existing records first
+        self._repository.delete_all()
+
+        # Import new records
+        imported_count = 0
+        for record in report.records():
+            self._repository.save(record)
+            imported_count += 1
+        return imported_count

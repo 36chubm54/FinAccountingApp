@@ -1,7 +1,8 @@
 from typing import Iterable, Dict
 from prettytable import PrettyTable
-from .records import Record, IncomeRecord
+from .records import Record, IncomeRecord, ExpenseRecord
 import csv
+import os
 
 
 class Report:
@@ -63,12 +64,62 @@ class Report:
     def to_csv(self, filepath: str) -> None:
         """Export the report to a CSV file."""
         sorted_records = sorted(self._records, key=lambda r: r.date)
-        with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+        with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(["Date", "Type", "Category", "Amount (KZT)"])
             for record in sorted_records:
-                record_type = "Income" if isinstance(record, IncomeRecord) else "Expense"
-                writer.writerow([record.date, record_type, record.category, f"{record.amount:.2f}"])
+                record_type = (
+                    "Income" if isinstance(record, IncomeRecord) else "Expense"
+                )
+                writer.writerow(
+                    [record.date, record_type, record.category, f"{record.amount:.2f}"]
+                )
             # Add total row
             total = self.total()
             writer.writerow(["TOTAL", "", "", f"{total:.2f}"])
+
+    @staticmethod
+    def from_csv(filepath: str) -> "Report":
+        """Import records from a CSV file and return a new Report."""
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"CSV file not found: {filepath}")
+
+        records = []
+        with open(filepath, "r", newline="", encoding="utf-8") as csvfile:
+            reader = csv.reader(csvfile)
+            next(reader, None)  # Skip header row
+
+            for row in reader:
+                if len(row) < 4:
+                    continue  # Skip malformed rows
+
+                date, record_type, category, amount_str = row[:4]
+
+                # Skip total row
+                if date.upper() == "TOTAL":
+                    continue
+
+                try:
+                    # Parse amount, remove parentheses if present
+                    amount_str = amount_str.strip()
+                    if amount_str.startswith("(") and amount_str.endswith(")"):
+                        amount_str = "-" + amount_str[1:-1]
+                    amount = float(amount_str)
+                except ValueError:
+                    continue  # Skip rows with invalid amount
+
+                # Determine record type
+                if record_type.lower() == "income":
+                    record = IncomeRecord(
+                        date=date, amount=abs(amount), category=category
+                    )
+                elif record_type.lower() == "expense":
+                    record = ExpenseRecord(
+                        date=date, amount=abs(amount), category=category
+                    )
+                else:
+                    continue  # Skip unknown record types
+
+                records.append(record)
+
+        return Report(records)

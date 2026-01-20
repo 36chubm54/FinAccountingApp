@@ -1,12 +1,13 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from app.use_cases import (
     CreateIncome,
     CreateExpense,
     GenerateReport,
     DeleteRecord,
     DeleteAllRecords,
+    ImportFromCSV,
 )
-from domain.records import IncomeRecord, ExpenseRecord
+from domain.records import IncomeRecord, ExpenseRecord, Record
 from infrastructure.repositories import RecordRepository
 
 
@@ -148,3 +149,27 @@ class TestDeleteAllRecords:
 
         # Assert
         mock_repo.delete_all.assert_called_once()
+
+
+class TestImportFromCSV:
+    def test_execute_imports_records_from_csv_and_saves_to_repository(self):
+        # Arrange
+        mock_repo = Mock(spec=RecordRepository)
+
+        # Mock Report.from_csv to return a report with test records
+        with patch("app.use_cases.Report") as mock_report_class:
+            mock_report = Mock()
+            test_records = [Mock(spec=Record), Mock(spec=Record), Mock(spec=Record)]
+            mock_report.records.return_value = test_records
+            mock_report_class.from_csv.return_value = mock_report
+
+            use_case = ImportFromCSV(repository=mock_repo)
+
+            # Act
+            result = use_case.execute("test.csv")
+
+            # Assert
+            mock_report_class.from_csv.assert_called_once_with("test.csv")
+            mock_repo.delete_all.assert_called_once()
+            assert mock_repo.save.call_count == 3
+            assert result == 3

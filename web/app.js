@@ -143,8 +143,19 @@ function getExchangeRate(currency) {
 
 // Конвертация суммы из одной валюты в другую
 function convertCurrency(amount, fromCurrency, toCurrency) {
-    const amountInKZT = amount * getExchangeRate(fromCurrency);
-    return amountInKZT / getExchangeRate(toCurrency);
+    try {
+        const fromRate = getExchangeRate(fromCurrency);
+        const toRate = getExchangeRate(toCurrency);
+        if (toRate === 0) {
+            throw new Error("Invalid target currency rate");
+        }
+        const amountInKZT = amount * fromRate;
+        return amountInKZT / toRate;
+    } catch (error) {
+        console.error("Currency conversion error:", error);
+        showToast("Ошибка конвертации валюты", "error");
+        return amount; // Return original amount on error
+    }
 }
 
 // Инициализация приложения

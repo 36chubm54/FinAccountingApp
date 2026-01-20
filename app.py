@@ -20,6 +20,7 @@ from app.use_cases import (
     GenerateReport,
     DeleteRecord,
     DeleteAllRecords,
+    ImportFromCSV,
 )
 from domain.records import IncomeRecord
 from app.services import CurrencyService
@@ -45,12 +46,18 @@ class FinancialApp(tk.Tk):
         button_width = 15  # Set uniform width for all buttons
 
         self.add_income_btn = tk.Button(
-            self, text="Add Income", command=self.add_income, width=button_width
+            self,
+            text="Add Income",
+            command=self.add_income,
+            width=button_width,
         )
         self.add_income_btn.pack(pady=10)
 
         self.add_expense_btn = tk.Button(
-            self, text="Add Expense", command=self.add_expense, width=button_width
+            self,
+            text="Add Expense",
+            command=self.add_expense,
+            width=button_width,
         )
         self.add_expense_btn.pack(pady=10)
 
@@ -63,7 +70,10 @@ class FinancialApp(tk.Tk):
         self.report_btn.pack(pady=10)
 
         self.delete_btn = tk.Button(
-            self, text="Delete Record", command=self.delete_record, width=button_width
+            self,
+            text="Delete Record",
+            command=self.delete_record,
+            width=button_width,
         )
         self.delete_btn.pack(pady=10)
 
@@ -75,6 +85,14 @@ class FinancialApp(tk.Tk):
         )
         self.delete_all_btn.pack(pady=10)
 
+        self.import_csv_btn = tk.Button(
+            self,
+            text="Import from CSV",
+            command=self.import_from_csv,
+            width=button_width,
+        )
+        self.import_csv_btn.pack(pady=10)
+
     def add_income(self):
         self._add_record("Income", CreateIncome)
 
@@ -82,18 +100,25 @@ class FinancialApp(tk.Tk):
         self._add_record("Expense", CreateExpense)
 
     def _add_record(self, record_type, use_case_class):
-        date = simpledialog.askstring("Date", "Enter date (YYYY.MM.DD):", parent=self)
+        date = simpledialog.askstring("Date", "Enter date (YYYY-MM-DD):", parent=self)
         if not date:
             return
         try:
             # Basic validation
-            year, month, day = map(int, date.split("."))
+            year, month, day = map(int, date.split("-"))
             if not (
                 1 <= month <= 12 and 1 <= day <= calendar.monthrange(year, month)[1]
             ):
-                raise ValueError
-        except ValueError:
-            messagebox.showerror("Error", "Invalid date format. Use YYYY.MM.DD.")
+                raise ValueError("Invalid date components")
+            # Check if date is not in the future
+            from datetime import datetime
+
+            entered_date = datetime(year, month, day).date()
+            today = datetime.now().date()
+            if entered_date > today:
+                raise ValueError("Date cannot be in the future")
+        except ValueError as e:
+            messagebox.showerror("Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD.")
             return
 
         amount_str = simpledialog.askstring("Amount", "Enter amount:", parent=self)
@@ -133,7 +158,7 @@ class FinancialApp(tk.Tk):
         current_report = None
 
         # Filters
-        tk.Label(report_window, text="Period (e.g., 2025.03):").grid(
+        tk.Label(report_window, text="Period (e.g., 2025-03):").grid(
             row=0, column=0, sticky="w"
         )
         period_entry = tk.Entry(report_window)
@@ -263,6 +288,39 @@ class FinancialApp(tk.Tk):
             delete_all_use_case = DeleteAllRecords(self.repository)
             delete_all_use_case.execute()
             messagebox.showinfo("Success", "All records have been deleted.")
+
+    def import_from_csv(self):
+        # File selection dialog
+        filepath = filedialog.askopenfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Select CSV file to import",
+        )
+        if not filepath:
+            return
+
+        try:
+            # Confirmation dialog
+            confirm = messagebox.askyesno(
+                "Confirm Import",
+                f"This will replace all existing records with data from:\n{filepath}\n\nContinue?",
+            )
+            if not confirm:
+                return
+
+            # Import records
+            import_use_case = ImportFromCSV(self.repository)
+            imported_count = import_use_case.execute(filepath)
+
+            messagebox.showinfo(
+                "Success",
+                f"Successfully imported {imported_count} records from CSV file.\nAll existing records have been replaced.",
+            )
+
+        except FileNotFoundError:
+            messagebox.showerror("Error", f"File not found: {filepath}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to import CSV: {str(e)}")
 
 
 def main() -> None:
