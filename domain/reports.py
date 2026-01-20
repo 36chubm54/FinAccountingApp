@@ -1,6 +1,7 @@
 from typing import Iterable, Dict
 from prettytable import PrettyTable
 from .records import Record, IncomeRecord
+import csv
 
 
 class Report:
@@ -58,3 +59,16 @@ class Report:
         table.add_row(["TOTAL", "", "", total_str], divider=True)
 
         return str(table)
+
+    def to_csv(self, filepath: str) -> None:
+        """Export the report to a CSV file."""
+        sorted_records = sorted(self._records, key=lambda r: r.date)
+        with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(["Date", "Type", "Category", "Amount (KZT)"])
+            for record in sorted_records:
+                record_type = "Income" if isinstance(record, IncomeRecord) else "Expense"
+                writer.writerow([record.date, record_type, record.category, f"{record.amount:.2f}"])
+            # Add total row
+            total = self.total()
+            writer.writerow(["TOTAL", "", "", f"{total:.2f}"])

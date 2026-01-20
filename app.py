@@ -2,7 +2,8 @@ import sys
 import calendar
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox, simpledialog, Toplevel, Listbox, Scrollbar, VERTICAL
+from tkinter import messagebox, simpledialog, Toplevel, Listbox, Scrollbar, VERTICAL, filedialog
+import os
 
 from infrastructure.repositories import JsonFileRecordRepository
 from app.use_cases import CreateIncome, CreateExpense, GenerateReport, DeleteRecord
@@ -25,25 +26,23 @@ class FinancialApp(tk.Tk):
         self.currency = CurrencyService()
 
         # Buttons
-        button_width = 20
-
         self.add_income_btn = tk.Button(
-            self, text="Add Income", command=self.add_income, width=button_width
+            self, text="Add Income", command=self.add_income
         )
         self.add_income_btn.pack(pady=10)
 
         self.add_expense_btn = tk.Button(
-            self, text="Add Expense", command=self.add_expense, width=button_width
+            self, text="Add Expense", command=self.add_expense
         )
         self.add_expense_btn.pack(pady=10)
 
         self.report_btn = tk.Button(
-            self, text="Generate Report", command=self.generate_report, width=button_width
+            self, text="Generate Report", command=self.generate_report
         )
         self.report_btn.pack(pady=10)
 
         self.delete_btn = tk.Button(
-            self, text="Delete Record", command=self.delete_record, width=button_width
+            self, text="Delete Record", command=self.delete_record
         )
         self.delete_btn.pack(pady=10)
 
@@ -102,6 +101,8 @@ class FinancialApp(tk.Tk):
         report_window.title("Generate Report")
         report_window.geometry("600x400")
 
+        current_report = None
+
         # Filters
         tk.Label(report_window, text="Period (e.g., 2025-03):").grid(
             row=0, column=0, sticky="w"
@@ -124,6 +125,7 @@ class FinancialApp(tk.Tk):
         )
 
         def generate():
+            nonlocal current_report
             report = GenerateReport(self.repository).execute()
             period = period_entry.get().strip()
             if period:
@@ -131,6 +133,8 @@ class FinancialApp(tk.Tk):
             cat = category_entry.get().strip()
             if cat:
                 report = report.filter_by_category(cat)
+
+            current_report = report  # Store the report
 
             result_text.delete(1.0, tk.END)
             if group_var.get():
@@ -150,8 +154,30 @@ class FinancialApp(tk.Tk):
                 total = report.total()
                 result_text.insert(tk.END, f"Total: {total:.2f} KZT\n")
 
+        def export_csv():
+            nonlocal current_report
+            if current_report is None:
+                messagebox.showerror("Error", "Please generate a report first.")
+                return
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=".csv",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+                title="Save Report as CSV"
+            )
+            if filepath:
+                try:
+                    current_report.to_csv(filepath)
+                    messagebox.showinfo("Success", f"Report exported to {filepath}")
+                    # Open the folder containing the file
+                    os.startfile(os.path.dirname(filepath))
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to export: {str(e)}")
+
         generate_btn = tk.Button(report_window, text="Generate", command=generate)
-        generate_btn.grid(row=4, column=0, columnspan=2, pady=10)
+        generate_btn.grid(row=4, column=0, pady=10)
+
+        export_btn = tk.Button(report_window, text="Export to CSV", command=export_csv)
+        export_btn.grid(row=4, column=1, pady=10)
 
         result_text = tk.Text(report_window, wrap="word")
         scrollbar = Scrollbar(report_window, orient=VERTICAL, command=result_text.yview)

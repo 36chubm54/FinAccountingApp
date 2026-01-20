@@ -1,5 +1,8 @@
 from domain.reports import Report
 from domain.records import IncomeRecord, ExpenseRecord
+import csv
+import tempfile
+import os
 
 
 class TestReport:
@@ -101,3 +104,23 @@ class TestReport:
         assert "Salary" in table_str
         assert "Food" in table_str
         assert "TOTAL" in table_str
+
+    def test_to_csv(self):
+        records = [
+            IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
+            ExpenseRecord(date="2025-01-02", amount=30.0, category="Food"),
+        ]
+        report = Report(records)
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv') as tmp:
+            tmp_path = tmp.name
+        try:
+            report.to_csv(tmp_path)
+            with open(tmp_path, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                rows = list(reader)
+            assert rows[0] == ["Date", "Type", "Category", "Amount (KZT)"]
+            assert rows[1] == ["2025-01-01", "Income", "Salary", "100.00"]
+            assert rows[2] == ["2025-01-02", "Expense", "Food", "30.00"]
+            assert rows[3] == ["TOTAL", "", "", "70.00"]
+        finally:
+            os.unlink(tmp_path)
