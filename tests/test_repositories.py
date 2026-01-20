@@ -1,0 +1,176 @@
+import os
+import json
+import tempfile
+import pytest
+from infrastructure.repositories import RecordRepository, JsonFileRecordRepository
+from domain.records import IncomeRecord, ExpenseRecord
+
+
+class TestRecordRepository:
+    def test_repository_is_abstract(self):
+        # RecordRepository is abstract and cannot be instantiated directly
+        with pytest.raises(TypeError):
+            RecordRepository()  # type: ignore
+
+
+class TestJsonFileRecordRepository:
+    def setup_method(self):
+        # Create a temporary file for each test
+        self.temp_file = tempfile.NamedTemporaryFile(
+            mode="w", delete=False, suffix=".json"
+        )
+        self.temp_file.close()
+        self.repo = JsonFileRecordRepository(self.temp_file.name)
+
+    def teardown_method(self):
+        # Clean up the temporary file
+        if os.path.exists(self.temp_file.name):
+            os.unlink(self.temp_file.name)
+
+    def test_save_and_load_single_income(self):
+        record = IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")
+        self.repo.save(record)
+        records = self.repo.load_all()
+        assert len(records) == 1
+        assert records[0].date == "2025-01-01"
+        assert records[0].amount == 100.0
+        assert records[0].category == "Salary"
+        assert isinstance(records[0], IncomeRecord)
+
+    def test_save_and_load_single_expense(self):
+        record = ExpenseRecord(date="2025-01-02", amount=50.0, category="Food")
+        self.repo.save(record)
+        records = self.repo.load_all()
+        assert len(records) == 1
+        assert records[0].date == "2025-01-02"
+        assert records[0].amount == 50.0
+        assert records[0].category == "Food"
+        assert isinstance(records[0], ExpenseRecord)
+
+    def test_save_multiple_records(self):
+        income1 = IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")
+        expense1 = ExpenseRecord(date="2025-01-02", amount=30.0, category="Food")
+        income2 = IncomeRecord(date="2025-01-03", amount=50.0, category="Bonus")
+
+        self.repo.save(income1)
+        self.repo.save(expense1)
+        self.repo.save(income2)
+
+        records = self.repo.load_all()
+        assert len(records) == 3
+
+    def test_load_all_empty_file(self):
+        records = self.repo.load_all()
+        assert records == []
+
+    def test_load_all_nonexistent_file(self):
+        # Create repo with non-existent file
+        nonexistent_repo = JsonFileRecordRepository("nonexistent.json")
+        records = nonexistent_repo.load_all()
+        assert records == []
+
+    def test_json_file_format(self):
+        # Test that the JSON file has the correct format
+        record = IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")
+        self.repo.save(record)
+
+        # Read the raw JSON to verify format
+        with open(self.temp_file.name, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        assert isinstance(data, list)
+        assert len(data) == 1
+        assert data[0]["type"] == "income"
+        assert data[0]["date"] == "2025-01-01"
+        assert data[0]["amount"] == 100.0
+        assert data[0]["category"] == "Salary"
+
+    def test_load_records_with_backward_compatibility(self):
+        # Test loading records without category (backward compatibility)
+        json_data = [
+            {"type": "income", "date": "2025-01-01", "amount": 100.0},
+            {"type": "expense", "date": "2025-01-02", "amount": 50.0},
+        ]
+        with open(self.temp_file.name, "w", encoding="utf-8") as f:
+            json.dump(json_data, f)
+
+        records = self.repo.load_all()
+        assert len(records) == 2
+        assert records[0].category == "General"  # Default category
+        assert records[1].category == "General"  # Default category
+
+    def test_invalid_record_type_ignored(self):
+        # Test that invalid record types are ignored
+        json_data = [
+            {
+                "type": "income",
+                "date": "2025-01-01",
+                "amount": 100.0,
+                "category": "Salary",
+            },
+            {
+                "type": "invalid",
+                "date": "2025-01-02",
+                "amount": 50.0,
+                "category": "Test",
+            },
+        ]
+        with open(self.temp_file.name, "w", encoding="utf-8") as f:
+            json.dump(json_data, f)
+
+        records = self.repo.load_all()
+        assert len(records) == 1  # Only the valid income record
+        assert isinstance(records[0], IncomeRecord)
+
+    def test_delete_by_index_success(self):
+        # Setup: add some records
+        income1 = IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")
+        expense1 = ExpenseRecord(date="2025-01-02", amount=30.0, category="Food")
+        income2 = IncomeRecord(date="2025-01-03", amount=50.0, category="Bonus")
+
+        self.repo.save(income1)
+        self.repo.save(expense1)
+        self.repo.save(income2)
+
+        # Verify we have 3 records
+        records = self.repo.load_all()
+        assert len(records) == 3
+
+        # Delete the middle record (index 1)
+        result = self.repo.delete_by_index(1)
+        assert result is True
+
+        # Verify we now have 2 records and the correct one was deleted
+        records = self.repo.load_all()
+        assert len(records) == 2
+        assert records[0].category == "Salary"  # First record still there
+        assert records[1].category == "Bonus"  # Third record still there
+
+    def test_delete_by_index_out_of_range(self):
+        income1 = IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")
+        self.repo.save(income1)
+
+        # Try to delete non-existent index
+        result = self.repo.delete_by_index(5)
+        assert result is False
+
+        # Verify record still exists
+        records = self.repo.load_all()
+        assert len(records) == 1
+
+    def test_delete_by_index_negative(self):
+        income1 = IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")
+        self.repo.save(income1)
+
+        # Try to delete with negative index
+        result = self.repo.delete_by_index(-1)
+        assert result is False
+
+        # Verify record still exists
+        records = self.repo.load_all()
+        assert len(records) == 1
+
+    def test_delete_by_index_empty_repository(self):
+        # Try to delete from empty repository
+        result = self.repo.delete_by_index(0)
+        assert result is False
