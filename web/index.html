@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Финансовый учёт</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Боковая панель -->
+        <aside class="sidebar">
+            <div class="logo">
+                <h1>💰 ФинУчёт</h1>
+            </div>
+            <nav class="nav-menu">
+                <button class="nav-btn active" data-section="dashboard">
+                    <span class="icon">📊</span>
+                    <span>Обзор</span>
+                </button>
+                <button class="nav-btn" data-section="income">
+                    <span class="icon">💵</span>
+                    <span>Доходы</span>
+                </button>
+                <button class="nav-btn" data-section="expenses">
+                    <span class="icon">💸</span>
+                    <span>Расходы</span>
+                </button>
+                <button class="nav-btn" data-section="reports">
+                    <span class="icon">📈</span>
+                    <span>Отчёты</span>
+                </button>
+                <button class="nav-btn" data-section="settings">
+                    <span class="icon">⚙️</span>
+                    <span>Настройки</span>
+                </button>
+            </nav>
+        </aside>
+
+        <!-- Основной контент -->
+        <main class="main-content">
+            <!-- Заголовок -->
+            <header class="header">
+                <h2 id="section-title">Обзор</h2>
+                <div class="header-actions">
+                    <span class="date-display" id="current-date"></span>
+                    <select id="currency-select">
+                        <option value="KZT">KZT ₸</option>
+                        <option value="USD">USD $</option>
+                        <option value="EUR">EUR €</option>
+                        <option value="RUB">RUB ₽</option>
+                    </select>
+                </div>
+            </header>
+            
+            <!-- Блок курсов валют НБ РК -->
+            <div id="rates-display" class="rates-container">
+                <div class="rates-info">
+                    <span class="rates-title">Загрузка курсов валют...</span>
+                </div>
+            </div>
+
+            <!-- Секция: Обзор (Dashboard) -->
+            <section id="dashboard" class="section active">
+                <div class="stats-grid">
+                    <div class="stat-card income">
+                        <div class="stat-icon">💵</div>
+                        <div class="stat-info">
+                            <span class="stat-label">Доходы</span>
+                            <span class="stat-value" id="total-income">0 ₸</span>
+                        </div>
+                    </div>
+                    <div class="stat-card expense">
+                        <div class="stat-icon">💸</div>
+                        <div class="stat-info">
+                            <span class="stat-label">Расходы</span>
+                            <span class="stat-value" id="total-expenses">0 ₸</span>
+                        </div>
+                    </div>
+                    <div class="stat-card balance">
+                        <div class="stat-icon">💰</div>
+                        <div class="stat-info">
+                            <span class="stat-label">Баланс</span>
+                            <span class="stat-value" id="total-balance">0 ₸</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="recent-transactions">
+                    <h3>Последние операции</h3>
+                    <div class="transactions-list" id="recent-list">
+                        <!-- Транзакции будут добавлены через JS -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Секция: Доходы -->
+            <section id="income" class="section">
+                <div class="section-header">
+                    <h3>Управление доходами</h3>
+                    <button class="btn btn-primary" onclick="openModal('income')">
+                        + Добавить доход
+                    </button>
+                </div>
+                <div class="transactions-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Дата</th>
+                                <th>Категория</th>
+                                <th>Сумма</th>
+                                <th>Валюта</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody id="income-table-body">
+                            <!-- Данные будут добавлены через JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Секция: Расходы -->
+            <section id="expenses" class="section">
+                <div class="section-header">
+                    <h3>Управление расходами</h3>
+                    <button class="btn btn-primary" onclick="openModal('expense')">
+                        + Добавить расход
+                    </button>
+                </div>
+                <div class="transactions-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Дата</th>
+                                <th>Категория</th>
+                                <th>Сумма</th>
+                                <th>Валюта</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody id="expenses-table-body">
+                            <!-- Данные будут добавлены через JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Секция: Отчёты -->
+            <section id="reports" class="section">
+                <div class="section-header">
+                    <h3>Генерация отчётов</h3>
+                </div>
+                <div class="report-filters">
+                    <div class="filter-group">
+                        <label>Период:</label>
+                        <input type="month" id="report-period">
+                    </div>
+                    <div class="filter-group">
+                        <label>Категория:</label>
+                        <select id="report-category">
+                            <option value="">Все категории</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>
+                            <input type="checkbox" id="group-by-category">
+                            Группировать по категориям
+                        </label>
+                    </div>
+                    <button class="btn btn-primary" onclick="generateReport()">
+                        Сформировать отчёт
+                    </button>
+                    <button class="btn btn-secondary" onclick="exportCSV()">
+                        Экспорт в CSV
+                    </button>
+                </div>
+                <div class="report-result" id="report-result">
+                    <p class="placeholder">Нажмите "Сформировать отчёт" для просмотра данных</p>
+                </div>
+            </section>
+
+            <!-- Секция: Настройки -->
+            <section id="settings" class="section">
+                <div class="section-header">
+                    <h3>Настройки приложения</h3>
+                </div>
+                <div class="settings-form">
+                    <div class="setting-item">
+                        <label>Валюта по умолчанию:</label>
+                        <select id="default-currency">
+                            <option value="KZT">KZT (Тенге)</option>
+                            <option value="USD">USD (Доллар)</option>
+                            <option value="EUR">EUR (Евро)</option>
+                            <option value="RUB">RUB (Рубль)</option>
+                        </select>
+                    </div>
+                    <div class="setting-item">
+                        <label>Тема оформления:</label>
+                        <select id="theme-select" onchange="toggleTheme()">
+                            <option value="light">Светлая</option>
+                            <option value="dark">Тёмная</option>
+                        </select>
+                    </div>
+                    <div class="setting-item">
+                        <button class="btn btn-danger" onclick="clearAllData()">
+                            Очистить все данные
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Модальное окно для добавления записи -->
+    <div class="modal" id="record-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">Добавить запись</h3>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <form id="record-form" onsubmit="saveRecord(event)">
+                <input type="hidden" id="record-type">
+                <div class="form-group">
+                    <label for="record-date">Дата:</label>
+                    <input type="date" id="record-date" required>
+                </div>
+                <div class="form-group">
+                    <label for="record-amount">Сумма:</label>
+                    <input type="number" id="record-amount" step="0.01" min="0" required>
+                </div>
+                <div class="form-group">
+                    <label for="record-currency">Валюта:</label>
+                    <select id="record-currency">
+                        <option value="KZT">KZT ₸</option>
+                        <option value="USD">USD $</option>
+                        <option value="EUR">EUR €</option>
+                        <option value="RUB">RUB ₽</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="record-category">Категория:</label>
+                    <input type="text" id="record-category" placeholder="Например: Зарплата, Продукты..." required>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Уведомления -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
