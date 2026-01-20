@@ -1,459 +1,709 @@
 # FinAccountingApp
 
-Приложение для финансового учёта, позволяющее отслеживать доходы и расходы с поддержкой мультивалютности и генерацией отчётов.
+Графическое приложение для персонального финансового учёта с поддержкой мультивалютности, категоризации и аналитических отчётов.
 
-## 📋 Содержание
+## 📋 Оглавление
 
-- [Архитектура](#архитектура)
-- [Установка](#установка)
-- [Использование CLI](#использование-cli)
-- [Примеры кода](#примеры-кода)
-- [Структура проекта](#структура-проекта)
-- [Тестирование](#тестирование)
+- [Быстрый старт](#быстрый-старт)
+- [Использование приложения](#использование-приложения)
+- [Архитектура проекта](#архитектура-проекта)
+- [Программный API](#программный-api)
+- [Файловая структура](#файловая-структура)
+- [Тесты](#тесты)
 
-## 🏗️ Архитектура
+---
 
-Приложение построено по принципам **Clean Architecture** с разделением на слои:
+## 🚀 Быстрый старт
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        app.py (CLI)                         │
-├─────────────────────────────────────────────────────────────┤
-│                    app/ (Application Layer)                 │
-│              use_cases.py  │  services.py                   │
-├─────────────────────────────────────────────────────────────┤
-│                    domain/ (Domain Layer)                   │
-│         records.py  │  reports.py  │  currency.py           │
-├─────────────────────────────────────────────────────────────┤
-│               infrastructure/ (Infrastructure Layer)        │
-│                      repositories.py                        │
-└─────────────────────────────────────────────────────────────┘
-```
+### Системные требования
 
-## 🚀 Установка
+- Python 3.10 или выше
+- pip (менеджер пакетов)
 
-### Требования
-- Python 3.10+
-- pip
-
-### Шаги установки
+### Установка
 
 ```bash
-# Клонируйте репозиторий
-git clone <repository-url>
-cd project
+# Перейдите в директорию проекта
+cd "Проект ФУ/project"
 
 # Создайте виртуальное окружение
 python -m venv .venv
 
-# Активируйте окружение
-# Windows:
-.venv\Scripts\activate
-# Linux/macOS:
+# Активация (Windows PowerShell)
+.\.venv\Scripts\Activate.ps1
+
+# Активация (Windows CMD)
+.venv\Scripts\activate.bat
+
+# Активация (Linux/macOS)
 source .venv/bin/activate
 
-# Установите зависимости
+# Установка зависимостей
 pip install -r requirements.txt
 ```
 
-## 💻 Использование CLI
-
-### Добавление дохода
+### Первый запуск
 
 ```bash
-python app.py add-income --date 2025-03-15 --amount 150000 --currency KZT --category Зарплата
+python app.py
 ```
 
-**Вывод:**
-```
-Added income: 150000.0 KZT on 2025-03-15 (category: Зарплата)
-```
+После запуска откроется графическое окно приложения Financial Accounting. Используйте кнопки для добавления доходов и расходов, генерации отчётов и удаления записей.
 
-### Добавление расхода
+---
 
-```bash
-python app.py add-expense --date 2025-03-16 --amount 50 --currency USD --category Продукты
-```
+## 🖥️ Использование приложения
 
-**Вывод:**
-```
-Added expense: 50.0 USD on 2025-03-16 (category: Продукты)
-```
+### Главное окно
 
-> **Примечание:** Все суммы автоматически конвертируются в KZT по текущему курсу.
+После запуска `python app.py` откроется окно с четырьмя кнопками:
+
+- **Add Income** — Добавление дохода
+- **Add Expense** — Добавление расхода  
+- **Generate Report** — Генерация отчёта
+- **Delete Record** — Удаление записи
+
+### Добавление дохода/расхода
+
+1. Нажмите "Add Income" или "Add Expense".
+2. Введите дату в формате YYYY-MM-DD (например, 2025-01-15).
+3. Введите сумму (число с плавающей точкой).
+4. Введите валюту (по умолчанию KZT). Поддерживаются: KZT, USD, EUR, RUB.
+5. Введите категорию (по умолчанию "General").
+6. Нажмите OK.
+
+Сумма автоматически конвертируется в базовую валюту (KZT) по текущему курсу.
 
 ### Генерация отчёта
 
-#### Общий итог
-```bash
-python app.py report
-```
+1. Нажмите "Generate Report".
+2. В новом окне введите фильтры (опционально):
+   - **Period**: Фильтр по периоду (например, 2025-01 для января 2025).
+   - **Category**: Фильтр по категории.
+3. Установите чекбоксы:
+   - **Group by category**: Группировка итогов по категориям.
+   - **Display as table**: Вывод в табличном формате.
+4. Нажмите "Generate".
 
-**Вывод:**
-```
-Total: 125000.00 KZT
-```
-
-#### Отчёт в виде таблицы
-```bash
-python app.py report --table
-```
-
-**Вывод:**
-```
-+------------+---------+----------+--------------+
-|    Date    |  Type   | Category | Amount (KZT) |
-+------------+---------+----------+--------------+
-| 2025-03-15 | Income  | Зарплата |   150000.00  |
-| 2025-03-16 | Expense | Продукты |    25000.00  |
-+------------+---------+----------+--------------+
-|   TOTAL    |         |          |   125000.00  |
-+------------+---------+----------+--------------+
-```
-
-#### Фильтрация по периоду
-```bash
-python app.py report --period 2025-03 --table
-```
-
-#### Фильтрация по категории
-```bash
-python app.py report --category Зарплата
-```
-
-#### Группировка по категориям
-```bash
-python app.py report --group-by-category
-```
-
-**Вывод:**
-```
-Report grouped by category:
-  Зарплата: 150000.00 KZT
-  Продукты: -25000.00 KZT
-```
+Результат отобразится в текстовом поле. Для таблиц используется форматированная таблица с итогом.
 
 ### Удаление записи
 
-```bash
-python app.py delete
-```
+1. Нажмите "Delete Record".
+2. В списке выберите запись для удаления (щелчком мыши).
+3. Нажмите "Delete Selected".
+4. Подтвердите удаление в диалоговом окне.
 
-**Интерактивный вывод:**
-```
-Current records:
-[0] 2025-03-15 - Income - Зарплата - 150000.00 KZT
-[1] 2025-03-16 - Expense - Продукты - 25000.00 KZT
+### Хранение данных
 
-Enter the index of the record to delete (or 'cancel' to abort): 1
-Successfully deleted record at index 1.
-```
+Все записи сохраняются в файле `records.json` в директории проекта. Файл создаётся автоматически при первом запуске.
 
-## 📝 Примеры кода
-
-### Доменные модели (domain/records.py)
-
-Записи о доходах и расходах представлены как неизменяемые dataclass-объекты:
-
-```python
-from dataclasses import dataclass
-from abc import ABC, abstractmethod
-
-@dataclass(frozen=True)
-class Record(ABC):
-    date: str      # Дата в формате YYYY-MM-DD
-    amount: float  # Сумма в KZT
-    category: str  # Категория записи
-
-    @abstractmethod
-    def signed_amount(self) -> float:
-        """Возвращает сумму со знаком (+ для дохода, - для расхода)"""
-        pass
-
-
-class IncomeRecord(Record):
-    """Запись о доходе"""
-    def signed_amount(self) -> float:
-        return self.amount  # Положительное значение
-
-
-class ExpenseRecord(Record):
-    """Запись о расходе"""
-    def signed_amount(self) -> float:
-        return -abs(self.amount)  # Отрицательное значение
-```
-
-**Пример использования:**
-
-```python
-from domain.records import IncomeRecord, ExpenseRecord
-
-# Создание записи о доходе
-income = IncomeRecord(date="2025-03-15", amount=150000.0, category="Зарплата")
-print(income.signed_amount())  # 150000.0
-
-# Создание записи о расходе
-expense = ExpenseRecord(date="2025-03-16", amount=25000.0, category="Продукты")
-print(expense.signed_amount())  # -25000.0
-```
-
-### Сервис валют (domain/currency.py)
-
-Конвертация валют в базовую валюту (KZT):
-
-```python
-class CurrencyService:
-    def __init__(self, rates: dict[str, float], base: str = "KZT"):
-        self._rates = rates  # Курсы валют к базовой
-        self._base = base    # Базовая валюта
-
-    def convert(self, amount: float, currency: str) -> float:
-        """Конвертирует сумму в базовую валюту"""
-        if currency == self._base:
-            return amount
-        return amount * self._rates[currency]
-```
-
-**Пример использования:**
-
-```python
-from domain.currency import CurrencyService
-
-# Создание сервиса с курсами
-rates = {"USD": 500.0, "EUR": 590.0, "RUB": 6.5}
-currency_service = CurrencyService(rates=rates, base="KZT")
-
-# Конвертация 100 USD в KZT
-amount_kzt = currency_service.convert(100, "USD")
-print(f"100 USD = {amount_kzt} KZT")  # 100 USD = 50000.0 KZT
-
-# KZT остаётся без изменений
-amount_kzt = currency_service.convert(10000, "KZT")
-print(f"10000 KZT = {amount_kzt} KZT")  # 10000 KZT = 10000 KZT
-```
-
-### Отчёты (domain/reports.py)
-
-Класс `Report` предоставляет методы для анализа записей:
-
-```python
-from domain.reports import Report
-from domain.records import IncomeRecord, ExpenseRecord
-
-# Создание записей
-records = [
-    IncomeRecord(date="2025-03-15", amount=150000.0, category="Зарплата"),
-    ExpenseRecord(date="2025-03-16", amount=25000.0, category="Продукты"),
-    ExpenseRecord(date="2025-03-17", amount=5000.0, category="Транспорт"),
-    IncomeRecord(date="2025-04-01", amount=10000.0, category="Подработка"),
-]
-
-# Создание отчёта
-report = Report(records)
-
-# Общий итог
-print(f"Итого: {report.total():.2f} KZT")  # Итого: 130000.00 KZT
-
-# Фильтрация по периоду (март 2025)
-march_report = report.filter_by_period("2025-03")
-print(f"Март: {march_report.total():.2f} KZT")  # Март: 120000.00 KZT
-
-# Фильтрация по категории
-salary_report = report.filter_by_category("Зарплата")
-print(f"Зарплата: {salary_report.total():.2f} KZT")  # Зарплата: 150000.00 KZT
-
-# Группировка по категориям
-groups = report.grouped_by_category()
-for category, cat_report in groups.items():
-    print(f"{category}: {cat_report.total():.2f} KZT")
-
-# Вывод в виде таблицы
-print(report.as_table())
-```
-
-### Репозиторий (infrastructure/repositories.py)
-
-Сохранение и загрузка записей из JSON-файла:
-
-```python
-from infrastructure.repositories import JsonFileRecordRepository
-from domain.records import IncomeRecord, ExpenseRecord
-
-# Создание репозитория
-repo = JsonFileRecordRepository(file_path="my_records.json")
-
-# Сохранение записей
-income = IncomeRecord(date="2025-03-15", amount=150000.0, category="Зарплата")
-repo.save(income)
-
-expense = ExpenseRecord(date="2025-03-16", amount=25000.0, category="Продукты")
-repo.save(expense)
-
-# Загрузка всех записей
-all_records = repo.load_all()
-for record in all_records:
-    print(f"{record.date}: {record.amount} ({record.category})")
-
-# Удаление записи по индексу
-deleted = repo.delete_by_index(0)
-print(f"Удалено: {deleted}")  # Удалено: True
-```
-
-**Формат JSON-файла (records.json):**
+**Формат файла:**
 
 ```json
 [
   {
     "type": "income",
-    "date": "2025-03-15",
-    "amount": 150000.0,
+    "date": "2025-01-15",
+    "amount": 350000.0,
     "category": "Зарплата"
   },
   {
     "type": "expense",
-    "date": "2025-03-16",
+    "date": "2025-01-16",
     "amount": 25000.0,
     "category": "Продукты"
   }
 ]
 ```
 
-### Use Cases (app/use_cases.py)
+---
 
-Бизнес-логика приложения инкапсулирована в use case классах:
+## 🏗️ Архитектура проекта
+
+Проект следует принципам **Clean Architecture** (Чистая архитектура):
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                     PRESENTATION LAYER                         │
+│                        app.py (GUI)                            │
+│   Графический интерфейс пользователя на Tkinter               │
+├────────────────────────────────────────────────────────────────┤
+│                     APPLICATION LAYER                          │
+│                    app/use_cases.py                            │
+│   CreateIncome, CreateExpense, GenerateReport, DeleteRecord    │
+│                    app/services.py                             │
+│   CurrencyService (адаптер с кэшированием курсов)              │
+├────────────────────────────────────────────────────────────────┤
+│                       DOMAIN LAYER                             │
+│   domain/records.py  - Record, IncomeRecord, ExpenseRecord     │
+│   domain/reports.py  - Report (фильтрация, группировка)        │
+│   domain/currency.py - CurrencyService (конвертация)           │
+├────────────────────────────────────────────────────────────────┤
+│                   INFRASTRUCTURE LAYER                         │
+│              infrastructure/repositories.py                    │
+│   RecordRepository (абстракция), JsonFileRecordRepository      │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### Принципы
+
+1. **Dependency Inversion** — верхние слои зависят от абстракций, а не от конкретных реализаций
+2. **Single Responsibility** — каждый класс отвечает за одну задачу
+3. **Immutability** — записи (Record) неизменяемы (`frozen=True`)
+
+
+
+## 📝 Программный API
+
+### Доменные модели
+
+#### Record, IncomeRecord, ExpenseRecord
+
+Файл: [`domain/records.py`](domain/records.py)
+
+```python
+from dataclasses import dataclass
+from abc import ABC, abstractmethod
+
+
+@dataclass(frozen=True)
+class Record(ABC):
+    """Базовый класс финансовой записи (неизменяемый)."""
+    date: str       # Формат: "YYYY-MM-DD"
+    amount: float   # Сумма в базовой валюте (KZT)
+    category: str   # Произвольная категория
+
+    @abstractmethod
+    def signed_amount(self) -> float:
+        """Сумма со знаком: + для доходов, - для расходов."""
+        pass
+
+
+class IncomeRecord(Record):
+    """Запись о доходе."""
+    def signed_amount(self) -> float:
+        return self.amount
+
+
+class ExpenseRecord(Record):
+    """Запись о расходе."""
+    def signed_amount(self) -> float:
+        return -abs(self.amount)
+```
+
+**Использование:**
+
+```python
+from domain.records import IncomeRecord, ExpenseRecord
+
+# Создание записей
+salary = IncomeRecord(
+    date="2025-01-15",
+    amount=350000.0,
+    category="Зарплата"
+)
+
+groceries = ExpenseRecord(
+    date="2025-01-16",
+    amount=25000.0,
+    category="Продукты"
+)
+
+# Получение суммы со знаком
+print(salary.signed_amount())     # 350000.0
+print(groceries.signed_amount())  # -25000.0
+
+# Записи неизменяемы (frozen=True)
+# salary.amount = 400000  # Ошибка: FrozenInstanceError
+```
+
+---
+
+### Конвертация валют
+
+#### CurrencyService (Domain)
+
+Файл: [`domain/currency.py`](domain/currency.py)
+
+```python
+class CurrencyService:
+    """Сервис конвертации валют в базовую (KZT)."""
+    
+    def __init__(self, rates: dict[str, float], base: str = "KZT"):
+        """
+        Args:
+            rates: Словарь курсов {код_валюты: курс_к_базовой}
+            base: Код базовой валюты
+        """
+        self._rates = rates
+        self._base = base
+
+    def convert(self, amount: float, currency: str) -> float:
+        """Конвертирует сумму в базовую валюту."""
+        if currency == self._base:
+            return amount
+        return amount * self._rates[currency]
+```
+
+**Использование:**
+
+```python
+from domain.currency import CurrencyService
+
+# Инициализация с курсами
+rates = {
+    "USD": 470.0,   # 1 USD = 470 KZT
+    "EUR": 510.0,   # 1 EUR = 510 KZT
+    "RUB": 5.2      # 1 RUB = 5.2 KZT
+}
+converter = CurrencyService(rates=rates, base="KZT")
+
+# Конвертация
+usd_amount = converter.convert(100, "USD")
+print(f"100 USD = {usd_amount} KZT")  # 100 USD = 47000.0 KZT
+
+eur_amount = converter.convert(50, "EUR")
+print(f"50 EUR = {eur_amount} KZT")   # 50 EUR = 25500.0 KZT
+
+# Базовая валюта не конвертируется
+kzt_amount = converter.convert(10000, "KZT")
+print(f"10000 KZT = {kzt_amount} KZT")  # 10000 KZT = 10000 KZT
+```
+
+#### CurrencyService (Application)
+
+Файл: [`app/services.py`](app/services.py)
+
+Расширенная версия с поддержкой онлайн-курсов и кэширования:
+
+```python
+from app.services import CurrencyService
+
+# Режим 1: Дефолтные курсы (для тестов)
+currency = CurrencyService()
+print(currency.convert(100, "USD"))  # 50000.0 (курс 500)
+
+# Режим 2: Онлайн-курсы с сайта НБРК
+currency_online = CurrencyService(use_online=True)
+# Курсы загружаются с nationalbank.kz и кэшируются в currency_rates.json
+
+# Режим 3: Кастомные курсы
+my_rates = {"USD": 480.0, "EUR": 520.0, "RUB": 5.5}
+currency_custom = CurrencyService(rates=my_rates)
+print(currency_custom.convert(200, "EUR"))  # 104000.0
+```
+
+---
+
+### Отчёты
+
+#### Report
+
+Файл: [`domain/reports.py`](domain/reports.py)
+
+```python
+from typing import Iterable, Dict
+from prettytable import PrettyTable
+from domain.records import Record, IncomeRecord
+
+
+class Report:
+    """Отчёт по финансовым записям с фильтрацией и группировкой."""
+    
+    def __init__(self, records: Iterable[Record]):
+        self._records = list(records)
+
+    def total(self) -> float:
+        """Общий баланс (доходы минус расходы)."""
+        return sum(r.signed_amount() for r in self._records)
+
+    def filter_by_period(self, prefix: str) -> "Report":
+        """Фильтр по дате (prefix: '2025' или '2025-01')."""
+        filtered = [r for r in self._records if r.date.startswith(prefix)]
+        return Report(filtered)
+
+    def filter_by_category(self, category: str) -> "Report":
+        """Фильтр по категории."""
+        filtered = [r for r in self._records if r.category == category]
+        return Report(filtered)
+
+    def grouped_by_category(self) -> Dict[str, "Report"]:
+        """Группировка записей по категориям."""
+        groups = {}
+        for record in self._records:
+            if record.category not in groups:
+                groups[record.category] = []
+            groups[record.category].append(record)
+        return {cat: Report(recs) for cat, recs in groups.items()}
+
+    def as_table(self) -> str:
+        """Форматированная таблица с итогом."""
+        # ... реализация с PrettyTable
+```
+
+**Использование:**
+
+```python
+from domain.reports import Report
+from domain.records import IncomeRecord, ExpenseRecord
+
+# Подготовка данных
+records = [
+    IncomeRecord(date="2025-01-15", amount=350000.0, category="Зарплата"),
+    IncomeRecord(date="2025-02-15", amount=350000.0, category="Зарплата"),
+    ExpenseRecord(date="2025-01-16", amount=25000.0, category="Продукты"),
+    ExpenseRecord(date="2025-01-20", amount=8000.0, category="Транспорт"),
+    ExpenseRecord(date="2025-02-05", amount=30000.0, category="Продукты"),
+]
+
+report = Report(records)
+
+# Общий баланс
+print(f"Баланс: {report.total():,.2f} KZT")
+# Баланс: 637,000.00 KZT
+
+# Фильтр по январю
+january = report.filter_by_period("2025-01")
+print(f"Январь: {january.total():,.2f} KZT")
+# Январь: 317,000.00 KZT
+
+# Фильтр по категории
+food = report.filter_by_category("Продукты")
+print(f"Продукты: {food.total():,.2f} KZT")
+# Продукты: -55,000.00 KZT
+
+# Группировка
+for cat, cat_report in report.grouped_by_category().items():
+    print(f"  {cat}: {cat_report.total():,.2f} KZT")
+# Зарплата: 700,000.00 KZT
+# Продукты: -55,000.00 KZT
+# Транспорт: -8,000.00 KZT
+
+# Таблица
+print(report.as_table())
+```
+
+---
+
+### Репозиторий
+
+#### JsonFileRecordRepository
+
+Файл: [`infrastructure/repositories.py`](infrastructure/repositories.py)
+
+```python
+from abc import ABC, abstractmethod
+from domain.records import Record, IncomeRecord, ExpenseRecord
+import json
+
+
+class RecordRepository(ABC):
+    """Абстрактный репозиторий записей."""
+    
+    @abstractmethod
+    def save(self, record: Record) -> None:
+        """Сохранить запись."""
+        pass
+
+    @abstractmethod
+    def load_all(self) -> list[Record]:
+        """Загрузить все записи."""
+        pass
+
+    @abstractmethod
+    def delete_by_index(self, index: int) -> bool:
+        """Удалить запись по индексу."""
+        pass
+
+
+class JsonFileRecordRepository(RecordRepository):
+    """Реализация репозитория с хранением в JSON-файле."""
+    
+    def __init__(self, file_path: str = "records.json"):
+        self._file_path = file_path
+    
+    # ... реализация методов
+```
+
+**Использование:**
+
+```python
+from infrastructure.repositories import JsonFileRecordRepository
+from domain.records import IncomeRecord, ExpenseRecord
+
+# Создание репозитория (файл создаётся автоматически)
+repo = JsonFileRecordRepository("my_finances.json")
+
+# Сохранение записей
+repo.save(IncomeRecord(
+    date="2025-01-15",
+    amount=350000.0,
+    category="Зарплата"
+))
+
+repo.save(ExpenseRecord(
+    date="2025-01-16",
+    amount=25000.0,
+    category="Продукты"
+))
+
+# Загрузка всех записей
+all_records = repo.load_all()
+for i, rec in enumerate(all_records):
+    rec_type = "Доход" if isinstance(rec, IncomeRecord) else "Расход"
+    print(f"[{i}] {rec.date} | {rec_type} | {rec.category} | {rec.amount:,.0f} KZT")
+
+# [0] 2025-01-15 | Доход | Зарплата | 350,000 KZT
+# [1] 2025-01-16 | Расход | Продукты | 25,000 KZT
+
+# Удаление по индексу
+deleted = repo.delete_by_index(1)
+print(f"Удалено: {deleted}")  # True
+```
+
+**Формат файла `records.json`:**
+
+```json
+[
+  {
+    "type": "income",
+    "date": "2025-01-15",
+    "amount": 350000.0,
+    "category": "Зарплата"
+  },
+  {
+    "type": "expense",
+    "date": "2025-01-16",
+    "amount": 25000.0,
+    "category": "Продукты"
+  }
+]
+```
+
+---
+
+### Use Cases
+
+Файл: [`app/use_cases.py`](app/use_cases.py)
+
+```python
+from domain.records import IncomeRecord, ExpenseRecord
+from domain.reports import Report
+from infrastructure.repositories import RecordRepository
+from app.services import CurrencyService
+
+
+class CreateIncome:
+    """Сценарий: создание записи о доходе."""
+    
+    def __init__(self, repository: RecordRepository, currency: CurrencyService):
+        self._repository = repository
+        self._currency = currency
+
+    def execute(self, *, date: str, amount: float, currency: str, category: str = "General"):
+        # Конвертация в базовую валюту
+        normalized = self._currency.convert(amount, currency)
+        record = IncomeRecord(date=date, amount=normalized, category=category)
+        self._repository.save(record)
+
+
+class CreateExpense:
+    """Сценарий: создание записи о расходе."""
+    # Аналогично CreateIncome
+
+
+class GenerateReport:
+    """Сценарий: генерация отчёта."""
+    
+    def __init__(self, repository: RecordRepository):
+        self._repository = repository
+
+    def execute(self) -> Report:
+        return Report(self._repository.load_all())
+
+
+class DeleteRecord:
+    """Сценарий: удаление записи по индексу."""
+    
+    def __init__(self, repository: RecordRepository):
+        self._repository = repository
+
+    def execute(self, index: int) -> bool:
+        return self._repository.delete_by_index(index)
+```
+
+**Использование:**
 
 ```python
 from infrastructure.repositories import JsonFileRecordRepository
 from app.services import CurrencyService
 from app.use_cases import CreateIncome, CreateExpense, GenerateReport, DeleteRecord
 
-# Инициализация зависимостей
-repository = JsonFileRecordRepository()
+# Инициализация
+repo = JsonFileRecordRepository()
 currency = CurrencyService()
 
-# Добавление дохода
-create_income = CreateIncome(repository, currency)
+# Добавление дохода в USD
+create_income = CreateIncome(repo, currency)
 create_income.execute(
-    date="2025-03-15",
-    amount=300,           # 300 USD
-    currency="USD",       # Будет конвертировано в KZT
+    date="2025-01-20",
+    amount=1000,
+    currency="USD",
     category="Фриланс"
 )
+# Сохранится как 500000.0 KZT (1000 * 500)
 
-# Добавление расхода
-create_expense = CreateExpense(repository, currency)
+# Добавление расхода в EUR
+create_expense = CreateExpense(repo, currency)
 create_expense.execute(
-    date="2025-03-16",
+    date="2025-01-21",
     amount=50,
     currency="EUR",
     category="Развлечения"
 )
+# Сохранится как 29500.0 KZT (50 * 590)
 
 # Генерация отчёта
-generate_report = GenerateReport(repository)
-report = generate_report.execute()
-print(f"Итого: {report.total():.2f} KZT")
+report = GenerateReport(repo).execute()
+print(f"Баланс: {report.total():,.2f} KZT")
 
-# Удаление записи
-delete_record = DeleteRecord(repository)
-success = delete_record.execute(index=0)
+# Фильтрация
+january_report = report.filter_by_period("2025-01")
+print(january_report.as_table())
+
+# Удаление
+delete = DeleteRecord(repo)
+success = delete.execute(0)
 print(f"Удалено: {success}")
 ```
 
-### Сервис валют с онлайн-курсами (app/services.py)
+---
 
-Приложение поддерживает получение актуальных курсов с сайта Национального Банка РК:
-
-```python
-from app.services import CurrencyService
-
-# Использование дефолтных курсов (для тестов)
-currency = CurrencyService()
-print(currency.convert(100, "USD"))  # 50000.0 (100 * 500)
-
-# Использование онлайн-курсов с кэшированием
-currency_online = CurrencyService(use_online=True)
-print(currency_online.convert(100, "USD"))  # Актуальный курс
-
-# Использование кастомных курсов
-custom_rates = {"USD": 450.0, "EUR": 520.0}
-currency_custom = CurrencyService(rates=custom_rates)
-print(currency_custom.convert(100, "USD"))  # 45000.0
-```
-
-## 📁 Структура проекта
+## 📁 Файловая структура
 
 ```
 project/
-├── app.py                    # Точка входа CLI
-├── records.json              # Хранилище записей
-├── currency_rates.json       # Кэш курсов валют
-├── requirements.txt          # Зависимости Python
-├── README.md                 # Документация
 │
-├── app/                      # Слой приложения
+├── app.py                      # GUI точка входа
+├── records.json                # Хранилище записей (создаётся автоматически)
+├── currency_rates.json         # Кэш курсов валют (при use_online=True)
+├── requirements.txt            # Python-зависимости
+├── README.md                   # Эта документация
+│
+├── app/                        # APPLICATION LAYER
 │   ├── __init__.py
-│   ├── services.py           # Сервисы (CurrencyService адаптер)
-│   └── use_cases.py          # Use cases (CreateIncome, CreateExpense, etc.)
+│   ├── services.py             # CurrencyService (адаптер с онлайн-курсами)
+│   └── use_cases.py            # CreateIncome, CreateExpense, GenerateReport, DeleteRecord
 │
-├── domain/                   # Доменный слой
+├── domain/                     # DOMAIN LAYER
 │   ├── __init__.py
-│   ├── records.py            # Доменные модели (Record, IncomeRecord, ExpenseRecord)
-│   ├── reports.py            # Отчёты (Report)
-│   └── currency.py           # Сервис валют (CurrencyService)
+│   ├── records.py              # Record, IncomeRecord, ExpenseRecord
+│   ├── reports.py              # Report
+│   └── currency.py             # CurrencyService (базовый)
 │
-├── infrastructure/           # Инфраструктурный слой
-│   └── repositories.py       # Репозитории (JsonFileRecordRepository)
+├── infrastructure/             # INFRASTRUCTURE LAYER
+│   └── repositories.py         # RecordRepository, JsonFileRecordRepository
 │
-└── tests/                    # Тесты
+└── tests/                      # Юнит-тесты
     ├── __init__.py
-    ├── test_currency.py
-    ├── test_records.py
-    ├── test_reports.py
-    ├── test_repositories.py
-    ├── test_services.py
-    └── test_use_cases.py
+    ├── test_currency.py        # Тесты конвертации
+    ├── test_records.py         # Тесты записей
+    ├── test_reports.py         # Тесты отчётов
+    ├── test_repositories.py    # Тесты репозитория
+    ├── test_services.py        # Тесты сервисов
+    └── test_use_cases.py       # Тесты use cases
 ```
 
-## 🧪 Тестирование
+---
 
-Запуск всех тестов:
+## 🧪 Тесты
+
+### Запуск тестов
 
 ```bash
-cd project
+# Перейти в директорию проекта
+cd "Проект ФУ/project"
+
+# Запуск всех тестов
 pytest
-```
 
-Запуск с подробным выводом:
-
-```bash
+# С подробным выводом
 pytest -v
-```
 
-Запуск конкретного теста:
-
-```bash
+# Конкретный файл
 pytest tests/test_records.py -v
+
+# Конкретный тест
+pytest tests/test_reports.py::test_report_total -v
 ```
 
-Запуск с покрытием кода:
+### Покрытие кода
 
 ```bash
+# Установка pytest-cov
 pip install pytest-cov
+
+# Запуск с отчётом покрытия
+pytest --cov=. --cov-report=term-missing
+
+# HTML-отчёт
 pytest --cov=. --cov-report=html
+# Открыть htmlcov/index.html в браузере
 ```
 
-## 📊 Поддерживаемые валюты
+### Примеры тестов
 
-| Валюта | Код | Дефолтный курс к KZT |
-|--------|-----|---------------------|
-| Тенге  | KZT | 1.0 (базовая)       |
-| Доллар | USD | 500.0               |
-| Евро   | EUR | 590.0               |
-| Рубль  | RUB | 6.5                 |
+```python
+# tests/test_records.py
+from domain.records import IncomeRecord, ExpenseRecord
 
-> При использовании `use_online=True` курсы загружаются с сайта [Национального Банка РК](https://nationalbank.kz/ru/exchangerates/ezhednevnye-oficialnye-rynochnye-kursy-valyut/).
+def test_income_signed_amount():
+    income = IncomeRecord(date="2025-01-15", amount=100000.0, category="Test")
+    assert income.signed_amount() == 100000.0
+
+def test_expense_signed_amount():
+    expense = ExpenseRecord(date="2025-01-16", amount=50000.0, category="Test")
+    assert expense.signed_amount() == -50000.0
+
+
+# tests/test_reports.py
+from domain.reports import Report
+from domain.records import IncomeRecord, ExpenseRecord
+
+def test_report_total():
+    records = [
+        IncomeRecord(date="2025-01-15", amount=100000.0, category="A"),
+        ExpenseRecord(date="2025-01-16", amount=30000.0, category="B"),
+    ]
+    report = Report(records)
+    assert report.total() == 70000.0
+
+def test_filter_by_period():
+    records = [
+        IncomeRecord(date="2025-01-15", amount=100000.0, category="A"),
+        IncomeRecord(date="2025-02-15", amount=50000.0, category="A"),
+    ]
+    report = Report(records)
+    january = report.filter_by_period("2025-01")
+    assert january.total() == 100000.0
+```
+
+---
+
+## 💱 Поддерживаемые валюты
+
+| Валюта | Код | Дефолтный курс | Описание |
+|--------|-----|----------------|----------|
+| Казахстанский тенге | KZT | 1.0 | Базовая валюта |
+| Доллар США | USD | 500.0 | 1 USD = 500 KZT |
+| Евро | EUR | 590.0 | 1 EUR = 590 KZT |
+| Российский рубль | RUB | 6.5 | 1 RUB = 6.5 KZT |
+
+> **Актуальные курсы:** При инициализации `CurrencyService(use_online=True)` курсы загружаются с [Национального Банка РК](https://nationalbank.kz/ru/exchangerates/ezhednevnye-oficialnye-rynochnye-kursy-valyut/) и кэшируются локально.
+
+---
 
 ## 📄 Лицензия
 
-MIT License
+MIT License — свободное использование, модификация и распространение.
