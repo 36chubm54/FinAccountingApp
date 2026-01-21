@@ -64,6 +64,7 @@ After running `python app.py`, a window with six buttons will open:
 - **Generate Report** — Report generation
 - **Delete Record** - Delete a record
 - **Delete All Records** - Delete all records
+- **Set Initial Balance** — Setting the initial balance
 - **Import from CSV** - Import data from CSV file
 
 ### Adding income/expense
@@ -97,6 +98,15 @@ The result will be displayed in the text field. For tables, a formatted table wi
 3. Click "Delete Selected".
 4. Confirm the deletion in the dialog box.
 
+### Setting the initial balance
+
+1. Click "Set Initial Balance".
+2. Enter the amount of the initial balance (floating point number, can be negative).
+3. Click OK.
+4. The opening balance will be saved and will be taken into account in balance calculations.
+
+The opening balance is the balance at the beginning of the accounting period. It is added to the final balance of all entries.
+
 ### Deleting all records
 
 1. Click "Delete All Records".
@@ -114,6 +124,7 @@ The result will be displayed in the text field. For tables, a formatted table wi
 
 ```csv
 Date,Type,Category,Amount (KZT)
+,Initial Balance,,50000.00
 2025-01-01,Income,Salary,100000.00
 2025-01-02,Expense,Food,15000.00
 2025-01-03,Income,Bonus,50000.00
@@ -123,6 +134,9 @@ TOTAL,,,-2000.00
 **Import rules:**
 
 - The first line must contain headers: `Date,Type,Category,Amount (KZT)`
+- The second line may contain the initial balance `Initial Balance` with empty `Type` and `Category` fields
+- Dates must be in the format `YYYY-MM-DD`
+- All delimiters are commas
 - Supported types: `Income` (income) and `Expense` (expense)
 - Amounts can be both positive and negative (in parentheses for expenses)
 - The row with `TOTAL` in the date field is ignored
@@ -135,21 +149,26 @@ All records are saved in the `records.json` file in the project directory. The f
 **File format:**
 
 ```json
-[
-  {
-    "type": "income",
-    "date": "2025-01-15",
-    "amount": 350000.0,
-    "category": "Salary"
-  },
-  {
-    "type": "expense",
-    "date": "2025-01-16",
-    "amount": 25000.0,
-    "category": "Products"
-  }
-]
+{
+  "initial_balance": 50000.0,
+  "records": [
+    {
+      "type": "income",
+      "date": "2025-01-15",
+      "amount": 350000.0,
+      "category": "Salary"
+    },
+    {
+      "type": "expense",
+      "date": "2025-01-16",
+      "amount": 25000.0,
+      "category": "Products"
+    }
+  ]
+}
 ```
+
+The `initial_balance` field stores the initial balance (balance at the beginning of the accounting period). If not set, equals 0.0.
 
 ---
 

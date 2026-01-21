@@ -6,22 +6,23 @@ import os
 
 
 class Report:
-    def __init__(self, records: Iterable[Record]):
+    def __init__(self, records: Iterable[Record], initial_balance: float = 0.0):
         self._records = list(records)
+        self._initial_balance = initial_balance
 
     def total(self) -> float:
-        """Calculate total signed amount of all records."""
-        return sum(r.signed_amount() for r in self._records)
+        """Calculate total signed amount of all records including initial balance."""
+        return self._initial_balance + sum(r.signed_amount() for r in self._records)
 
     def filter_by_period(self, prefix: str) -> "Report":
         """Return a new Report with records filtered by date prefix."""
         filtered = [r for r in self._records if r.date.startswith(prefix)]
-        return Report(filtered)
+        return Report(filtered, self._initial_balance)
 
     def filter_by_category(self, category: str) -> "Report":
         """Return a new Report with records filtered by category."""
         filtered = [r for r in self._records if r.category == category]
-        return Report(filtered)
+        return Report(filtered, self._initial_balance)
 
     def grouped_by_category(self) -> Dict[str, "Report"]:
         groups = {}
@@ -29,11 +30,11 @@ class Report:
             if record.category not in groups:
                 groups[record.category] = []
             groups[record.category].append(record)
-        return {cat: Report(recs) for cat, recs in groups.items()}
+        return {cat: Report(recs, self._initial_balance) for cat, recs in groups.items()}
 
     def sorted_by_date(self) -> "Report":
         """Return a new Report sorted by date."""
-        return Report(sorted(self._records, key=lambda r: r.date))
+        return Report(sorted(self._records, key=lambda r: r.date), self._initial_balance)
 
     def records(self) -> list[Record]:
         return list(self._records)
@@ -42,6 +43,11 @@ class Report:
         """Return a string representation of records in table format."""
         table = PrettyTable()
         table.field_names = ["Date", "Type", "Category", "Amount (KZT)"]
+
+        # Add initial balance row
+        if self._initial_balance != 0:
+            balance_str = f"{self._initial_balance:.2f}" if self._initial_balance >= 0 else f"({abs(self._initial_balance):.2f})"
+            table.add_row(["", "Initial Balance", "", balance_str])
 
         sorted_records = sorted(self._records, key=lambda r: r.date)
 
@@ -54,10 +60,15 @@ class Report:
             )
             table.add_row([record.date, record_type, record.category, amount_str])
 
-        # Add total row
-        total = self.total()
-        total_str = f"{total:.2f}" if total >= 0 else f"({abs(total):.2f})"
-        table.add_row(["TOTAL", "", "", total_str], divider=True)
+        # Add total row for records
+        records_total = sum(r.signed_amount() for r in self._records)
+        records_total_str = f"{records_total:.2f}" if records_total >= 0 else f"({abs(records_total):.2f})"
+        table.add_row(["SUBTOTAL", "", "", records_total_str], divider=True)
+
+        # Add final balance row
+        final_balance = self.total()
+        final_balance_str = f"{final_balance:.2f}" if final_balance >= 0 else f"({abs(final_balance):.2f})"
+        table.add_row(["FINAL BALANCE", "", "", final_balance_str], divider=True)
 
         return str(table)
 

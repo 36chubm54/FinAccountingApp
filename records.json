@@ -1,56 +1,191 @@
-[
-  {
-    "type": "income",
-    "date": "2025-01-01",
-    "amount": 50000.0,
-    "category": "Salary"
-  },
-  {
-    "type": "income",
-    "date": "2025-01-01",
-    "amount": 51216.0,
-    "category": "Gift"
-  },
-  {
-    "type": "income",
-    "date": "2025-04-01",
-    "amount": 50000.0,
-    "category": "Salary"
-  },
-  {
-    "type": "income",
-    "date": "2026-01-17",
-    "amount": 10000.0,
-    "category": "Gift"
-  },
-  {
-    "type": "income",
-    "date": "2026-01-17",
-    "amount": 5000.0,
-    "category": "Gift"
-  },
-  {
-    "type": "expense",
-    "date": "2026-01-17",
-    "amount": 2500.0,
-    "category": "Food"
-  },
-  {
-    "type": "income",
-    "date": "2026-01-18",
-    "amount": 59472.0,
-    "category": "Salary"
-  },
-  {
-    "type": "income",
-    "date": "2026-01-20",
-    "amount": 500000.0,
-    "category": "Salary"
-  },
-  {
-    "type": "expense",
-    "date": "2026-01-20",
-    "amount": 500.0,
-    "category": "Food"
-  }
-]
+{
+  "initial_balance": 199524.38,
+  "records": [
+    {
+      "type": "expense",
+      "date": "2026-01-01",
+      "amount": 1319.0,
+      "category": "Питание"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-02",
+      "amount": 210.0,
+      "category": "Питание"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-02",
+      "amount": 2130.0,
+      "category": "Электроника и аксессуары"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-03",
+      "amount": 1504.0,
+      "category": "Питание"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-04",
+      "amount": 200.0,
+      "category": "Транспорт"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-04",
+      "amount": 2800.0,
+      "category": "Питание"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-04",
+      "amount": 500.0,
+      "category": "Отдых и развлечения"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-06",
+      "amount": 2744.0,
+      "category": "Питание"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-09",
+      "amount": 744.0,
+      "category": "Питание"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-09",
+      "amount": 100.0,
+      "category": "Отдых и развлечения"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-09",
+      "amount": 599.0,
+      "category": "Прочие расходы"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-10",
+      "amount": 214.0,
+      "category": "Питание"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-10",
+      "amount": 606.0,
+      "category": "Прочие расходы"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-11",
+      "amount": 200.0,
+      "category": "Транспорт"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-12",
+      "amount": 5125.0,
+      "category": "Питание"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-12",
+      "amount": 360.0,
+      "category": "Прочие расходы"
+    },
+    {
+      "type": "income",
+      "date": "2026-01-13",
+      "amount": 1000.0,
+      "category": "Кешбэк"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-13",
+      "amount": 1359.0,
+      "category": "Питание"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-14",
+      "amount": 8886.0,
+      "category": "Прочие расходы"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-15",
+      "amount": 389.0,
+      "category": "Питание"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-18",
+      "amount": 400.0,
+      "category": "Транспорт"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-18",
+      "amount": 600.0,
+      "category": "Прочие расходы"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-19",
+      "amount": 200.0,
+      "category": "Транспорт"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-19",
+      "amount": 100.0,
+      "category": "Питание"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-19",
+      "amount": 490.0,
+      "category": "Прочие расходы"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-20",
+      "amount": 3061.0,
+      "category": "Питание"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-20",
+      "amount": 1210.0,
+      "category": "Электроника и аксессуары"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-20",
+      "amount": 45.0,
+      "category": "Прочие расходы"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-21",
+      "amount": 420.0,
+      "category": "Питание"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-21",
+      "amount": 820.0,
+      "category": "Питание"
+    },
+    {
+      "type": "expense",
+      "date": "2026-01-21",
+      "amount": 200.0,
+      "category": "Канцтовары"
+    }
+  ]
+}

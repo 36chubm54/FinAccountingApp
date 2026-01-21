@@ -35,7 +35,7 @@ class FinancialApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Financial Accounting")
-        self.geometry("400x300")
+        self.geometry("300x360")
 
         self.repository = JsonFileRecordRepository(
             str(Path(__file__).parent / "records.json")
@@ -85,6 +85,14 @@ class FinancialApp(tk.Tk):
         )
         self.delete_all_btn.pack(pady=10)
 
+        self.set_initial_balance_btn = tk.Button(
+            self,
+            text="Set Initial Balance",
+            command=self.set_initial_balance,
+            width=button_width,
+        )
+        self.set_initial_balance_btn.pack(pady=10)
+        
         self.import_csv_btn = tk.Button(
             self,
             text="Import from CSV",
@@ -92,6 +100,7 @@ class FinancialApp(tk.Tk):
             width=button_width,
         )
         self.import_csv_btn.pack(pady=10)
+
 
     def add_income(self):
         self._add_record("Income", CreateIncome)
@@ -153,7 +162,7 @@ class FinancialApp(tk.Tk):
     def generate_report(self):
         report_window = Toplevel(self)
         report_window.title("Generate Report")
-        report_window.geometry("600x400")
+        report_window.geometry("700x400")
 
         current_report = None
 
@@ -205,8 +214,14 @@ class FinancialApp(tk.Tk):
             elif table_var.get():
                 result_text.insert(tk.END, report.as_table())
             else:
-                total = report.total()
-                result_text.insert(tk.END, f"Total: {total:.2f} KZT\n")
+                initial_balance = self.repository.load_initial_balance()
+                records_total = sum(r.signed_amount() for r in report.records())
+                final_balance = report.total()
+                result_text.insert(
+                    tk.END, f"Initial Balance: {initial_balance:.2f} KZT\n"
+                )
+                result_text.insert(tk.END, f"Records Total: {records_total:.2f} KZT\n")
+                result_text.insert(tk.END, f"Final Balance: {final_balance:.2f} KZT\n")
 
         def export_csv():
             nonlocal current_report
@@ -321,6 +336,25 @@ class FinancialApp(tk.Tk):
             messagebox.showerror("Error", f"File not found: {filepath}")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to import CSV: {str(e)}")
+
+    def set_initial_balance(self):
+        current_balance = self.repository.load_initial_balance()
+        balance_str = simpledialog.askstring(
+            "Initial Balance",
+            f"Enter initial balance (current: {current_balance:.2f} KZT):",
+            parent=self,
+            initialvalue=str(current_balance),
+        )
+        if balance_str is None:
+            return
+        try:
+            balance = float(balance_str)
+        except ValueError:
+            messagebox.showerror("Error", "Invalid balance amount.")
+            return
+
+        self.repository.save_initial_balance(balance)
+        messagebox.showinfo("Success", f"Initial balance set to {balance:.2f} KZT.")
 
 
 def main() -> None:

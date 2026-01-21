@@ -78,12 +78,15 @@ class TestJsonFileRecordRepository:
         with open(self.temp_file.name, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        assert isinstance(data, list)
-        assert len(data) == 1
-        assert data[0]["type"] == "income"
-        assert data[0]["date"] == "2025-01-01"
-        assert data[0]["amount"] == 100.0
-        assert data[0]["category"] == "Salary"
+        assert isinstance(data, dict)
+        assert "initial_balance" in data
+        assert "records" in data
+        assert data["initial_balance"] == 0.0
+        assert len(data["records"]) == 1
+        assert data["records"][0]["type"] == "income"
+        assert data["records"][0]["date"] == "2025-01-01"
+        assert data["records"][0]["amount"] == 100.0
+        assert data["records"][0]["category"] == "Salary"
 
     def test_load_records_with_backward_compatibility(self):
         # Test loading records without category (backward compatibility)
@@ -196,7 +199,50 @@ class TestJsonFileRecordRepository:
         records = self.repo.load_all()
         assert len(records) == 0
 
-        # Verify JSON file contains empty list
+        # Verify JSON file contains empty records but initial_balance
         with open(self.temp_file.name, "r", encoding="utf-8") as f:
             data = json.load(f)
-        assert data == []
+        assert data["records"] == []
+        assert data["initial_balance"] == 0.0
+
+    def test_save_and_load_initial_balance(self):
+        # Test saving and loading initial balance
+        self.repo.save_initial_balance(100.0)
+        balance = self.repo.load_initial_balance()
+        assert balance == 100.0
+
+        # Verify JSON file
+        with open(self.temp_file.name, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        assert data["initial_balance"] == 100.0
+        assert data["records"] == []
+
+    def test_load_initial_balance_default(self):
+        # Test loading initial balance when not set (should be 0.0)
+        balance = self.repo.load_initial_balance()
+        assert balance == 0.0
+
+    def test_save_initial_balance_overwrite(self):
+        # Test overwriting initial balance
+        self.repo.save_initial_balance(50.0)
+        self.repo.save_initial_balance(75.0)
+        balance = self.repo.load_initial_balance()
+        assert balance == 75.0
+
+    def test_initial_balance_with_records(self):
+        # Test initial balance persists with records
+        self.repo.save_initial_balance(200.0)
+        record = IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")
+        self.repo.save(record)
+
+        balance = self.repo.load_initial_balance()
+        assert balance == 200.0
+
+        records = self.repo.load_all()
+        assert len(records) == 1
+
+        # Verify JSON file
+        with open(self.temp_file.name, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        assert data["initial_balance"] == 200.0
+        assert len(data["records"]) == 1

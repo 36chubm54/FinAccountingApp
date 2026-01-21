@@ -35,7 +35,7 @@ class GenerateReport:
         self._repository = repository
 
     def execute(self) -> Report:
-        return Report(self._repository.load_all())
+        return Report(self._repository.load_all(), self._repository.load_initial_balance())
 
 
 class DeleteRecord:

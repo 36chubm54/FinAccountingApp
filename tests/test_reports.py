@@ -12,6 +12,12 @@ class TestReport:
         report = Report(records)
         assert report.records() == records
 
+    def test_creation_with_initial_balance(self):
+        records = [IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")]
+        report = Report(records, initial_balance=50.0)
+        assert report.records() == records
+        assert report.total() == 150.0
+
     def test_total_empty(self):
         report = Report([])
         assert report.total() == 0.0
@@ -41,10 +47,10 @@ class TestReport:
             ExpenseRecord(date="2025-02-01", amount=30.0, category="Food"),
             IncomeRecord(date="2025-01-15", amount=50.0, category="Bonus"),
         ]
-        report = Report(records)
+        report = Report(records, initial_balance=20.0)
         jan_report = report.filter_by_period("2025-01")
         assert len(jan_report.records()) == 2
-        assert jan_report.total() == 150.0  # 100 + 50
+        assert jan_report.total() == 170.0  # 20 + 100 + 50
 
     def test_filter_by_category(self):
         records = [
@@ -104,7 +110,22 @@ class TestReport:
         assert "Amount" in table_str
         assert "Salary" in table_str
         assert "Food" in table_str
-        assert "TOTAL" in table_str
+        assert "SUBTOTAL" in table_str
+        assert "FINAL BALANCE" in table_str
+
+    def test_as_table_with_initial_balance(self):
+        records = [
+            IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
+            ExpenseRecord(date="2025-01-02", amount=30.0, category="Food"),
+        ]
+        report = Report(records, initial_balance=50.0)
+        table_str = report.as_table()
+        assert "Initial Balance" in table_str
+        assert "50.00" in table_str
+        assert "SUBTOTAL" in table_str
+        assert "70.00" in table_str  # 100 - 30
+        assert "FINAL BALANCE" in table_str
+        assert "120.00" in table_str  # 50 + 70
 
     def test_to_csv(self):
         records = [
