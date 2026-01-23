@@ -1,5 +1,5 @@
 {
-  "initial_balance": 199524.38,
+  "initial_balance": 208613.38,
   "records": [
     {
       "type": "expense",
@@ -74,118 +74,63 @@
       "category": "Питание"
     },
     {
-      "type": "expense",
+      "type": "mandatory_expense",
+      "date": "2026-01-12",
+      "amount": 2700.0,
+      "category": "Подписка",
+      "description": "",
+      "period": "monthly"
+    },
+    {
+      "type": "mandatory_expense",
       "date": "2026-01-10",
-      "amount": 606.0,
-      "category": "Прочие расходы"
+      "amount": 3500.0,
+      "category": "Парикмахер",
+      "description": "",
+      "period": "monthly"
     },
     {
-      "type": "expense",
-      "date": "2026-01-11",
-      "amount": 200.0,
-      "category": "Транспорт"
-    },
-    {
-      "type": "expense",
-      "date": "2026-01-12",
-      "amount": 5125.0,
-      "category": "Питание"
-    },
-    {
-      "type": "expense",
-      "date": "2026-01-12",
-      "amount": 360.0,
-      "category": "Прочие расходы"
+      "type": "mandatory_expense",
+      "date": "2026-01-08",
+      "amount": 3000.0,
+      "category": "Интернет",
+      "description": "telecom",
+      "period": "monthly"
     },
     {
       "type": "income",
-      "date": "2026-01-13",
-      "amount": 1000.0,
-      "category": "Кешбэк"
+      "date": "2026-01-01",
+      "amount": 10000.0,
+      "category": "Подарок"
     },
     {
-      "type": "expense",
-      "date": "2026-01-13",
-      "amount": 1359.0,
-      "category": "Питание"
+      "type": "income",
+      "date": "2026-01-10",
+      "amount": 50000.0,
+      "category": "Зарплата"
+    }
+  ],
+  "mandatory_expenses": [
+    {
+      "date": "",
+      "amount": 3500.0,
+      "category": "Парикмахер",
+      "description": "Стрижка",
+      "period": "monthly"
     },
     {
-      "type": "expense",
-      "date": "2026-01-14",
-      "amount": 8886.0,
-      "category": "Прочие расходы"
+      "date": "",
+      "amount": 3000.0,
+      "category": "Интернет",
+      "description": "telecom",
+      "period": "monthly"
     },
     {
-      "type": "expense",
-      "date": "2026-01-15",
-      "amount": 389.0,
-      "category": "Питание"
-    },
-    {
-      "type": "expense",
-      "date": "2026-01-18",
-      "amount": 400.0,
-      "category": "Транспорт"
-    },
-    {
-      "type": "expense",
-      "date": "2026-01-18",
-      "amount": 600.0,
-      "category": "Прочие расходы"
-    },
-    {
-      "type": "expense",
-      "date": "2026-01-19",
-      "amount": 200.0,
-      "category": "Транспорт"
-    },
-    {
-      "type": "expense",
-      "date": "2026-01-19",
-      "amount": 100.0,
-      "category": "Питание"
-    },
-    {
-      "type": "expense",
-      "date": "2026-01-19",
-      "amount": 490.0,
-      "category": "Прочие расходы"
-    },
-    {
-      "type": "expense",
-      "date": "2026-01-20",
-      "amount": 3061.0,
-      "category": "Питание"
-    },
-    {
-      "type": "expense",
-      "date": "2026-01-20",
-      "amount": 1210.0,
-      "category": "Электроника и аксессуары"
-    },
-    {
-      "type": "expense",
-      "date": "2026-01-20",
-      "amount": 45.0,
-      "category": "Прочие расходы"
-    },
-    {
-      "type": "expense",
-      "date": "2026-01-21",
-      "amount": 420.0,
-      "category": "Питание"
-    },
-    {
-      "type": "expense",
-      "date": "2026-01-21",
-      "amount": 820.0,
-      "category": "Питание"
-    },
-    {
-      "type": "expense",
-      "date": "2026-01-21",
-      "amount": 200.0,
-      "category": "Канцтовары"
+      "date": "",
+      "amount": 2700.0,
+      "category": "Подписка",
+      "description": "Youtube Premium",
+      "period": "monthly"
     }
   ]
 }

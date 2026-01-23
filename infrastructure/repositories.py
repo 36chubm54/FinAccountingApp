@@ -1,6 +1,6 @@
 import json
 from abc import ABC, abstractmethod
-from domain.records import Record, IncomeRecord, ExpenseRecord
+from domain.records import Record, IncomeRecord, ExpenseRecord, MandatoryExpenseRecord
 
 
 class RecordRepository(ABC):
@@ -32,6 +32,26 @@ class RecordRepository(ABC):
         """Load initial balance. Returns 0.0 if not set."""
         pass
 
+    @abstractmethod
+    def save_mandatory_expense(self, expense: MandatoryExpenseRecord) -> None:
+        """Save mandatory expense."""
+        pass
+
+    @abstractmethod
+    def load_mandatory_expenses(self) -> list[MandatoryExpenseRecord]:
+        """Load all mandatory expenses."""
+        pass
+
+    @abstractmethod
+    def delete_mandatory_expense_by_index(self, index: int) -> bool:
+        """Delete mandatory expense by index. Returns True if deleted."""
+        pass
+
+    @abstractmethod
+    def delete_all_mandatory_expenses(self) -> None:
+        """Delete all mandatory expenses."""
+        pass
+
 
 class JsonFileRecordRepository(RecordRepository):
     def __init__(self, file_path: str = "records.json"):
@@ -54,12 +74,22 @@ class JsonFileRecordRepository(RecordRepository):
 
     def save(self, record: Record) -> None:
         data = self._load_data()
-        record_data = {
-            "type": "income" if isinstance(record, IncomeRecord) else "expense",
-            "date": record.date,
-            "amount": record.amount,
-            "category": record.category,
-        }
+        if isinstance(record, MandatoryExpenseRecord):
+            record_data = {
+                "type": "mandatory_expense",
+                "date": record.date,
+                "amount": record.amount,
+                "category": record.category,
+                "description": record.description,
+                "period": record.period,
+            }
+        else:
+            record_data = {
+                "type": "income" if isinstance(record, IncomeRecord) else "expense",
+                "date": record.date,
+                "amount": record.amount,
+                "category": record.category,
+            }
         data["records"].append(record_data)
         self._save_data(data)
 
@@ -75,6 +105,14 @@ class JsonFileRecordRepository(RecordRepository):
             elif item["type"] == "expense":
                 record = ExpenseRecord(
                     date=item["date"], amount=item["amount"], category=category
+                )
+            elif item["type"] == "mandatory_expense":
+                record = MandatoryExpenseRecord(
+                    date=item["date"],
+                    amount=item["amount"],
+                    category=category,
+                    description=item["description"],
+                    period=item["period"]
                 )
             else:
                 continue
@@ -106,3 +144,48 @@ class JsonFileRecordRepository(RecordRepository):
         """Load initial balance. Returns 0.0 if not set."""
         data = self._load_data()
         return data.get("initial_balance", 0.0)
+
+    def save_mandatory_expense(self, expense: MandatoryExpenseRecord) -> None:
+        """Save mandatory expense."""
+        data = self._load_data()
+        if "mandatory_expenses" not in data:
+            data["mandatory_expenses"] = []
+        expense_data = {
+            "date": expense.date,
+            "amount": expense.amount,
+            "category": expense.category,
+            "description": expense.description,
+            "period": expense.period,
+        }
+        data["mandatory_expenses"].append(expense_data)
+        self._save_data(data)
+
+    def load_mandatory_expenses(self) -> list[MandatoryExpenseRecord]:
+        """Load all mandatory expenses."""
+        data = self._load_data()
+        expenses = []
+        for item in data.get("mandatory_expenses", []):
+            expense = MandatoryExpenseRecord(
+                date=item["date"],
+                amount=item["amount"],
+                category=item["category"],
+                description=item["description"],
+                period=item["period"],
+            )
+            expenses.append(expense)
+        return expenses
+
+    def delete_mandatory_expense_by_index(self, index: int) -> bool:
+        """Delete mandatory expense by index. Returns True if deleted."""
+        data = self._load_data()
+        if "mandatory_expenses" in data and 0 <= index < len(data["mandatory_expenses"]):
+            data["mandatory_expenses"].pop(index)
+            self._save_data(data)
+            return True
+        return False
+
+    def delete_all_mandatory_expenses(self) -> None:
+        """Delete all mandatory expenses."""
+        data = self._load_data()
+        data["mandatory_expenses"] = []
+        self._save_data(data)

@@ -57,7 +57,7 @@ After launch, the graphical window of the Financial Accounting application will 
 
 ### Main window
 
-After running `python app.py`, a window with six buttons will open:
+After running `python app.py`, a window with eight buttons will open:
 
 - **Add Income** - Adding income
 - **Add Expense** - Adding an expense
@@ -65,7 +65,8 @@ After running `python app.py`, a window with six buttons will open:
 - **Delete Record** - Delete a record
 - **Delete All Records** - Delete all records
 - **Set Initial Balance** — Setting the initial balance
-- **Import from CSV** - Import data from CSV file
+- **Manage Mandatory** - Management of mandatory expenses
+- **Import from CSV** — Import data from a CSV file
 
 ### Adding income/expense
 
@@ -107,17 +108,48 @@ The result will be displayed in the text field. For tables, a formatted table wi
 
 The opening balance is the balance at the beginning of the accounting period. It is added to the final balance of all entries.
 
-### Deleting all records
+### Managing mandatory expenses
+
+1. Click "Manage Mandatory".
+2. A list of existing mandatory expenses will be displayed in a new window.
+3. Use the buttons:
+   - **Add** — Add a new mandatory expense
+   - **Delete** — Delete the selected mandatory expense
+   - **Delete All** - Delete all mandatory expenses
+   - **Add to Report** — Add the selected expense to the report indicating the date
+   - **Close** — Close the window
+
+**Adding mandatory expense:**
+
+1. Click "Add" in the control window.
+2. Fill in the fields:
+   - **Amount** — Amount (floating point number)
+   - **Currency** — Currency (default KZT)
+   - **Category** — Category (default "Mandatory")
+   - **Description** — Description of consumption (required)
+   - **Period** — Periodicity (daily/weekly/monthly/yearly)
+3. Click "Save".
+
+**Add to report:**
+
+1. Select a required expense from the list.
+2. Click "Add to Report".
+3. Enter the date in YYYY-MM-DD format.
+4. Click OK.
+
+Mandatory expenses are recurring expenses (rent, utilities, etc.). They are stored separately and can be added to the report at any time.
+
+### Delete all entries
 
 1. Click "Delete All Records".
-2. Confirm deletion in the dialog (this action is irreversible).
-3. All financial records will be deleted from the `records.json` file.
+2. Confirm deletion in the dialog box (this action is irreversible).
+3. All financial records will be removed from the `records.json` file. The opening balance will remain unchanged.
 
 ### Import from CSV
 
 1. Click "Import from CSV".
-2. Select a CSV file in the file opening dialog.
-3. Confirm the import in the dialog (all existing records will be replaced).
+2. Select the CSV file in the open file dialog box.
+3. Confirm the import in the dialog box (all existing entries will be replaced).
 4. The application will show the number of successfully imported records.
 
 **CSV file format:**
@@ -133,14 +165,14 @@ TOTAL,,,-2000.00
 
 **Import rules:**
 
-- The first line must contain headers: `Date,Type,Category,Amount (KZT)`
-- The second line may contain the initial balance `Initial Balance` with empty `Type` and `Category` fields
+- The first line should contain the headings: `Date,Type,Category,Amount (KZT)`
+- The second line may contain the initial balance `Initial Balance` with empty fields `Type` and `Category`
 - Dates must be in the format `YYYY-MM-DD`
 - All delimiters are commas
 - Supported types: `Income` (income) and `Expense` (expense)
-- Amounts can be both positive and negative (in parentheses for expenses)
-- The row with `TOTAL` in the date field is ignored
-- All existing data will be replaced with new data from CSV
+- Amounts can be either positive or negative (in brackets for expenses)
+- The line with `TOTAL` in the date field is ignored
+- All existing data will be replaced with new data from the CSV file
 
 ### Data storage
 
@@ -225,7 +257,7 @@ python -m http.server 8000
 
 ### 🛠️ Technical features
 
-#### Storing web application data
+#### Storing data in a web application
 
 - All data is stored in the browser's **localStorage**
 - No need for a database or server
@@ -308,13 +340,14 @@ The project follows the principles of **Clean Architecture**:
 
 ### Domain models
 
-#### Record, IncomeRecord, ExpenseRecord
+#### Record, IncomeRecord, ExpenseRecord, MandatoryExpenseRecord
 
 File: [`domain/records.py`](domain/records.py)
 
 ```python
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -340,12 +373,21 @@ class ExpenseRecord(Record):
     """Record of expense."""
     def signed_amount(self) -> float:
         return -abs(self.amount)
+
+
+@dataclass(frozen=True)
+class MandatoryExpenseRecord(Record):
+    description: str
+    period: Literal["daily", "weekly", "monthly", "yearly"]
+
+    def signed_amount(self) -> float:
+        return -abs(self.amount)
 ```
 
 **Usage:**
 
 ```python
-from domain.records import IncomeRecord, ExpenseRecord
+from domain.records import IncomeRecord, ExpenseRecord, MandatoryExpenseRecord
 
 # Create entries
 salary = IncomeRecord(
@@ -360,9 +402,18 @@ groceries = ExpenseRecord(
     category="Products"
 )
 
+rent = MandatoryExpenseRecord(
+    date="2025-01-01",
+    amount=150000.0,
+    category="Mandatory",
+    description="Monthly rent payment",
+    period="monthly"
+)
+
 # Get signed sum
 print(salary.signed_amount()) # 350000.0
 print(groceries.signed_amount()) # -25000.0
+print(rent.signed_amount()) # -150000.0
 
 # Entries are immutable (frozen=True)
 # salary.amount = 400000 # Error: FrozenInstanceError
@@ -748,7 +799,7 @@ project/
 │
 ├── domain/ # DOMAIN LAYER
 │ ├── __init__.py
-│ ├── records.py # Record, IncomeRecord, ExpenseRecord
+│ ├── records.py # Record, IncomeRecord, ExpenseRecord, MandatoryExpenseRecord
 │ ├── reports.py # Report
 │ └── currency.py # CurrencyService (base)
 │

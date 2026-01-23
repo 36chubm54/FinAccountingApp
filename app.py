@@ -21,8 +21,13 @@ from app.use_cases import (
     DeleteRecord,
     DeleteAllRecords,
     ImportFromCSV,
+    CreateMandatoryExpense,
+    GetMandatoryExpenses,
+    DeleteMandatoryExpense,
+    DeleteAllMandatoryExpenses,
+    AddMandatoryExpenseToReport,
 )
-from domain.records import IncomeRecord
+from domain.records import IncomeRecord, MandatoryExpenseRecord
 from app.services import CurrencyService
 
 # Ensure project package root is on sys.path so imports work regardless of CWD
@@ -35,7 +40,7 @@ class FinancialApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Financial Accounting")
-        self.geometry("300x360")
+        self.geometry("300x400")
 
         self.repository = JsonFileRecordRepository(
             str(Path(__file__).parent / "records.json")
@@ -92,7 +97,15 @@ class FinancialApp(tk.Tk):
             width=button_width,
         )
         self.set_initial_balance_btn.pack(pady=10)
-        
+
+        self.manage_mandatory_btn = tk.Button(
+            self,
+            text="Manage Mandatory",
+            command=self.manage_mandatory_expenses,
+            width=button_width,
+        )
+        self.manage_mandatory_btn.pack(pady=10)
+
         self.import_csv_btn = tk.Button(
             self,
             text="Import from CSV",
@@ -100,7 +113,6 @@ class FinancialApp(tk.Tk):
             width=button_width,
         )
         self.import_csv_btn.pack(pady=10)
-
 
     def add_income(self):
         self._add_record("Income", CreateIncome)
@@ -269,7 +281,12 @@ class FinancialApp(tk.Tk):
 
         listbox = Listbox(delete_window)
         for i, record in enumerate(all_records):
-            record_type = "Income" if isinstance(record, IncomeRecord) else "Expense"
+            if isinstance(record, IncomeRecord):
+                record_type = "Income"
+            elif isinstance(record, MandatoryExpenseRecord):
+                record_type = "Mandatory Expense"
+            else:
+                record_type = "Expense"
             listbox.insert(
                 tk.END,
                 f"[{i}] {record.date} - {record_type} - {record.category} - {record.amount:.2f} KZT",
@@ -355,6 +372,198 @@ class FinancialApp(tk.Tk):
 
         self.repository.save_initial_balance(balance)
         messagebox.showinfo("Success", f"Initial balance set to {balance:.2f} KZT.")
+
+    def manage_mandatory_expenses(self):
+        manage_window = Toplevel(self)
+        manage_window.title("Manage Mandatory Expenses")
+        manage_window.geometry("600x500")
+
+        # Listbox for mandatory expenses
+        listbox = Listbox(manage_window, width=80, height=15)
+        scrollbar = Scrollbar(manage_window, orient=VERTICAL, command=listbox.yview)
+        listbox.config(yscrollcommand=scrollbar.set)
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
+
+        # Buttons frame
+        buttons_frame = tk.Frame(manage_window)
+        buttons_frame.pack(pady=10)
+
+        def refresh_list():
+            listbox.delete(0, tk.END)
+            get_expenses = GetMandatoryExpenses(self.repository)
+            expenses = get_expenses.execute()
+            for i, expense in enumerate(expenses):
+                listbox.insert(
+                    tk.END,
+                    f"[{i}] {expense.amount:.2f} KZT - {expense.category} - {expense.description} ({expense.period})",
+                )
+
+        def add_expense():
+            # Create add expense window
+            add_window = Toplevel(manage_window)
+            add_window.title("Add Mandatory Expense")
+            add_window.geometry("400x300")
+
+            tk.Label(add_window, text="Amount:").grid(
+                row=0, column=0, sticky="w", padx=10, pady=5
+            )
+            amount_entry = tk.Entry(add_window)
+            amount_entry.grid(row=0, column=1, padx=10, pady=5)
+
+            tk.Label(add_window, text="Currency (default KZT):").grid(
+                row=1, column=0, sticky="w", padx=10, pady=5
+            )
+            currency_entry = tk.Entry(add_window)
+            currency_entry.insert(0, "KZT")
+            currency_entry.grid(row=1, column=1, padx=10, pady=5)
+
+            tk.Label(add_window, text="Category (default Mandatory):").grid(
+                row=2, column=0, sticky="w", padx=10, pady=5
+            )
+            category_entry = tk.Entry(add_window)
+            category_entry.insert(0, "Mandatory")
+            category_entry.grid(row=2, column=1, padx=10, pady=5)
+
+            tk.Label(add_window, text="Description:").grid(
+                row=3, column=0, sticky="w", padx=10, pady=5
+            )
+            description_entry = tk.Entry(add_window)
+            description_entry.grid(row=3, column=1, padx=10, pady=5)
+
+            tk.Label(add_window, text="Period:").grid(
+                row=4, column=0, sticky="w", padx=10, pady=5
+            )
+            period_var = tk.StringVar(value="monthly")
+            period_menu = tk.OptionMenu(
+                add_window, period_var, "daily", "weekly", "monthly", "yearly"
+            )
+            period_menu.grid(row=4, column=1, padx=10, pady=5)
+
+            def save_expense():
+                try:
+                    amount = float(amount_entry.get())
+                    currency = currency_entry.get() or "KZT"
+                    category = category_entry.get() or "Mandatory"
+                    description = description_entry.get()
+                    period = period_var.get()
+
+                    if not description:
+                        messagebox.showerror("Error", "Description is required.")
+                        return
+
+                    create_expense = CreateMandatoryExpense(
+                        self.repository, self.currency
+                    )
+                    create_expense.execute(
+                        amount=amount,
+                        currency=currency,
+                        category=category,
+                        description=description,
+                        period=period,
+                    )
+                    messagebox.showinfo("Success", "Mandatory expense added.")
+                    add_window.destroy()
+                    refresh_list()
+                except ValueError as e:
+                    messagebox.showerror("Error", str(e))
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to add expense: {str(e)}")
+
+            save_btn = tk.Button(add_window, text="Save", command=save_expense)
+            save_btn.grid(row=5, column=0, columnspan=2, pady=20)
+
+        def delete_expense():
+            selection = listbox.curselection()
+            if not selection:
+                messagebox.showerror("Error", "Please select an expense to delete.")
+                return
+
+            index = selection[0]
+            confirm = messagebox.askyesno(
+                "Confirm Delete", "Delete this mandatory expense?"
+            )
+            if confirm:
+                delete_use_case = DeleteMandatoryExpense(self.repository)
+                if delete_use_case.execute(index):
+                    messagebox.showinfo("Success", "Mandatory expense deleted.")
+                    refresh_list()
+                else:
+                    messagebox.showerror("Error", "Failed to delete expense.")
+
+        def delete_all_expenses():
+            confirm = messagebox.askyesno(
+                "Confirm Delete All", "Delete ALL mandatory expenses?"
+            )
+            if confirm:
+                delete_all_use_case = DeleteAllMandatoryExpenses(self.repository)
+                delete_all_use_case.execute()
+                messagebox.showinfo("Success", "All mandatory expenses deleted.")
+                refresh_list()
+
+        def add_to_report():
+            selection = listbox.curselection()
+            if not selection:
+                messagebox.showerror(
+                    "Error", "Please select an expense to add to report."
+                )
+                return
+
+            index = selection[0]
+            date = simpledialog.askstring(
+                "Date", "Enter date (YYYY-MM-DD):", parent=manage_window
+            )
+            if not date:
+                return
+
+            try:
+                # Basic date validation
+                year, month, day = map(int, date.split("-"))
+                if not (
+                    1 <= month <= 12 and 1 <= day <= calendar.monthrange(year, month)[1]
+                ):
+                    raise ValueError("Invalid date")
+
+                add_to_report_use_case = AddMandatoryExpenseToReport(
+                    self.repository, self.currency
+                )
+                if add_to_report_use_case.execute(index, date):
+                    messagebox.showinfo(
+                        "Success", f"Mandatory expense added to report for {date}."
+                    )
+                else:
+                    messagebox.showerror("Error", "Failed to add expense to report.")
+            except ValueError as e:
+                messagebox.showerror(
+                    "Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD."
+                )
+
+        # Buttons
+        add_btn = tk.Button(buttons_frame, text="Add", command=add_expense, width=12)
+        add_btn.pack(pady=10)
+
+        delete_btn = tk.Button(
+            buttons_frame, text="Delete", command=delete_expense, width=12
+        )
+        delete_btn.pack(pady=10)
+
+        delete_all_btn = tk.Button(
+            buttons_frame, text="Delete All", command=delete_all_expenses, width=12
+        )
+        delete_all_btn.pack(pady=10)
+
+        add_to_report_btn = tk.Button(
+            buttons_frame, text="Add to Report", command=add_to_report, width=12
+        )
+        add_to_report_btn.pack(pady=10)
+
+        close_btn = tk.Button(
+            buttons_frame, text="Close", command=manage_window.destroy, width=12
+        )
+        close_btn.pack(pady=10)
+
+        # Initial refresh
+        refresh_list()
 
 
 def main() -> None:

@@ -1,5 +1,5 @@
 import pytest
-from domain.records import Record, IncomeRecord, ExpenseRecord
+from domain.records import Record, IncomeRecord, ExpenseRecord, MandatoryExpenseRecord
 
 
 class TestIncomeRecord:
@@ -46,6 +46,65 @@ class TestExpenseRecord:
         record = ExpenseRecord(date="2025-01-01", amount=50.0, category="Food")
         with pytest.raises(AttributeError):
             record.amount = 30.0  # type: ignore
+
+
+class TestMandatoryExpenseRecord:
+    def test_creation(self):
+        record = MandatoryExpenseRecord(
+            date="2025-01-01",
+            amount=100.0,
+            category="Mandatory",
+            description="Rent payment",
+            period="monthly",
+        )
+        assert record.date == "2025-01-01"
+        assert record.amount == 100.0
+        assert record.category == "Mandatory"
+        assert record.description == "Rent payment"
+        assert record.period == "monthly"
+
+    def test_signed_amount_negative(self):
+        record = MandatoryExpenseRecord(
+            date="2025-01-01",
+            amount=100.0,
+            category="Mandatory",
+            description="Rent payment",
+            period="monthly",
+        )
+        assert record.signed_amount() == -100.0
+
+    def test_signed_amount_absolute_value(self):
+        record = MandatoryExpenseRecord(
+            date="2025-01-01",
+            amount=-50.0,
+            category="Mandatory",
+            description="Test",
+            period="weekly",
+        )
+        assert record.signed_amount() == -50.0
+
+    def test_immutable(self):
+        record = MandatoryExpenseRecord(
+            date="2025-01-01",
+            amount=100.0,
+            category="Mandatory",
+            description="Rent payment",
+            period="monthly",
+        )
+        with pytest.raises(AttributeError):
+            record.amount = 200.0  # type: ignore
+
+    def test_period_validation(self):
+        # Test that period accepts valid values
+        for period in ["daily", "weekly", "monthly", "yearly"]:
+            record = MandatoryExpenseRecord(
+                date="2025-01-01",
+                amount=100.0,
+                category="Mandatory",
+                description="Test",
+                period=period,  # type: ignore
+            )
+            assert record.period == period
 
 
 class TestRecord:

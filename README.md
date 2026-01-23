@@ -57,7 +57,7 @@ python app.py
 
 ### Главное окно
 
-После запуска `python app.py` откроется окно с шестью кнопками:
+После запуска `python app.py` откроется окно с восемью кнопками:
 
 - **Add Income** — Добавление дохода
 - **Add Expense** — Добавление расхода
@@ -65,6 +65,7 @@ python app.py
 - **Delete Record** — Удаление записи
 - **Delete All Records** — Удаление всех записей
 - **Set Initial Balance** — Установка начального остатка
+- **Manage Mandatory** — Управление обязательными расходами
 - **Import from CSV** — Импорт данных из CSV файла
 
 ### Добавление дохода/расхода
@@ -106,6 +107,37 @@ python app.py
 4. Начальный остаток сохранится и будет учитываться в расчётах баланса.
 
 Начальный остаток представляет собой баланс на начало периода учёта. Он добавляется к итоговому балансу всех записей.
+
+### Управление обязательными расходами
+
+1. Нажмите "Manage Mandatory".
+2. В новом окне отобразится список существующих обязательных расходов.
+3. Используйте кнопки:
+   - **Add** — Добавить новый обязательный расход
+   - **Delete** — Удалить выбранный обязательный расход
+   - **Delete All** — Удалить все обязательные расходы
+   - **Add to Report** — Добавить выбранный расход в отчёт с указанием даты
+   - **Close** — Закрыть окно
+
+**Добавление обязательного расхода:**
+
+1. Нажмите "Add" в окне управления.
+2. Заполните поля:
+   - **Amount** — Сумма (число с плавающей точкой)
+   - **Currency** — Валюта (по умолчанию KZT)
+   - **Category** — Категория (по умолчанию "Mandatory")
+   - **Description** — Описание расхода (обязательно)
+   - **Period** — Периодичность (daily/weekly/monthly/yearly)
+3. Нажмите "Save".
+
+**Добавление в отчёт:**
+
+1. Выберите обязательный расход в списке.
+2. Нажмите "Add to Report".
+3. Введите дату в формате YYYY-MM-DD.
+4. Нажмите OK.
+
+Обязательные расходы — это повторяющиеся расходы (аренда, коммунальные услуги и т.д.). Они хранятся отдельно и могут быть добавлены в отчёт в любой момент времени.
 
 ### Удаление всех записей
 
@@ -308,13 +340,14 @@ web/
 
 ### Доменные модели
 
-#### Record, IncomeRecord, ExpenseRecord
+#### Record, IncomeRecord, ExpenseRecord, MandatoryExpenseRecord
 
 Файл: [`domain/records.py`](domain/records.py)
 
 ```python
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -340,12 +373,21 @@ class ExpenseRecord(Record):
     """Запись о расходе."""
     def signed_amount(self) -> float:
         return -abs(self.amount)
+
+
+@dataclass(frozen=True)
+class MandatoryExpenseRecord(Record):
+    description: str
+    period: Literal["daily", "weekly", "monthly", "yearly"]
+
+    def signed_amount(self) -> float:
+        return -abs(self.amount)
 ```
 
 **Использование:**
 
 ```python
-from domain.records import IncomeRecord, ExpenseRecord
+from domain.records import IncomeRecord, ExpenseRecord, MandatoryExpenseRecord
 
 # Создание записей
 salary = IncomeRecord(
@@ -360,9 +402,18 @@ groceries = ExpenseRecord(
     category="Продукты"
 )
 
+rent = MandatoryExpenseRecord(
+    date="2025-01-01",
+    amount=150000.0,
+    category="Mandatory",
+    description="Monthly rent payment",
+    period="monthly"
+)
+
 # Получение суммы со знаком
 print(salary.signed_amount())     # 350000.0
 print(groceries.signed_amount())  # -25000.0
+print(rent.signed_amount())       # -150000.0
 
 # Записи неизменяемы (frozen=True)
 # salary.amount = 400000  # Ошибка: FrozenInstanceError
@@ -748,7 +799,7 @@ project/
 │
 ├── domain/                     # DOMAIN LAYER
 │   ├── __init__.py
-│   ├── records.py              # Record, IncomeRecord, ExpenseRecord
+│   ├── records.py              # Record, IncomeRecord, ExpenseRecord, MandatoryExpenseRecord
 │   ├── reports.py              # Report
 │   └── currency.py             # CurrencyService (базовый)
 │

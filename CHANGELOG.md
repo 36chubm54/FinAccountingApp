@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Add initial balance feature to financial tracker
+- Add mandatory expenses management feature
 - Add CSV import and delete all records features
 - Add web directory with frontend files (HTML, CSS, JS) for financial accounting interface
 - Add delete all records functionality and improve currency service
