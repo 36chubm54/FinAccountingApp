@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add delete all records functionality and improve currency service
 - Add CSV export functionality for reports
 - Add financial accounting project structure
+- Add CSV import/export functionality for mandatory expenses with dedicated UI buttons and error handling
+- Add utils module for mandatory expense CSV operations with validation and data integrity checks
 
 ### Changed
 

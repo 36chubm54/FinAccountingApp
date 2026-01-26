@@ -17,4 +17,5 @@ Date,Type,Category,Amount (KZT)
 2026-01-10,Mandatory Expense,Парикмахер,3500.00
 2026-01-10,Income,Зарплата,50000.00
 2026-01-12,Mandatory Expense,Подписка,2700.00
-TOTAL,,,246349.38
+SUBTOTAL,,,37736.00
+FINAL BALANCE,,,246349.38

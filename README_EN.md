@@ -117,6 +117,8 @@ The opening balance is the balance at the beginning of the accounting period. It
    - **Delete** — Delete the selected mandatory expense
    - **Delete All** - Delete all mandatory expenses
    - **Add to Report** — Add the selected expense to the report indicating the date
+   - **Import from CSV** — Import mandatory expenses from a CSV file
+   - **Export to CSV** — Export mandatory expenses to a CSV file
    - **Close** — Close the window
 
 **Adding mandatory expense:**
@@ -173,6 +175,54 @@ TOTAL,,,-2000.00
 - Amounts can be either positive or negative (in brackets for expenses)
 - The line with `TOTAL` in the date field is ignored
 - All existing data will be replaced with new data from the CSV file
+
+### Import/Export of mandatory expenses
+
+#### Export mandatory expenses
+
+1. Click "Manage Mandatory" to open the window for managing mandatory expenses.
+2. Click "Export to CSV".
+3. Select a save location and file name in the dialog box.
+4. The application exports all mandatory expenses in CSV format.
+5. The folder with the saved file will open automatically.
+
+**CSV file format for mandatory expenses:**
+
+```csv
+Amount (KZT),Category,Description,Period
+150000.00,Rent,Monthly rent payment,monthly
+50000.00,Utilities,Electricity and water,monthly
+20000.00,Internet,Home internet connection,monthly
+```
+
+#### Import mandatory expenses
+
+1. Click "Manage Mandatory" to open the window for managing mandatory expenses.
+2. Click "Import from CSV".
+3. Select the mandatory expense CSV file in the dialog box.
+4. Confirm import (all existing mandatory charges will be replaced).
+5. The application will import the data and update the list of required expenses.
+
+**Rules for importing mandatory expenses:**
+
+- The first line should contain the headings: `Amount (KZT),Category,Description,Period`
+- Supported periods: `daily`, `weekly`, `monthly`, `yearly`
+- Amounts must be numeric values
+- Description is a required field
+- Incorrectly formatted lines will be skipped
+- All existing mandatory expenses will be replaced with imported data
+
+**Usage example:**
+
+```csv
+Amount (KZT),Category,Description,Period
+100000.00,Mandatory,Apartment rent,monthly
+30000.00,Mandatory,Electricity bill,monthly
+15000.00,Mandatory,Internet subscription,monthly
+5000.00,Mandatory,Mobile phone plan,monthly
+```
+
+> **Note:** Import/export of statutory expenses works independently of the main import/export of financial records. This allows you to manage mandatory expenses separately from your main financial transactions.
 
 ### Data storage
 
@@ -327,6 +377,9 @@ The project follows the principles of **Clean Architecture**:
 │                    INFRASTRUCTURE LAYER                        │
 │              infrastructure/repositories.py                    │
 │   RecordRepository (abstraction), JsonFileRecordRepository     │
+├────────────────────────────────────────────────────────────────┤
+│                         UTILITIES                              │
+│           utils/csv_utils.py (import/export CSV)               │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -786,39 +839,46 @@ print(f"Deleted: {success}")
 ```
 project/
 │
-├── app.py # GUI entry point
-├── records.json # Record storage (created automatically)
-├── currency_rates.json # Currency rate cache (if use_online=True)
-├── requirements.txt # Python dependencies
-├── README.md # This documentation
+├── app.py                      # GUI entry point
+├── records.json                # Record storage (created automatically)
+├── currency_rates.json         # Currency rate cache (if use_online=True)
+├── requirements.txt            # Python dependencies
+├── README.md                   # This documentation
+├── README_EN.md                # English documentation
+├── CHANGELOG.md                # Project changelog
+├── LICENSE.md                  # License information
 │
-├── app/ # APPLICATION LAYER
+├── app/                        # APPLICATION LAYER
 │ ├── __init__.py
-│ ├── services.py # CurrencyService (adapter with online courses)
-│ └── use_cases.py # CreateIncome, CreateExpense, GenerateReport, DeleteRecord
+│ ├── services.py               # CurrencyService (adapter with online courses)
+│ └── use_cases.py              # CreateIncome, CreateExpense, GenerateReport, DeleteRecord
 │
-├── domain/ # DOMAIN LAYER
+├── domain/                     # DOMAIN LAYER
 │ ├── __init__.py
-│ ├── records.py # Record, IncomeRecord, ExpenseRecord, MandatoryExpenseRecord
-│ ├── reports.py # Report
-│ └── currency.py # CurrencyService (base)
+│ ├── records.py                # Record, IncomeRecord, ExpenseRecord, MandatoryExpenseRecord
+│ ├── reports.py                # Report
+│ └── currency.py               # CurrencyService (base)
 │
-├── infrastructure/ # INFRASTRUCTURE LAYER
-│ └── repositories.py # RecordRepository, JsonFileRecordRepository
+├── infrastructure/             # INFRASTRUCTURE LAYER
+│ └── repositories.py           # RecordRepository, JsonFileRecordRepository
 │
-├── web/ # Web application
-│ ├── index.html # HTML structure of the web application
-│ ├── styles.css # Styles and themes
-│ └── app.js # Web application logic
+├── web/                        # Web application
+│ ├── index.html                # HTML structure of the web application
+│ ├── styles.css                # Styles and themes
+│ └── app.js                    # Web application logic
 │
-└── tests/ # Unit tests
+├── tests/                      # Unit tests
+│   ├── __init__.py
+│   ├── test_currency.py        # Conversion tests
+│   ├── test_records.py         # Record tests
+│   ├── test_reports.py         # Report tests
+│   ├── test_repositories.py    # Repository tests
+│   ├── test_services.py        # Service tests
+│   └── test_use_cases.py       # Tests use cases
+│
+└── utils/                      # UTILITIES
     ├── __init__.py
-    ├── test_currency.py # Conversion tests
-    ├── test_records.py # Record tests
-    ├── test_reports.py # Report tests
-    ├── test_repositories.py # Repository tests
-    ├── test_services.py # Service tests
-    └── test_use_cases.py # Tests use cases
+    └── csv_utils.py            # Import/export CSV
 ```
 
 ---

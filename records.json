@@ -8,6 +8,12 @@
       "category": "Питание"
     },
     {
+      "type": "income",
+      "date": "2026-01-01",
+      "amount": 10000.0,
+      "category": "Подарок"
+    },
+    {
       "type": "expense",
       "date": "2026-01-02",
       "amount": 210.0,
@@ -50,6 +56,14 @@
       "category": "Питание"
     },
     {
+      "type": "mandatory_expense",
+      "date": "2026-01-08",
+      "amount": 3000.0,
+      "category": "Интернет",
+      "description": "",
+      "period": "monthly"
+    },
+    {
       "type": "expense",
       "date": "2026-01-09",
       "amount": 744.0,
@@ -75,14 +89,6 @@
     },
     {
       "type": "mandatory_expense",
-      "date": "2026-01-12",
-      "amount": 2700.0,
-      "category": "Подписка",
-      "description": "",
-      "period": "monthly"
-    },
-    {
-      "type": "mandatory_expense",
       "date": "2026-01-10",
       "amount": 3500.0,
       "category": "Парикмахер",
@@ -90,24 +96,18 @@
       "period": "monthly"
     },
     {
-      "type": "mandatory_expense",
-      "date": "2026-01-08",
-      "amount": 3000.0,
-      "category": "Интернет",
-      "description": "telecom",
-      "period": "monthly"
-    },
-    {
-      "type": "income",
-      "date": "2026-01-01",
-      "amount": 10000.0,
-      "category": "Подарок"
-    },
-    {
       "type": "income",
       "date": "2026-01-10",
       "amount": 50000.0,
       "category": "Зарплата"
+    },
+    {
+      "type": "mandatory_expense",
+      "date": "2026-01-12",
+      "amount": 2700.0,
+      "category": "Подписка",
+      "description": "",
+      "period": "monthly"
     }
   ],
   "mandatory_expenses": [

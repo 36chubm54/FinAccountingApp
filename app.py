@@ -27,6 +27,10 @@ from app.use_cases import (
     DeleteAllMandatoryExpenses,
     AddMandatoryExpenseToReport,
 )
+from utils.csv_utils import (
+    export_mandatory_expenses_to_csv,
+    import_mandatory_expenses_from_csv,
+)
 from domain.records import IncomeRecord, MandatoryExpenseRecord
 from app.services import CurrencyService
 
@@ -376,7 +380,7 @@ class FinancialApp(tk.Tk):
     def manage_mandatory_expenses(self):
         manage_window = Toplevel(self)
         manage_window.title("Manage Mandatory Expenses")
-        manage_window.geometry("600x500")
+        manage_window.geometry("650x400")
 
         # Listbox for mandatory expenses
         listbox = Listbox(manage_window, width=80, height=15)
@@ -538,27 +542,129 @@ class FinancialApp(tk.Tk):
                     "Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD."
                 )
 
+        def export_expenses():
+            get_expenses = GetMandatoryExpenses(self.repository)
+            expenses = get_expenses.execute()
+            if not expenses:
+                messagebox.showinfo("No Expenses", "No mandatory expenses to export.")
+                return
+
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=".csv",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+                title="Export Mandatory Expenses to CSV",
+            )
+            if filepath:
+                try:
+                    export_mandatory_expenses_to_csv(expenses, filepath)
+                    messagebox.showinfo(
+                        "Success", f"Mandatory expenses exported to {filepath}"
+                    )
+                    # Open the folder containing the file
+                    os.startfile(os.path.dirname(filepath))
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to export: {str(e)}")
+
+        def import_expenses():
+            # File selection dialog
+            filepath = filedialog.askopenfilename(
+                defaultextension=".csv",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+                title="Select CSV file to import mandatory expenses",
+            )
+            if not filepath:
+                return
+
+            try:
+                # Confirmation dialog
+                confirm = messagebox.askyesno(
+                    "Confirm Import",
+                    f"This will replace all existing mandatory expenses with data from:\n{filepath}\n\nContinue?",
+                )
+                if not confirm:
+                    return
+
+                # Import mandatory expenses
+                expenses = import_mandatory_expenses_from_csv(filepath)
+
+                # Delete all existing mandatory expenses first
+                delete_all_use_case = DeleteAllMandatoryExpenses(self.repository)
+                delete_all_use_case.execute()
+
+                # Save imported expenses
+                for expense in expenses:
+                    create_expense = CreateMandatoryExpense(
+                        self.repository, self.currency
+                    )
+                    create_expense.execute(
+                        amount=expense.amount,
+                        currency="KZT",  # Assume KZT for imported expenses
+                        category=expense.category,
+                        description=expense.description,
+                        period=expense.period,
+                    )
+
+                messagebox.showinfo(
+                    "Success",
+                    f"Successfully imported {len(expenses)} mandatory expenses from CSV file.\nAll existing mandatory expenses have been replaced.",
+                )
+                refresh_list()
+
+            except FileNotFoundError:
+                messagebox.showerror("Error", f"File not found: {filepath}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to import CSV: {str(e)}")
+
         # Buttons
-        add_btn = tk.Button(buttons_frame, text="Add", command=add_expense, width=12)
+        button_width = 14  # Set uniform width for all buttons
+
+        add_btn = tk.Button(
+            buttons_frame, text="Add", command=add_expense, width=button_width
+        )
         add_btn.pack(pady=10)
 
         delete_btn = tk.Button(
-            buttons_frame, text="Delete", command=delete_expense, width=12
+            buttons_frame, text="Delete", command=delete_expense, width=button_width
         )
         delete_btn.pack(pady=10)
 
         delete_all_btn = tk.Button(
-            buttons_frame, text="Delete All", command=delete_all_expenses, width=12
+            buttons_frame,
+            text="Delete All",
+            command=delete_all_expenses,
+            width=button_width,
         )
         delete_all_btn.pack(pady=10)
 
         add_to_report_btn = tk.Button(
-            buttons_frame, text="Add to Report", command=add_to_report, width=12
+            buttons_frame,
+            text="Add to Report",
+            command=add_to_report,
+            width=button_width,
         )
         add_to_report_btn.pack(pady=10)
 
+        import_btn = tk.Button(
+            buttons_frame,
+            text="Import from CSV",
+            command=import_expenses,
+            width=button_width,
+        )
+        import_btn.pack(pady=10)
+
+        export_btn = tk.Button(
+            buttons_frame,
+            text="Export to CSV",
+            command=export_expenses,
+            width=button_width,
+        )
+        export_btn.pack(pady=10)
+
         close_btn = tk.Button(
-            buttons_frame, text="Close", command=manage_window.destroy, width=12
+            buttons_frame,
+            text="Close",
+            command=manage_window.destroy,
+            width=button_width,
         )
         close_btn.pack(pady=10)
 

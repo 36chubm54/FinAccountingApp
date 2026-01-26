@@ -143,7 +143,7 @@ class TestReport:
             assert rows[0] == ["Date", "Type", "Category", "Amount (KZT)"]
             assert rows[1] == ["2025-01-01", "Income", "Salary", "100.00"]
             assert rows[2] == ["2025-01-02", "Expense", "Food", "30.00"]
-            assert rows[3] == ["TOTAL", "", "", "70.00"]
+            assert rows[3] == ["SUBTOTAL", "", "", "70.00"]
         finally:
             os.unlink(tmp_path)
 
@@ -164,7 +164,8 @@ class TestReport:
             assert rows[1] == ["", "Initial Balance", "", "50.00"]
             assert rows[2] == ["2025-01-01", "Income", "Salary", "100.00"]
             assert rows[3] == ["2025-01-02", "Expense", "Food", "30.00"]
-            assert rows[4] == ["TOTAL", "", "", "120.00"]
+            assert rows[4] == ["SUBTOTAL", "", "", "70.00"]
+            assert rows[5] == ["FINAL BALANCE", "", "", "120.00"]
         finally:
             os.unlink(tmp_path)
 
