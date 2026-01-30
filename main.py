@@ -52,6 +52,11 @@ class FinancialApp(tk.Tk):
         self.title("Financial Accounting")
         self.geometry("300x450")
 
+        # Track open windows so repeated button presses focus them instead of creating new ones
+        self.report_window = None
+        self.delete_window = None
+        self.manage_window = None
+
         self.repository = JsonFileRecordRepository(
             str(Path(__file__).parent / "records.json")
         )
@@ -190,9 +195,29 @@ class FinancialApp(tk.Tk):
         )
 
     def generate_report(self):
+        # If report window already exists, bring it to front and focus it
+        if self.report_window and self.report_window.winfo_exists():
+            try:
+                self.report_window.deiconify()
+                self.report_window.lift()
+                self.report_window.focus_force()
+            except Exception:
+                pass
+            return
+
         report_window = Toplevel(self)
+        self.report_window = report_window
         report_window.title("Generate Report")
         report_window.geometry("800x400")
+
+        def _on_report_close():
+            try:
+                report_window.destroy()
+            except Exception:
+                pass
+            self.report_window = None
+
+        report_window.protocol("WM_DELETE_WINDOW", _on_report_close)
 
         current_report = None
 
@@ -316,9 +341,29 @@ class FinancialApp(tk.Tk):
             messagebox.showinfo("No Records", "No records to delete.")
             return
 
+        # If delete window already exists, bring it to front and focus it
+        if self.delete_window and self.delete_window.winfo_exists():
+            try:
+                self.delete_window.deiconify()
+                self.delete_window.lift()
+                self.delete_window.focus_force()
+            except Exception:
+                pass
+            return
+
         delete_window = Toplevel(self)
+        self.delete_window = delete_window
         delete_window.title("Delete Record")
         delete_window.geometry("500x400")
+
+        def _on_delete_close():
+            try:
+                delete_window.destroy()
+            except Exception:
+                pass
+            self.delete_window = None
+
+        delete_window.protocol("WM_DELETE_WINDOW", _on_delete_close)
 
         listbox = Listbox(delete_window)
         for i, record in enumerate(all_records):
@@ -343,8 +388,13 @@ class FinancialApp(tk.Tk):
             delete_use_case = DeleteRecord(self.repository)
             if delete_use_case.execute(index):
                 messagebox.showinfo("Success", f"Deleted record at index {index}.")
-                delete_window.destroy()
-                self.delete_record()  # Refresh list? But since window closes, maybe not necessary
+                # Close and clear tracked window reference, then reopen to refresh list
+                try:
+                    delete_window.destroy()
+                except Exception:
+                    pass
+                self.delete_window = None
+                self.delete_record()
             else:
                 messagebox.showerror("Error", "Failed to delete record.")
 
@@ -451,9 +501,29 @@ class FinancialApp(tk.Tk):
         messagebox.showinfo("Success", f"Initial balance set to {balance:.2f} KZT.")
 
     def manage_mandatory_expenses(self):
+        # If manage window already exists, bring it to front and focus it
+        if self.manage_window and self.manage_window.winfo_exists():
+            try:
+                self.manage_window.deiconify()
+                self.manage_window.lift()
+                self.manage_window.focus_force()
+            except Exception:
+                pass
+            return
+
         manage_window = Toplevel(self)
+        self.manage_window = manage_window
         manage_window.title("Manage Mandatory Expenses")
         manage_window.geometry("650x400")
+
+        def _on_manage_close():
+            try:
+                manage_window.destroy()
+            except Exception:
+                pass
+            self.manage_window = None
+
+        manage_window.protocol("WM_DELETE_WINDOW", _on_manage_close)
 
         # Listbox for mandatory expenses
         listbox = Listbox(manage_window, width=80, height=15)
