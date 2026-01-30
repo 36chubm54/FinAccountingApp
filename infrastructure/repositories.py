@@ -112,7 +112,7 @@ class JsonFileRecordRepository(RecordRepository):
                     amount=item["amount"],
                     category=category,
                     description=item["description"],
-                    period=item["period"]
+                    period=item["period"],
                 )
             else:
                 continue
@@ -178,7 +178,9 @@ class JsonFileRecordRepository(RecordRepository):
     def delete_mandatory_expense_by_index(self, index: int) -> bool:
         """Delete mandatory expense by index. Returns True if deleted."""
         data = self._load_data()
-        if "mandatory_expenses" in data and 0 <= index < len(data["mandatory_expenses"]):
+        if "mandatory_expenses" in data and 0 <= index < len(
+            data["mandatory_expenses"]
+        ):
             data["mandatory_expenses"].pop(index)
             self._save_data(data)
             return True

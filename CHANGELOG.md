@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add financial accounting project structure
 - Add CSV import/export functionality for mandatory expenses with dedicated UI buttons and error handling
 - Add utils module for mandatory expense CSV operations with validation and data integrity checks
+- Add Excel import/export support: import records from `.xlsx` and export reports to `.xlsx`
+- Add Excel import/export for mandatory expenses (sheet `Mandatory` with columns `Amount (KZT),Category,Description,Period`)
 
 ### Changed
 

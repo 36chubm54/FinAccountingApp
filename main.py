@@ -31,6 +31,12 @@ from utils.csv_utils import (
     export_mandatory_expenses_to_csv,
     import_mandatory_expenses_from_csv,
 )
+from utils.excel_utils import (
+    report_from_xlsx,
+    report_to_xlsx,
+    export_mandatory_expenses_to_xlsx,
+    import_mandatory_expenses_from_xlsx,
+)
 from domain.records import IncomeRecord, MandatoryExpenseRecord
 from app.services import CurrencyService
 
@@ -44,7 +50,7 @@ class FinancialApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Financial Accounting")
-        self.geometry("300x400")
+        self.geometry("300x450")
 
         self.repository = JsonFileRecordRepository(
             str(Path(__file__).parent / "records.json")
@@ -118,6 +124,14 @@ class FinancialApp(tk.Tk):
         )
         self.import_csv_btn.pack(pady=10)
 
+        self.import_excel_btn = tk.Button(
+            self,
+            text="Import from Excel",
+            command=self.import_from_excel,
+            width=button_width,
+        )
+        self.import_excel_btn.pack(pady=10)
+
     def add_income(self):
         self._add_record("Income", CreateIncome)
 
@@ -178,7 +192,7 @@ class FinancialApp(tk.Tk):
     def generate_report(self):
         report_window = Toplevel(self)
         report_window.title("Generate Report")
-        report_window.geometry("700x400")
+        report_window.geometry("800x400")
 
         current_report = None
 
@@ -263,6 +277,29 @@ class FinancialApp(tk.Tk):
 
         export_btn = tk.Button(report_window, text="Export to CSV", command=export_csv)
         export_btn.grid(row=4, column=1, pady=10)
+
+        def export_xlsx():
+            nonlocal current_report
+            if current_report is None:
+                messagebox.showerror("Error", "Please generate a report first.")
+                return
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+                title="Save Report as Excel",
+            )
+            if filepath:
+                try:
+                    report_to_xlsx(current_report, filepath)
+                    messagebox.showinfo("Success", f"Report exported to {filepath}")
+                    os.startfile(os.path.dirname(filepath))
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to export Excel: {str(e)}")
+
+        export_xlsx_btn = tk.Button(
+            report_window, text="Export to Excel", command=export_xlsx
+        )
+        export_xlsx_btn.grid(row=4, column=2, pady=10)
 
         result_text = tk.Text(report_window, wrap="word")
         scrollbar = Scrollbar(report_window, orient=VERTICAL, command=result_text.yview)
@@ -357,6 +394,42 @@ class FinancialApp(tk.Tk):
             messagebox.showerror("Error", f"File not found: {filepath}")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to import CSV: {str(e)}")
+
+    def import_from_excel(self):
+        filepath = filedialog.askopenfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            title="Select XLSX file to import",
+        )
+        if not filepath:
+            return
+
+        try:
+            confirm = messagebox.askyesno(
+                "Confirm Import",
+                f"This will replace all existing records with data from:\n{filepath}\n\nContinue?",
+            )
+            if not confirm:
+                return
+
+            report = report_from_xlsx(filepath)
+
+            # Replace repository data
+            self.repository.delete_all()
+            imported_count = 0
+            for record in report.records():
+                self.repository.save(record)
+                imported_count += 1
+
+            messagebox.showinfo(
+                "Success",
+                f"Successfully imported {imported_count} records from Excel file.\nAll existing records have been replaced.",
+            )
+
+        except FileNotFoundError:
+            messagebox.showerror("Error", f"File not found: {filepath}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to import Excel: {str(e)}")
 
     def set_initial_balance(self):
         current_balance = self.repository.load_initial_balance()
@@ -542,7 +615,7 @@ class FinancialApp(tk.Tk):
                     "Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD."
                 )
 
-        def export_expenses():
+        def export_expenses_csv():
             get_expenses = GetMandatoryExpenses(self.repository)
             expenses = get_expenses.execute()
             if not expenses:
@@ -565,7 +638,29 @@ class FinancialApp(tk.Tk):
                 except Exception as e:
                     messagebox.showerror("Error", f"Failed to export: {str(e)}")
 
-        def import_expenses():
+        def export_expenses_excel():
+            get_expenses = GetMandatoryExpenses(self.repository)
+            expenses = get_expenses.execute()
+            if not expenses:
+                messagebox.showinfo("No Expenses", "No mandatory expenses to export.")
+                return
+
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+                title="Export Mandatory Expenses to XLSX",
+            )
+            if filepath:
+                try:
+                    export_mandatory_expenses_to_xlsx(expenses, filepath)
+                    messagebox.showinfo(
+                        "Success", f"Mandatory expenses exported to {filepath}"
+                    )
+                    os.startfile(os.path.dirname(filepath))
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to export XLSX: {str(e)}")
+
+        def import_expenses_csv():
             # File selection dialog
             filepath = filedialog.askopenfilename(
                 defaultextension=".csv",
@@ -615,6 +710,53 @@ class FinancialApp(tk.Tk):
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to import CSV: {str(e)}")
 
+        def import_expenses_xlsx():
+            filepath = filedialog.askopenfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+                title="Select XLSX file to import mandatory expenses",
+            )
+            if not filepath:
+                return
+
+            try:
+                confirm = messagebox.askyesno(
+                    "Confirm Import",
+                    f"This will replace all existing mandatory expenses with data from:\n{filepath}\n\nContinue?",
+                )
+                if not confirm:
+                    return
+
+                expenses = import_mandatory_expenses_from_xlsx(filepath)
+
+                # Delete all existing mandatory expenses first
+                delete_all_use_case = DeleteAllMandatoryExpenses(self.repository)
+                delete_all_use_case.execute()
+
+                # Save imported expenses
+                for expense in expenses:
+                    create_expense = CreateMandatoryExpense(
+                        self.repository, self.currency
+                    )
+                    create_expense.execute(
+                        amount=expense.amount,
+                        currency="KZT",
+                        category=expense.category,
+                        description=expense.description,
+                        period=expense.period,
+                    )
+
+                messagebox.showinfo(
+                    "Success",
+                    f"Successfully imported {len(expenses)} mandatory expenses from XLSX file.\nAll existing mandatory expenses have been replaced.",
+                )
+                refresh_list()
+
+            except FileNotFoundError:
+                messagebox.showerror("Error", f"File not found: {filepath}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to import XLSX: {str(e)}")
+
         # Buttons
         button_width = 14  # Set uniform width for all buttons
 
@@ -647,18 +789,34 @@ class FinancialApp(tk.Tk):
         import_btn = tk.Button(
             buttons_frame,
             text="Import from CSV",
-            command=import_expenses,
+            command=import_expenses_csv,
             width=button_width,
         )
         import_btn.pack(pady=10)
 
+        import_xlsx_btn = tk.Button(
+            buttons_frame,
+            text="Import from Excel",
+            command=import_expenses_xlsx,
+            width=button_width,
+        )
+        import_xlsx_btn.pack(pady=10)
+
         export_btn = tk.Button(
             buttons_frame,
             text="Export to CSV",
-            command=export_expenses,
+            command=export_expenses_csv,
             width=button_width,
         )
         export_btn.pack(pady=10)
+
+        export_xlsx_btn = tk.Button(
+            buttons_frame,
+            text="Export to Excel",
+            command=export_expenses_excel,
+            width=button_width,
+        )
+        export_xlsx_btn.pack(pady=10)
 
         close_btn = tk.Button(
             buttons_frame,

@@ -1,0 +1,217 @@
+from typing import List
+import os
+from openpyxl import Workbook, load_workbook
+import gc
+
+from domain.records import (
+    IncomeRecord,
+    ExpenseRecord,
+    MandatoryExpenseRecord,
+)
+from domain.reports import Report
+
+
+def _safe_str(value):
+    return "" if value is None else str(value)
+
+
+def report_to_xlsx(report: Report, filepath: str) -> None:
+    """Export Report to an XLSX file."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Report"
+
+    ws.append(["Date", "Type", "Category", "Amount (KZT)"])
+
+    # initial balance
+    if getattr(report, "_initial_balance", 0) != 0:
+        ws.append(["", "Initial Balance", "", f"{report._initial_balance:.2f}"])
+
+    for record in sorted(report.records(), key=lambda r: r.date):
+        if isinstance(record, IncomeRecord):
+            record_type = "Income"
+        elif isinstance(record, MandatoryExpenseRecord):
+            record_type = "Mandatory Expense"
+        else:
+            record_type = "Expense"
+        ws.append([record.date, record_type, record.category, f"{record.amount:.2f}"])
+
+    total = report.total()
+    records_total = sum(r.signed_amount() for r in report.records())
+    ws.append(["SUBTOTAL", "", "", f"{records_total:.2f}"])
+    ws.append(["FINAL BALANCE", "", "", f"{total:.2f}"])
+
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
+        filepath
+    ) else None
+    wb.save(filepath)
+    try:
+        wb.close()
+    except Exception:
+        pass
+    try:
+        del wb
+    except Exception:
+        pass
+    gc.collect()
+
+
+def report_from_xlsx(filepath: str) -> Report:
+    """Import Report from an XLSX file and return a Report object."""
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"XLSX file not found: {filepath}")
+
+    wb = load_workbook(filepath, data_only=True)
+    ws = wb.active
+
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        return Report([], 0.0)
+
+    # skip header
+    start = 1
+    records = []
+    initial_balance = 0.0
+
+    for row in rows[start:]:
+        if not row or all(cell is None for cell in row):
+            continue
+        date = _safe_str(row[0]).strip()
+        record_type = _safe_str(row[1]).strip()
+        category = _safe_str(row[2]).strip()
+        amount_raw = _safe_str(row[3]).strip()
+
+        if date.upper() in ["SUBTOTAL", "FINAL BALANCE"]:
+            continue
+
+        if date == "" and record_type.lower() == "initial balance":
+            try:
+                initial_balance = float(amount_raw)
+            except Exception:
+                initial_balance = 0.0
+            continue
+
+        try:
+            amt = amount_raw
+            if isinstance(amt, str):
+                amt = amt.strip()
+                if amt.startswith("(") and amt.endswith(")"):
+                    amt = "-" + amt[1:-1]
+            amount = float(amt)
+        except Exception:
+            continue
+
+        if record_type.lower() == "income":
+            rec = IncomeRecord(date=date, amount=abs(amount), category=category)
+        elif record_type.lower() == "expense":
+            rec = ExpenseRecord(date=date, amount=abs(amount), category=category)
+        elif record_type.lower() == "mandatory expense":
+            rec = MandatoryExpenseRecord(
+                date=date,
+                amount=abs(amount),
+                category=category,
+                description="",
+                period="monthly",
+            )
+        else:
+            continue
+
+        records.append(rec)
+
+    try:
+        return Report(records, initial_balance)
+    finally:
+        try:
+            wb.close()
+        except Exception:
+            pass
+        try:
+            del wb
+        except Exception:
+            pass
+        gc.collect()
+
+
+def export_mandatory_expenses_to_xlsx(
+    expenses: List[MandatoryExpenseRecord], filepath: str
+) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Mandatory"
+    ws.append(["Amount (KZT)", "Category", "Description", "Period"])
+
+    for e in expenses:
+        amount = (
+            f"{getattr(e, 'amount', 0):.2f}"
+            if getattr(e, "amount", None) is not None
+            else "0.00"
+        )
+        category = getattr(e, "category", "") or ""
+        description = getattr(e, "description", "") or ""
+        period = getattr(e, "period", "") or ""
+        ws.append([amount, category, description, period])
+
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
+        filepath
+    ) else None
+    wb.save(filepath)
+    try:
+        wb.close()
+    except Exception:
+        pass
+    try:
+        del wb
+    except Exception:
+        pass
+    gc.collect()
+
+
+def import_mandatory_expenses_from_xlsx(filepath: str) -> List[MandatoryExpenseRecord]:
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"XLSX file not found: {filepath}")
+
+    wb = load_workbook(filepath, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows or len(rows) < 2:
+        return []
+
+    expenses: List[MandatoryExpenseRecord] = []
+    for row in rows[1:]:
+        if not row or all(cell is None for cell in row):
+            continue
+        amount_raw = _safe_str(row[0]).strip()
+        category = _safe_str(row[1]).strip()
+        description = _safe_str(row[2]).strip()
+        period = _safe_str(row[3]).strip().lower()
+
+        try:
+            amount = float(amount_raw)
+        except Exception:
+            continue
+
+        valid_periods = ["daily", "weekly", "monthly", "yearly"]
+        if period not in valid_periods:
+            continue
+
+        expense = MandatoryExpenseRecord(
+            date="",
+            amount=amount,
+            category=category,
+            description=description,
+            period=period,
+        )
+        expenses.append(expense)
+
+    try:
+        return expenses
+    finally:
+        try:
+            wb.close()
+        except Exception:
+            pass
+        try:
+            del wb
+        except Exception:
+            pass
+        gc.collect()

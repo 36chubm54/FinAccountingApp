@@ -46,7 +46,7 @@ pip install -r requirements.txt
 ### First launch
 
 ```bash
-python app.py
+python main.py
 ```
 
 After launch, the graphical window of the Financial Accounting application will open. Use buttons to add income and expenses, generate reports, and delete entries.
@@ -57,7 +57,7 @@ After launch, the graphical window of the Financial Accounting application will 
 
 ### Main window
 
-After running `python app.py`, a window with eight buttons will open:
+After running `python main.py`, a window with nine buttons will open:
 
 - **Add Income** - Adding income
 - **Add Expense** - Adding an expense
@@ -67,6 +67,7 @@ After running `python app.py`, a window with eight buttons will open:
 - **Set Initial Balance** — Setting the initial balance
 - **Manage Mandatory** - Management of mandatory expenses
 - **Import from CSV** — Import data from a CSV file
+- **Import from Excel** — Import data from an XLSX file
 
 ### Adding income/expense
 
@@ -91,6 +92,8 @@ The amount is automatically converted into the base currency (KZT) at the curren
 4. Click "Generate".
 
 The result will be displayed in the text field. For tables, a formatted table with a total is used.
+
+Additionally: the report window has an **Export to XLSX** button to save the current report as an Excel file (.xlsx). The file contains a `Report` sheet with columns `Date, Type, Category, Amount (KZT)`. If an initial balance is set, it will be recorded as a row with `Type = Initial Balance`.
 
 ### Deleting an entry
 
@@ -119,6 +122,8 @@ The opening balance is the balance at the beginning of the accounting period. It
    - **Add to Report** — Add the selected expense to the report indicating the date
    - **Import from CSV** — Import mandatory expenses from a CSV file
    - **Export to CSV** — Export mandatory expenses to a CSV file
+   - **Import from Excel** — Import mandatory expenses from an Excel (.xlsx) file
+   - **Export to Excel** — Export mandatory expenses to an Excel (.xlsx) file
    - **Close** — Close the window
 
 **Adding mandatory expense:**
@@ -176,6 +181,21 @@ TOTAL,,,-2000.00
 - The line with `TOTAL` in the date field is ignored
 - All existing data will be replaced with new data from the CSV file
 
+### Import from XLSX
+
+1. Click "Import from Excel" in the main window.
+2. Select an `.xlsx` file in the open file dialog.
+3. Confirm the import (all existing entries will be replaced).
+4. The application will report how many records were imported.
+
+XLSX file format:
+
+- Sheet: `Report`
+- Columns: `Date`, `Type`, `Category`, `Amount (KZT)` (first row as headers)
+- Initial balance can be specified as a row with empty `Date` and `Type = Initial Balance`.
+
+Import rules follow CSV rules: invalid rows are skipped; supported types are `Income`, `Expense`, and `Mandatory Expense`.
+
 ### Import/Export of mandatory expenses
 
 #### Export mandatory expenses
@@ -185,6 +205,11 @@ TOTAL,,,-2000.00
 3. Select a save location and file name in the dialog box.
 4. The application exports all mandatory expenses in CSV format.
 5. The folder with the saved file will open automatically.
+
+**XLSX format for mandatory expenses:**
+
+- Sheet: `Mandatory`
+- Columns: `Amount (KZT)`, `Category`, `Description`, `Period` (first line - headings)
 
 **CSV file format for mandatory expenses:**
 
@@ -198,8 +223,8 @@ Amount (KZT),Category,Description,Period
 #### Import mandatory expenses
 
 1. Click "Manage Mandatory" to open the window for managing mandatory expenses.
-2. Click "Import from CSV".
-3. Select the mandatory expense CSV file in the dialog box.
+2. Click "Import from CSV" or "Import from Excel".
+3. Select the mandatory expense CSV/XLSX file in the dialog box.
 4. Confirm import (all existing mandatory charges will be replaced).
 5. The application will import the data and update the list of required expenses.
 
@@ -211,6 +236,15 @@ Amount (KZT),Category,Description,Period
 - Description is a required field
 - Incorrectly formatted lines will be skipped
 - All existing mandatory expenses will be replaced with imported data
+
+#### Import from XLSX (mandatory expenses)
+
+1. Click "Import from Excel" in the Manage Mandatory window.
+2. Select an `.xlsx` file and confirm import (existing mandatory expenses will be replaced).
+3. The file must contain a `Mandatory` sheet and the columns `Amount (KZT),Category,Description,Period`.
+4. Supported periods: `daily`, `weekly`, `monthly`, `yearly`.
+
+Invalid rows will be skipped; valid rows will replace the current mandatory expenses list.
 
 **Usage example:**
 
@@ -359,7 +393,7 @@ The project follows the principles of **Clean Architecture**:
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │                     PRESENTATION LAYER                         │
-│                        app.py (GUI)                            │
+│                        main.py (GUI)                           │
 │             Graphical user interface on Tkinter                │
 ├────────────────────────────────────────────────────────────────┤
 │                      APPLICATION LAYER                         │
@@ -380,6 +414,7 @@ The project follows the principles of **Clean Architecture**:
 ├────────────────────────────────────────────────────────────────┤
 │                         UTILITIES                              │
 │           utils/csv_utils.py (import/export CSV)               │
+│         utils/excel_utils.py (import/export XLSX)              │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -839,7 +874,7 @@ print(f"Deleted: {success}")
 ```
 project/
 │
-├── app.py                      # GUI entry point
+├── main.py                     # GUI entry point
 ├── records.json                # Record storage (created automatically)
 ├── currency_rates.json         # Currency rate cache (if use_online=True)
 ├── requirements.txt            # Python dependencies
@@ -878,7 +913,8 @@ project/
 │
 └── utils/                      # UTILITIES
     ├── __init__.py
-    └── csv_utils.py            # Import/export CSV
+    ├── csv_utils.py            # Import/export CSV
+    └── excel_utils.py          # Import/export XLSX
 ```
 
 ---

@@ -94,10 +94,12 @@ class Report:
     def to_csv(self, filepath: str) -> None:
         """Export the report to a CSV file."""
         from utils.csv_utils import report_to_csv
+
         report_to_csv(self, filepath)
 
     @staticmethod
     def from_csv(filepath: str) -> "Report":
         """Import records from a CSV file and return a new Report."""
         from utils.csv_utils import report_from_csv
+
         return report_from_csv(filepath)
