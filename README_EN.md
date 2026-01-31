@@ -66,15 +66,15 @@ After running `python main.py`, a window with nine buttons will open:
 - **Delete All Records** - Delete all records
 - **Set Initial Balance** — Setting the initial balance
 - **Manage Mandatory** - Management of mandatory expenses
-- **Import from CSV** — Import data from a CSV file
-- **Import from Excel** — Import data from an XLSX file
+- Format selector for import/export (CSV, XLSX, PDF)
+- **Import** — Import data from a file of the selected format (CSV, XLSX, PDF)
 
 ### Adding income/expense
 
 1. Click "Add Income" or "Add Expense".
 2. Enter the date in YYYY-MM-DD format (for example, 2025-01-15).
 3. Enter the amount (floating point number).
-4. Enter the currency (default KZT). Supported: KZT, USD, EUR, RUB.
+4. Enter the currency (default KZT). Supported any currency (USD, EUR, RUB, etc.).
 5. Enter a category (default is "General").
 6. Click OK.
 
@@ -93,7 +93,7 @@ The amount is automatically converted into the base currency (KZT) at the curren
 
 The result will be displayed in the text field. For tables, a formatted table with a total is used.
 
-Additionally: the report window has an **Export to XLSX** button to save the current report as an Excel file (.xlsx). The file contains a `Report` sheet with columns `Date, Type, Category, Amount (KZT)`. If an initial balance is set, it will be recorded as a row with `Type = Initial Balance`.
+Additionally: in the report generation window, the **Export** button is available to save the report in any available format. The file contains the `Report` sheet with the `Date, Type, Category, Amount (KZT)` columns. If an initial balance is specified, it is written on a separate line with `Type = Initial Balance`.
 
 ### Deleting an entry
 
@@ -116,14 +116,13 @@ The opening balance is the balance at the beginning of the accounting period. It
 1. Click "Manage Mandatory".
 2. A list of existing mandatory expenses will be displayed in a new window.
 3. Use the buttons:
+   - Format selector for import/export (CSV, XLSX, PDF)
    - **Add** — Add a new mandatory expense
    - **Delete** — Delete the selected mandatory expense
    - **Delete All** - Delete all mandatory expenses
    - **Add to Report** — Add the selected expense to the report indicating the date
-   - **Import from CSV** — Import mandatory expenses from a CSV file
-   - **Export to CSV** — Export mandatory expenses to a CSV file
-   - **Import from Excel** — Import mandatory expenses from an Excel (.xlsx) file
-   - **Export to Excel** — Export mandatory expenses to an Excel (.xlsx) file
+   - **Import** — Import mandatory expenses from a file of the selected format (CSV, XLSX, PDF)
+   - **Export** — Export mandatory expenses to a file of the selected format (CSV, XLSX, PDF)
    - **Close** — Close the window
 
 **Adding mandatory expense:**
@@ -154,10 +153,11 @@ Mandatory expenses are recurring expenses (rent, utilities, etc.). They are stor
 
 ### Import from CSV
 
-1. Click "Import from CSV".
-2. Select the CSV file in the open file dialog box.
-3. Confirm the import in the dialog box (all existing entries will be replaced).
-4. The application will show the number of successfully imported records.
+1. Select "CSV" from the import format drop-down list in the main window.
+2. Click "Import".
+3. Select the CSV file in the open file dialog box.
+4. Confirm the import in the dialog box (all existing entries will be replaced).
+5. The application will show the number of successfully imported records.
 
 **CSV file format:**
 
@@ -167,26 +167,17 @@ Date,Type,Category,Amount (KZT)
 2025-01-01,Income,Salary,100000.00
 2025-01-02,Expense,Food,15000.00
 2025-01-03,Income,Bonus,50000.00
-TOTAL,,,-2000.00
+SUBTOTAL,,,135000.00
+FINAL BALANCE,,,185000.00
 ```
-
-**Import rules:**
-
-- The first line should contain the headings: `Date,Type,Category,Amount (KZT)`
-- The second line may contain the initial balance `Initial Balance` with empty fields `Type` and `Category`
-- Dates must be in the format `YYYY-MM-DD`
-- All delimiters are commas
-- Supported types: `Income` (income) and `Expense` (expense)
-- Amounts can be either positive or negative (in brackets for expenses)
-- The line with `TOTAL` in the date field is ignored
-- All existing data will be replaced with new data from the CSV file
 
 ### Import from XLSX
 
-1. Click "Import from Excel" in the main window.
-2. Select an `.xlsx` file in the open file dialog.
-3. Confirm the import (all existing entries will be replaced).
-4. The application will report how many records were imported.
+1. Select "XLSX" from the import format drop-down list in the main window.
+2. Click "Import".
+3. Select the `.xlsx` file in the open file dialog box.
+4. Confirm the import (all existing entries will be replaced).
+5. The application will show the number of imported records.
 
 XLSX file format:
 
@@ -196,14 +187,33 @@ XLSX file format:
 
 Import rules follow CSV rules: invalid rows are skipped; supported types are `Income`, `Expense`, and `Mandatory Expense`.
 
+### Import from PDF
+
+1. Select "PDF" from the import format drop-down list in the main window.
+2. Click "Import".
+3. Select the PDF file in the open file dialog box.
+4. Confirm the import (all existing entries will be replaced).
+5. The application will show the number of successfully imported records.
+
+**Import rules:**
+
+- The first line should contain the headings: `Date,Type,Category,Amount (KZT)`
+- The second line may contain the initial balance `Initial Balance` with empty fields `Type` and `Category`
+- Dates must be in the format `YYYY-MM-DD`
+- All delimiters are commas
+- Supported types: `Income` (income) and `Expense` (expense)
+- Amounts can be either positive or negative (in brackets for expenses)
+- Lines with `SUBTOTAL` and `FINAL BALANCE` in the date field are ignored
+- All existing data will be replaced with new data from the file
+
 ### Import/Export of mandatory expenses
 
 #### Export mandatory expenses
 
 1. Click "Manage Mandatory" to open the window for managing mandatory expenses.
-2. Click "Export to CSV".
+2. Select the format you need (CSV, XLSX or PDF) and click "Export".
 3. Select a save location and file name in the dialog box.
-4. The application exports all mandatory expenses in CSV format.
+4. The application exports all mandatory expenses in the selected format.
 5. The folder with the saved file will open automatically.
 
 **XLSX format for mandatory expenses:**
@@ -220,11 +230,13 @@ Amount (KZT),Category,Description,Period
 20000.00,Internet,Home internet connection,monthly
 ```
 
+> **Note:** The PDF format for mandatory expenses is similar to CSV.
+
 #### Import mandatory expenses
 
 1. Click "Manage Mandatory" to open the window for managing mandatory expenses.
-2. Click "Import from CSV" or "Import from Excel".
-3. Select the mandatory expense CSV/XLSX file in the dialog box.
+2. Select the desired format (CSV, XLSX or PDF) and click "Import".
+3. Select a file of the selected format with mandatory expenses in the dialog box.
 4. Confirm import (all existing mandatory charges will be replaced).
 5. The application will import the data and update the list of required expenses.
 
@@ -285,6 +297,15 @@ All records are saved in the `records.json` file in the project directory. The f
       "amount": 25000.0,
       "category": "Products"
     }
+  ],
+  "mandatory_expenses": [
+      {
+      "date": "2025-01-01",
+      "amount": 150000.0,
+      "category": "Mandatory",
+      "description": "Monthly rent payment",
+      "period": "monthly"
+      }
   ]
 }
 ```
@@ -335,7 +356,7 @@ python -m http.server 8000
 - Filtering by period (month/year)
 - Filter by category
 - Grouping data by category
-- Export reports to CSV format
+- Export reports to CSV, XLSX, PDF formats
 - Tables with totals
 
 #### ⚙️Settings
@@ -548,18 +569,18 @@ from domain.currency import CurrencyService
 
 # Initialization with courses
 rates = {
-    "USD": 470.0, #1 USD = 470 KZT
-    "EUR": 510.0, #1 EUR = 510 KZT
-    "RUB": 5.2 # 1 RUB = 5.2 KZT
+    "USD": 500.0,   # 1 USD = 500 KZT
+    "EUR": 600.0,   # 1 EUR = 600 KZT
+    "RUB": 5.6      # 1 RUB = 5.6 KZT
 }
 converter = CurrencyService(rates=rates, base="KZT")
 
 # Conversion
 usd_amount = converter.convert(100, "USD")
-print(f"100 USD = {usd_amount} KZT") # 100 USD = 47000.0 KZT
+print(f"100 USD = {usd_amount} KZT") # 100 USD = 50000.0 KZT
 
 eur_amount = converter.convert(50, "EUR")
-print(f"50 EUR = {eur_amount} KZT") # 50 EUR = 25500.0 KZT
+print(f"50 EUR = {eur_amount} KZT") # 50 EUR = 30000.0 KZT
 
 # Base currency is not convertible
 kzt_amount = converter.convert(10000, "KZT")
@@ -1007,12 +1028,12 @@ def test_filter_by_period():
 
 ## 💱 Supported currencies
 
-| Currency | Code | Default rate | Description |
-| --- | --- | --- | --- |
-| Kazakhstani tenge | KZT | 1.0 | Base currency |
-| US dollar | USD | 500.0 | 1 USD = 500 KZT |
-| Euro | EUR | 590.0 | 1 EUR = 590 KZT |
-| Russian ruble | RUB | 6.5 | 1 RUB = 6.5 KZT |
+| Currency          | Code | Default rate | Description     |
+| ----------------- | ---- | ------------ | --------------- |
+| Kazakhstani tenge | KZT  | 1.0          | Base currency   |
+| US dollar         | USD  | 500.0        | 1 USD = 500 KZT |
+| Euro              | EUR  | 590.0        | 1 EUR = 590 KZT |
+| Russian ruble     | RUB  | 6.5          | 1 RUB = 6.5 KZT |
 
 > **Current rates:** When initializing `CurrencyService(use_online=True)`, rates are downloaded from the [National Bank of the Republic of Kazakhstan](https://nationalbank.kz/ru/exchangerates/ezhednevnye-oficialnye-rynochnye-kursy-valyut/) and cached locally.
 

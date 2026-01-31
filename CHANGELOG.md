@@ -20,19 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add utils module for mandatory expense CSV operations with validation and data integrity checks
 - Add Excel import/export support: import records from `.xlsx` and export reports to `.xlsx`
 - Add Excel import/export for mandatory expenses (sheet `Mandatory` with columns `Amount (KZT),Category,Description,Period`)
- - Add PDF import/export support for reports and mandatory expenses
- - UI: replace separate import/export buttons with format dropdowns and single Import/Export buttons (supports CSV, XLSX, PDF)
+- Add PDF import/export support for reports and mandatory expenses
+- UI: replace separate import/export buttons with format dropdowns and single Import/Export buttons (supports CSV, XLSX, PDF)
 
 ### Changed
 
 - Enable online currency rates by default and refactor parsing
 - Replace CLI with Tkinter GUI for financial accounting
-- Standardize date format to YYYY.MM.DD in records.json
 
 ### Documentation
 
 - Fixed link to the "Web application" title in the README_EN.md table of contents
-- Improve README formatting and add test setup note; Update date input format to YYYY.MM.DD
+- Improve README formatting and add test setup note
 - Add web application section to README.md with features, setup, and structure details
 
 ### Initial
