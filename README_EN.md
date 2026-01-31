@@ -121,7 +121,7 @@ The opening balance is the balance at the beginning of the accounting period. It
    - **Delete** — Delete the selected mandatory expense
    - **Delete All** - Delete all mandatory expenses
    - **Add to Report** — Add the selected expense to the report indicating the date
-   - **Import** — Import mandatory expenses from a file of the selected format (CSV, XLSX, PDF)
+   - **Import** — Import mandatory expenses from a file of the selected format (CSV, XLSX)
    - **Export** — Export mandatory expenses to a file of the selected format (CSV, XLSX, PDF)
    - **Close** — Close the window
 
@@ -187,14 +187,6 @@ XLSX file format:
 
 Import rules follow CSV rules: invalid rows are skipped; supported types are `Income`, `Expense`, and `Mandatory Expense`.
 
-### Import from PDF
-
-1. Select "PDF" from the import format drop-down list in the main window.
-2. Click "Import".
-3. Select the PDF file in the open file dialog box.
-4. Confirm the import (all existing entries will be replaced).
-5. The application will show the number of successfully imported records.
-
 **Import rules:**
 
 - The first line should contain the headings: `Date,Type,Category,Amount (KZT)`
@@ -235,7 +227,7 @@ Amount (KZT),Category,Description,Period
 #### Import mandatory expenses
 
 1. Click "Manage Mandatory" to open the window for managing mandatory expenses.
-2. Select the desired format (CSV, XLSX or PDF) and click "Import".
+2. Select the desired format (CSV or XLSX) and click "Import".
 3. Select a file of the selected format with mandatory expenses in the dialog box.
 4. Confirm import (all existing mandatory charges will be replaced).
 5. The application will import the data and update the list of required expenses.
@@ -249,18 +241,27 @@ Amount (KZT),Category,Description,Period
 - Incorrectly formatted lines will be skipped
 - All existing mandatory expenses will be replaced with imported data
 
-#### Import from XLSX (mandatory expenses)
+#### Import CSV for mandatory expenses
 
-1. Click "Import from Excel" in the Manage Mandatory window.
-2. Select an `.xlsx` file and confirm import (existing mandatory expenses will be replaced).
-3. The file must contain a `Mandatory` sheet and the columns `Amount (KZT),Category,Description,Period`.
-4. Supported periods: `daily`, `weekly`, `monthly`, `yearly`.
+1. Select `CSV` format from the import format drop-down list in the Mandatory Expense Management window.
+2. Click "Import".
+3. Select the `.csv` file and confirm the import (all existing mandatory expenses will be replaced).
+4. The file must contain the columns `Amount (KZT), Category, Description, Period`.
+5. Supported periods: `daily`, `weekly`, `monthly`, `yearly`.
+
+#### Import XLSX for mandatory expenses
+
+1. Select `XLSX` format from the import format drop-down list in the Mandatory Expense Management window.
+2. Click "Import".
+3. Select the `.xlsx` file and confirm the import (all existing mandatory expenses will be replaced).
+4. The file must contain the `Mandatory` sheet and the `Amount (KZT), Category, Description, Period` columns.
+5. Supported periods: `daily`, `weekly`, `monthly`, `yearly`.
 
 Invalid rows will be skipped; valid rows will replace the current mandatory expenses list.
 
 ### Additions: PDF and unified Import/Export UI
 
-- The application now supports exporting and importing reports and mandatory expenses in `PDF` format. PDFs created by the app contain CSV-like text and can be re-imported reliably.
+- The application now supports exporting reports and mandatory expenses in `PDF` format. PDF files created by the application contain tables, with corresponding columns and headings.
 - The UI replaces separate import/export buttons with a format dropdown (`CSV`, `XLSX`, `PDF`) and a single `Import` / `Export` button in the main window, the Generate Report window, and the Manage Mandatory window.
 
 **Usage example:**
@@ -439,9 +440,9 @@ The project follows the principles of **Clean Architecture**:
 │   RecordRepository (abstraction), JsonFileRecordRepository     │
 ├────────────────────────────────────────────────────────────────┤
 │                         UTILITIES                              │
-│           utils/csv_utils.py (import/export CSV)               │
-│         utils/excel_utils.py (import/export XLSX)              │
-│           utils/pdf_utils.py (import/export PDF)               │
+│           utils/csv_utils.py   (import/export CSV)             │
+│           utils/excel_utils.py (import/export XLSX)            │
+│           utils/pdf_utils.py   (import/export PDF)             │
 └────────────────────────────────────────────────────────────────┘
 ```
 

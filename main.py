@@ -38,10 +38,8 @@ from utils.excel_utils import (
     import_mandatory_expenses_from_xlsx,
 )
 from utils.pdf_utils import (
-    report_from_pdf,
     report_to_pdf,
     export_mandatory_expenses_to_pdf,
-    import_mandatory_expenses_from_pdf,
 )
 from domain.records import IncomeRecord, MandatoryExpenseRecord
 from app.services import CurrencyService
@@ -130,7 +128,7 @@ class FinancialApp(tk.Tk):
         # Import format selector and single Import button
         self.import_format_var = tk.StringVar(value="CSV")
         self.import_format_menu = tk.OptionMenu(
-            self, self.import_format_var, "CSV", "XLSX", "PDF"
+            self, self.import_format_var, "CSV", "XLSX"
         )
         self.import_format_menu.config(width=button_width - 3)
         self.import_format_menu.pack(pady=padding)
@@ -507,50 +505,12 @@ class FinancialApp(tk.Tk):
         except Exception as e:
             messagebox.showerror("Error", f"Failed to import Excel: {str(e)}")
 
-    def import_from_pdf(self):
-        filepath = filedialog.askopenfilename(
-            defaultextension=".pdf",
-            filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
-            title="Select PDF file to import",
-        )
-        if not filepath:
-            return
-
-        try:
-            confirm = messagebox.askyesno(
-                "Confirm Import",
-                f"This will replace all existing records with data from:\n{filepath}\n\nContinue?",
-            )
-            if not confirm:
-                return
-
-            report = report_from_pdf(filepath)
-
-            # Replace repository data
-            self.repository.delete_all()
-            imported_count = 0
-            for record in report.records():
-                self.repository.save(record)
-                imported_count += 1
-
-            messagebox.showinfo(
-                "Success",
-                f"Successfully imported {imported_count} records from PDF file.\nAll existing records have been replaced.",
-            )
-
-        except FileNotFoundError:
-            messagebox.showerror("Error", f"File not found: {filepath}")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to import PDF: {str(e)}")
-
     def _import_handler(self):
         fmt = self.import_format_var.get()
         if fmt == "CSV":
             self.import_from_csv()
-        elif fmt == "XLSX":
+        else:  # XLSX
             self.import_from_excel()
-        else:
-            self.import_from_pdf()
 
     def set_initial_balance(self):
         current_balance = self.repository.load_initial_balance()
@@ -941,45 +901,11 @@ class FinancialApp(tk.Tk):
                 import_expenses_csv()
             elif fmt == "XLSX":
                 import_expenses_xlsx()
-            else:
-                # PDF import
-                filepath = filedialog.askopenfilename(
-                    defaultextension=".pdf",
-                    filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
-                    title="Select PDF file to import mandatory expenses",
+            else:  # PDF
+                messagebox.showinfo(
+                    "Not Supported",
+                    "Importing mandatory expenses from PDF is not supported.",
                 )
-                if not filepath:
-                    return
-                try:
-                    confirm = messagebox.askyesno(
-                        "Confirm Import",
-                        f"This will replace all existing mandatory expenses with data from:\n{filepath}\n\nContinue?",
-                    )
-                    if not confirm:
-                        return
-                    expenses = import_mandatory_expenses_from_pdf(filepath)
-                    delete_all_use_case = DeleteAllMandatoryExpenses(self.repository)
-                    delete_all_use_case.execute()
-                    for expense in expenses:
-                        create_expense = CreateMandatoryExpense(
-                            self.repository, self.currency
-                        )
-                        create_expense.execute(
-                            amount=expense.amount,
-                            currency="KZT",
-                            category=expense.category,
-                            description=expense.description,
-                            period=expense.period,
-                        )
-                    messagebox.showinfo(
-                        "Success",
-                        f"Successfully imported {len(expenses)} mandatory expenses from PDF file.\nAll existing mandatory expenses have been replaced.",
-                    )
-                    refresh_list()
-                except FileNotFoundError:
-                    messagebox.showerror("Error", f"File not found: {filepath}")
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to import PDF: {str(e)}")
 
         def export_any():
             fmt = mandatory_format_var.get()
