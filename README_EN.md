@@ -246,6 +246,11 @@ Amount (KZT),Category,Description,Period
 
 Invalid rows will be skipped; valid rows will replace the current mandatory expenses list.
 
+### Additions: PDF and unified Import/Export UI
+
+- The application now supports exporting and importing reports and mandatory expenses in `PDF` format. PDFs created by the app contain CSV-like text and can be re-imported reliably.
+- The UI replaces separate import/export buttons with a format dropdown (`CSV`, `XLSX`, `PDF`) and a single `Import` / `Export` button in the main window, the Generate Report window, and the Manage Mandatory window.
+
 **Usage example:**
 
 ```csv
@@ -399,7 +404,7 @@ The project follows the principles of **Clean Architecture**:
 │                      APPLICATION LAYER                         │
 │                      app/use_cases.py                          │
 │    CreateIncome, CreateExpense, GenerateReport, DeleteRecord   │
-│                      ImportFromCSV                             │
+│                      ImportFromCSV etc.                        │
 │                       app/services.py                          │
 │         CurrencyService (adapter with course caching)          │
 ├────────────────────────────────────────────────────────────────┤
@@ -415,6 +420,7 @@ The project follows the principles of **Clean Architecture**:
 │                         UTILITIES                              │
 │           utils/csv_utils.py (import/export CSV)               │
 │         utils/excel_utils.py (import/export XLSX)              │
+│           utils/pdf_utils.py (import/export PDF)               │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -904,7 +910,10 @@ project/
 │
 ├── tests/                      # Unit tests
 │   ├── __init__.py
-│   ├── test_currency.py        # Conversion tests
+│   ├── test_csv.py             # CSV import/export tests
+│   ├── test_currency.py        # CurrencyService tests
+│   ├── test_excel.py           # XLSX import/export tests
+│   ├── test_pdf.py             # PDF import/export tests
 │   ├── test_records.py         # Record tests
 │   ├── test_reports.py         # Report tests
 │   ├── test_repositories.py    # Repository tests
@@ -914,7 +923,8 @@ project/
 └── utils/                      # UTILITIES
     ├── __init__.py
     ├── csv_utils.py            # Import/export CSV
-    └── excel_utils.py          # Import/export XLSX
+    ├── excel_utils.py          # Import/export XLSX
+    └── pdf_utils.py            # Import/export PDF
 ```
 
 ---

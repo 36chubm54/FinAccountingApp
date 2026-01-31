@@ -37,6 +37,12 @@ from utils.excel_utils import (
     export_mandatory_expenses_to_xlsx,
     import_mandatory_expenses_from_xlsx,
 )
+from utils.pdf_utils import (
+    report_from_pdf,
+    report_to_pdf,
+    export_mandatory_expenses_to_pdf,
+    import_mandatory_expenses_from_pdf,
+)
 from domain.records import IncomeRecord, MandatoryExpenseRecord
 from app.services import CurrencyService
 
@@ -64,6 +70,7 @@ class FinancialApp(tk.Tk):
 
         # Buttons
         button_width = 15  # Set uniform width for all buttons
+        padding = 10
 
         self.add_income_btn = tk.Button(
             self,
@@ -71,7 +78,7 @@ class FinancialApp(tk.Tk):
             command=self.add_income,
             width=button_width,
         )
-        self.add_income_btn.pack(pady=10)
+        self.add_income_btn.pack(pady=padding)
 
         self.add_expense_btn = tk.Button(
             self,
@@ -79,7 +86,7 @@ class FinancialApp(tk.Tk):
             command=self.add_expense,
             width=button_width,
         )
-        self.add_expense_btn.pack(pady=10)
+        self.add_expense_btn.pack(pady=padding)
 
         self.report_btn = tk.Button(
             self,
@@ -87,7 +94,7 @@ class FinancialApp(tk.Tk):
             command=self.generate_report,
             width=button_width,
         )
-        self.report_btn.pack(pady=10)
+        self.report_btn.pack(pady=padding)
 
         self.delete_btn = tk.Button(
             self,
@@ -95,7 +102,7 @@ class FinancialApp(tk.Tk):
             command=self.delete_record,
             width=button_width,
         )
-        self.delete_btn.pack(pady=10)
+        self.delete_btn.pack(pady=padding)
 
         self.delete_all_btn = tk.Button(
             self,
@@ -103,7 +110,7 @@ class FinancialApp(tk.Tk):
             command=self.delete_all_records,
             width=button_width,
         )
-        self.delete_all_btn.pack(pady=10)
+        self.delete_all_btn.pack(pady=padding)
 
         self.set_initial_balance_btn = tk.Button(
             self,
@@ -111,31 +118,29 @@ class FinancialApp(tk.Tk):
             command=self.set_initial_balance,
             width=button_width,
         )
-        self.set_initial_balance_btn.pack(pady=10)
-
+        self.set_initial_balance_btn.pack(pady=padding)
         self.manage_mandatory_btn = tk.Button(
             self,
             text="Manage Mandatory",
             command=self.manage_mandatory_expenses,
             width=button_width,
         )
-        self.manage_mandatory_btn.pack(pady=10)
+        self.manage_mandatory_btn.pack(pady=padding)
 
-        self.import_csv_btn = tk.Button(
+        # Import format selector and single Import button
+        self.import_format_var = tk.StringVar(value="CSV")
+        self.import_format_menu = tk.OptionMenu(
+            self, self.import_format_var, "CSV", "XLSX", "PDF"
+        )
+        self.import_format_menu.config(width=button_width - 3)
+        self.import_format_menu.pack(pady=padding)
+        self.import_btn = tk.Button(
             self,
-            text="Import from CSV",
-            command=self.import_from_csv,
+            text="Import",
+            command=self._import_handler,
             width=button_width,
         )
-        self.import_csv_btn.pack(pady=10)
-
-        self.import_excel_btn = tk.Button(
-            self,
-            text="Import from Excel",
-            command=self.import_from_excel,
-            width=button_width,
-        )
-        self.import_excel_btn.pack(pady=10)
+        self.import_btn.pack(pady=padding)
 
     def add_income(self):
         self._add_record("Income", CreateIncome)
@@ -300,31 +305,52 @@ class FinancialApp(tk.Tk):
         generate_btn = tk.Button(report_window, text="Generate", command=generate)
         generate_btn.grid(row=4, column=0, pady=10)
 
-        export_btn = tk.Button(report_window, text="Export to CSV", command=export_csv)
-        export_btn.grid(row=4, column=1, pady=10)
+        # Export format selector + single Export button
+        export_format_var = tk.StringVar(value="CSV")
+        export_menu = tk.OptionMenu(
+            report_window, export_format_var, "CSV", "XLSX", "PDF"
+        )
+        export_menu.grid(row=4, column=1, pady=10)
 
-        def export_xlsx():
+        def export_any():
             nonlocal current_report
             if current_report is None:
                 messagebox.showerror("Error", "Please generate a report first.")
                 return
-            filepath = filedialog.asksaveasfilename(
-                defaultextension=".xlsx",
-                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
-                title="Save Report as Excel",
-            )
-            if filepath:
-                try:
-                    report_to_xlsx(current_report, filepath)
-                    messagebox.showinfo("Success", f"Report exported to {filepath}")
-                    os.startfile(os.path.dirname(filepath))
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to export Excel: {str(e)}")
+            fmt = export_format_var.get()
+            if fmt == "CSV":
+                export_csv()
+            elif fmt == "XLSX":
+                filepath = filedialog.asksaveasfilename(
+                    defaultextension=".xlsx",
+                    filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+                    title="Save Report as Excel",
+                )
+                if filepath:
+                    try:
+                        report_to_xlsx(current_report, filepath)
+                        messagebox.showinfo("Success", f"Report exported to {filepath}")
+                        os.startfile(os.path.dirname(filepath))
+                    except Exception as e:
+                        messagebox.showerror(
+                            "Error", f"Failed to export Excel: {str(e)}"
+                        )
+            else:  # PDF
+                filepath = filedialog.asksaveasfilename(
+                    defaultextension=".pdf",
+                    filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+                    title="Save Report as PDF",
+                )
+                if filepath:
+                    try:
+                        report_to_pdf(current_report, filepath)
+                        messagebox.showinfo("Success", f"Report exported to {filepath}")
+                        os.startfile(os.path.dirname(filepath))
+                    except Exception as e:
+                        messagebox.showerror("Error", f"Failed to export PDF: {str(e)}")
 
-        export_xlsx_btn = tk.Button(
-            report_window, text="Export to Excel", command=export_xlsx
-        )
-        export_xlsx_btn.grid(row=4, column=2, pady=10)
+        export_btn = tk.Button(report_window, text="Export", command=export_any)
+        export_btn.grid(row=4, column=2, pady=10)
 
         result_text = tk.Text(report_window, wrap="word")
         scrollbar = Scrollbar(report_window, orient=VERTICAL, command=result_text.yview)
@@ -480,6 +506,51 @@ class FinancialApp(tk.Tk):
             messagebox.showerror("Error", f"File not found: {filepath}")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to import Excel: {str(e)}")
+
+    def import_from_pdf(self):
+        filepath = filedialog.askopenfilename(
+            defaultextension=".pdf",
+            filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+            title="Select PDF file to import",
+        )
+        if not filepath:
+            return
+
+        try:
+            confirm = messagebox.askyesno(
+                "Confirm Import",
+                f"This will replace all existing records with data from:\n{filepath}\n\nContinue?",
+            )
+            if not confirm:
+                return
+
+            report = report_from_pdf(filepath)
+
+            # Replace repository data
+            self.repository.delete_all()
+            imported_count = 0
+            for record in report.records():
+                self.repository.save(record)
+                imported_count += 1
+
+            messagebox.showinfo(
+                "Success",
+                f"Successfully imported {imported_count} records from PDF file.\nAll existing records have been replaced.",
+            )
+
+        except FileNotFoundError:
+            messagebox.showerror("Error", f"File not found: {filepath}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to import PDF: {str(e)}")
+
+    def _import_handler(self):
+        fmt = self.import_format_var.get()
+        if fmt == "CSV":
+            self.import_from_csv()
+        elif fmt == "XLSX":
+            self.import_from_excel()
+        else:
+            self.import_from_pdf()
 
     def set_initial_balance(self):
         current_balance = self.repository.load_initial_balance()
@@ -685,6 +756,14 @@ class FinancialApp(tk.Tk):
                     "Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD."
                 )
 
+        # Format selector for mandatory expenses export/import
+        mandatory_format_var = tk.StringVar(value="CSV")
+        mandatory_format_menu = tk.OptionMenu(
+            buttons_frame, mandatory_format_var, "CSV", "XLSX", "PDF"
+        )
+        mandatory_format_menu.config(width=11)
+        mandatory_format_menu.pack(pady=10)
+
         def export_expenses_csv():
             get_expenses = GetMandatoryExpenses(self.repository)
             expenses = get_expenses.execute()
@@ -856,37 +935,96 @@ class FinancialApp(tk.Tk):
         )
         add_to_report_btn.pack(pady=10)
 
+        def import_any():
+            fmt = mandatory_format_var.get()
+            if fmt == "CSV":
+                import_expenses_csv()
+            elif fmt == "XLSX":
+                import_expenses_xlsx()
+            else:
+                # PDF import
+                filepath = filedialog.askopenfilename(
+                    defaultextension=".pdf",
+                    filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+                    title="Select PDF file to import mandatory expenses",
+                )
+                if not filepath:
+                    return
+                try:
+                    confirm = messagebox.askyesno(
+                        "Confirm Import",
+                        f"This will replace all existing mandatory expenses with data from:\n{filepath}\n\nContinue?",
+                    )
+                    if not confirm:
+                        return
+                    expenses = import_mandatory_expenses_from_pdf(filepath)
+                    delete_all_use_case = DeleteAllMandatoryExpenses(self.repository)
+                    delete_all_use_case.execute()
+                    for expense in expenses:
+                        create_expense = CreateMandatoryExpense(
+                            self.repository, self.currency
+                        )
+                        create_expense.execute(
+                            amount=expense.amount,
+                            currency="KZT",
+                            category=expense.category,
+                            description=expense.description,
+                            period=expense.period,
+                        )
+                    messagebox.showinfo(
+                        "Success",
+                        f"Successfully imported {len(expenses)} mandatory expenses from PDF file.\nAll existing mandatory expenses have been replaced.",
+                    )
+                    refresh_list()
+                except FileNotFoundError:
+                    messagebox.showerror("Error", f"File not found: {filepath}")
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to import PDF: {str(e)}")
+
+        def export_any():
+            fmt = mandatory_format_var.get()
+            if fmt == "CSV":
+                export_expenses_csv()
+            elif fmt == "XLSX":
+                export_expenses_excel()
+            else:  # PDF
+                get_expenses = GetMandatoryExpenses(self.repository)
+                expenses = get_expenses.execute()
+                if not expenses:
+                    messagebox.showinfo(
+                        "No Expenses", "No mandatory expenses to export."
+                    )
+                    return
+                filepath = filedialog.asksaveasfilename(
+                    defaultextension=".pdf",
+                    filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+                    title="Export Mandatory Expenses to PDF",
+                )
+                if filepath:
+                    try:
+                        export_mandatory_expenses_to_pdf(expenses, filepath)
+                        messagebox.showinfo(
+                            "Success", f"Mandatory expenses exported to {filepath}"
+                        )
+                        os.startfile(os.path.dirname(filepath))
+                    except Exception as e:
+                        messagebox.showerror("Error", f"Failed to export PDF: {str(e)}")
+
         import_btn = tk.Button(
             buttons_frame,
-            text="Import from CSV",
-            command=import_expenses_csv,
+            text="Import",
+            command=import_any,
             width=button_width,
         )
         import_btn.pack(pady=10)
 
-        import_xlsx_btn = tk.Button(
-            buttons_frame,
-            text="Import from Excel",
-            command=import_expenses_xlsx,
-            width=button_width,
-        )
-        import_xlsx_btn.pack(pady=10)
-
         export_btn = tk.Button(
             buttons_frame,
-            text="Export to CSV",
-            command=export_expenses_csv,
+            text="Export",
+            command=export_any,
             width=button_width,
         )
         export_btn.pack(pady=10)
-
-        export_xlsx_btn = tk.Button(
-            buttons_frame,
-            text="Export to Excel",
-            command=export_expenses_excel,
-            width=button_width,
-        )
-        export_xlsx_btn.pack(pady=10)
 
         close_btn = tk.Button(
             buttons_frame,

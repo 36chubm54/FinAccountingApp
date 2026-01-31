@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add utils module for mandatory expense CSV operations with validation and data integrity checks
 - Add Excel import/export support: import records from `.xlsx` and export reports to `.xlsx`
 - Add Excel import/export for mandatory expenses (sheet `Mandatory` with columns `Amount (KZT),Category,Description,Period`)
+ - Add PDF import/export support for reports and mandatory expenses
+ - UI: replace separate import/export buttons with format dropdowns and single Import/Export buttons (supports CSV, XLSX, PDF)
 
 ### Changed
 
