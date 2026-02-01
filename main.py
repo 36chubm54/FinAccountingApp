@@ -117,6 +117,7 @@ class FinancialApp(tk.Tk):
             width=button_width,
         )
         self.set_initial_balance_btn.pack(pady=padding)
+
         self.manage_mandatory_btn = tk.Button(
             self,
             text="Manage Mandatory",
@@ -132,6 +133,7 @@ class FinancialApp(tk.Tk):
         )
         self.import_format_menu.config(width=button_width - 3)
         self.import_format_menu.pack(pady=padding)
+
         self.import_btn = tk.Button(
             self,
             text="Import",
@@ -281,6 +283,16 @@ class FinancialApp(tk.Tk):
                 result_text.insert(tk.END, f"Records Total: {records_total:.2f} KZT\n")
                 result_text.insert(tk.END, f"Final Balance: {final_balance:.2f} KZT\n")
 
+        generate_btn = tk.Button(report_window, text="Generate", command=generate)
+        generate_btn.grid(row=4, column=0, pady=10)
+
+        # Export format selector + single Export button
+        export_format_var = tk.StringVar(value="CSV")
+        export_menu = tk.OptionMenu(
+            report_window, export_format_var, "CSV", "XLSX", "PDF"
+        )
+        export_menu.grid(row=4, column=1, pady=10)
+
         def export_csv():
             nonlocal current_report
             if current_report is None:
@@ -300,52 +312,50 @@ class FinancialApp(tk.Tk):
                 except Exception as e:
                     messagebox.showerror("Error", f"Failed to export: {str(e)}")
 
-        generate_btn = tk.Button(report_window, text="Generate", command=generate)
-        generate_btn.grid(row=4, column=0, pady=10)
-
-        # Export format selector + single Export button
-        export_format_var = tk.StringVar(value="CSV")
-        export_menu = tk.OptionMenu(
-            report_window, export_format_var, "CSV", "XLSX", "PDF"
-        )
-        export_menu.grid(row=4, column=1, pady=10)
-
-        def export_any():
+        def export_excel():
             nonlocal current_report
             if current_report is None:
                 messagebox.showerror("Error", "Please generate a report first.")
                 return
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+                title="Save Report as Excel",
+            )
+            if filepath:
+                try:
+                    report_to_xlsx(current_report, filepath)
+                    messagebox.showinfo("Success", f"Report exported to {filepath}")
+                    os.startfile(os.path.dirname(filepath))
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to export Excel: {str(e)}")
+
+        def export_pdf():
+            nonlocal current_report
+            if current_report is None:
+                messagebox.showerror("Error", "Please generate a report first.")
+                return
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=".pdf",
+                filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+                title="Save Report as PDF",
+            )
+            if filepath:
+                try:
+                    report_to_pdf(current_report, filepath)
+                    messagebox.showinfo("Success", f"Report exported to {filepath}")
+                    os.startfile(os.path.dirname(filepath))
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to export PDF: {str(e)}")
+
+        def export_any():
             fmt = export_format_var.get()
             if fmt == "CSV":
                 export_csv()
             elif fmt == "XLSX":
-                filepath = filedialog.asksaveasfilename(
-                    defaultextension=".xlsx",
-                    filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
-                    title="Save Report as Excel",
-                )
-                if filepath:
-                    try:
-                        report_to_xlsx(current_report, filepath)
-                        messagebox.showinfo("Success", f"Report exported to {filepath}")
-                        os.startfile(os.path.dirname(filepath))
-                    except Exception as e:
-                        messagebox.showerror(
-                            "Error", f"Failed to export Excel: {str(e)}"
-                        )
+                export_excel()
             else:  # PDF
-                filepath = filedialog.asksaveasfilename(
-                    defaultextension=".pdf",
-                    filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
-                    title="Save Report as PDF",
-                )
-                if filepath:
-                    try:
-                        report_to_pdf(current_report, filepath)
-                        messagebox.showinfo("Success", f"Report exported to {filepath}")
-                        os.startfile(os.path.dirname(filepath))
-                    except Exception as e:
-                        messagebox.showerror("Error", f"Failed to export PDF: {str(e)}")
+                export_pdf()
 
         export_btn = tk.Button(report_window, text="Export", command=export_any)
         export_btn.grid(row=4, column=2, pady=10)
@@ -769,6 +779,36 @@ class FinancialApp(tk.Tk):
                 except Exception as e:
                     messagebox.showerror("Error", f"Failed to export XLSX: {str(e)}")
 
+        def export_expenses_pdf():
+            get_expenses = GetMandatoryExpenses(self.repository)
+            expenses = get_expenses.execute()
+            if not expenses:
+                messagebox.showinfo("No Expenses", "No mandatory expenses to export.")
+                return
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=".pdf",
+                filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+                title="Export Mandatory Expenses to PDF",
+            )
+            if filepath:
+                try:
+                    export_mandatory_expenses_to_pdf(expenses, filepath)
+                    messagebox.showinfo(
+                        "Success", f"Mandatory expenses exported to {filepath}"
+                    )
+                    os.startfile(os.path.dirname(filepath))
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to export PDF: {str(e)}")
+
+        def export_any():
+            fmt = mandatory_format_var.get()
+            if fmt == "CSV":
+                export_expenses_csv()
+            elif fmt == "XLSX":
+                export_expenses_excel()
+            else:  # PDF
+                export_expenses_pdf()
+
         def import_expenses_csv():
             # File selection dialog
             filepath = filedialog.askopenfilename(
@@ -866,6 +906,18 @@ class FinancialApp(tk.Tk):
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to import XLSX: {str(e)}")
 
+        def import_any():
+            fmt = mandatory_format_var.get()
+            if fmt == "CSV":
+                import_expenses_csv()
+            elif fmt == "XLSX":
+                import_expenses_xlsx()
+            else:  # PDF
+                messagebox.showinfo(
+                    "Not Supported",
+                    "Importing mandatory expenses from PDF is not supported.",
+                )
+
         # Buttons
         button_width = 14  # Set uniform width for all buttons
 
@@ -894,47 +946,6 @@ class FinancialApp(tk.Tk):
             width=button_width,
         )
         add_to_report_btn.pack(pady=10)
-
-        def import_any():
-            fmt = mandatory_format_var.get()
-            if fmt == "CSV":
-                import_expenses_csv()
-            elif fmt == "XLSX":
-                import_expenses_xlsx()
-            else:  # PDF
-                messagebox.showinfo(
-                    "Not Supported",
-                    "Importing mandatory expenses from PDF is not supported.",
-                )
-
-        def export_any():
-            fmt = mandatory_format_var.get()
-            if fmt == "CSV":
-                export_expenses_csv()
-            elif fmt == "XLSX":
-                export_expenses_excel()
-            else:  # PDF
-                get_expenses = GetMandatoryExpenses(self.repository)
-                expenses = get_expenses.execute()
-                if not expenses:
-                    messagebox.showinfo(
-                        "No Expenses", "No mandatory expenses to export."
-                    )
-                    return
-                filepath = filedialog.asksaveasfilename(
-                    defaultextension=".pdf",
-                    filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
-                    title="Export Mandatory Expenses to PDF",
-                )
-                if filepath:
-                    try:
-                        export_mandatory_expenses_to_pdf(expenses, filepath)
-                        messagebox.showinfo(
-                            "Success", f"Mandatory expenses exported to {filepath}"
-                        )
-                        os.startfile(os.path.dirname(filepath))
-                    except Exception as e:
-                        messagebox.showerror("Error", f"Failed to export PDF: {str(e)}")
 
         import_btn = tk.Button(
             buttons_frame,
