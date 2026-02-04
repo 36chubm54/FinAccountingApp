@@ -75,6 +75,7 @@ On the right, the infographic shows:
 - A monthly income/expense histogram (with year switcher)
 
 Income is shown in green above the zero line, expenses are red below it.
+When there are many categories, smaller values are grouped into an "Other" slice.
 
 ### Adding income/expense
 

@@ -584,6 +584,7 @@ class FinancialApp(tk.Tk):
         totals = aggregate_expenses_by_category(records)
         data = [(k, v) for k, v in totals.items() if v > 0]
         data.sort(key=lambda item: item[1], reverse=True)
+        data = self._group_minor_categories(data, max_slices=10)
 
         self.expense_pie_canvas.delete("all")
         for child in self.expense_legend_frame.winfo_children():
@@ -608,16 +609,7 @@ class FinancialApp(tk.Tk):
         x1 = x0 + size
         y1 = y0 + size
 
-        colors = [
-            "#4f46e5",
-            "#06b6d4",
-            "#f59e0b",
-            "#10b981",
-            "#ec4899",
-            "#8b5cf6",
-            "#14b8a6",
-            "#ef4444",
-        ]
+        colors = self._generate_colors(len(data))
 
         total = sum(value for _, value in data)
         start = 0
@@ -641,6 +633,72 @@ class FinancialApp(tk.Tk):
                 text=f"{category}: {value:.2f} KZT",
                 font=("Segoe UI", 9),
             ).pack(side=tk.LEFT, padx=6)
+
+    def _group_minor_categories(self, data, max_slices: int) -> list[tuple[str, float]]:
+        if len(data) <= max_slices:
+            return data
+
+        major = data[: max_slices - 1]
+        other_total = sum(value for _, value in data[max_slices - 1 :])
+        major.append(("Прочее", other_total))
+        return major
+
+    def _generate_colors(self, count: int) -> list[str]:
+        if count <= 0:
+            return []
+
+        base_palette = [
+            "#4f46e5",
+            "#06b6d4",
+            "#f59e0b",
+            "#10b981",
+            "#ec4899",
+            "#8b5cf6",
+            "#14b8a6",
+            "#ef4444",
+            "#f97316",
+            "#22c55e",
+            "#0ea5e9",
+            "#a855f7",
+        ]
+
+        if count <= len(base_palette):
+            return base_palette[:count]
+
+        colors = list(base_palette)
+        remaining = count - len(colors)
+        for i in range(remaining):
+            hue = (i * 360 / max(1, remaining)) % 360
+            saturation = 70
+            lightness = 50
+            colors.append(f"#{self._hsl_to_hex(hue, saturation, lightness)}")
+        return colors
+
+    def _hsl_to_hex(self, hue: float, saturation: float, lightness: float) -> str:
+        saturation /= 100
+        lightness /= 100
+
+        c = (1 - abs(2 * lightness - 1)) * saturation
+        x = c * (1 - abs((hue / 60) % 2 - 1))
+        m = lightness - c / 2
+
+        if 0 <= hue < 60:
+            r, g, b = c, x, 0
+        elif 60 <= hue < 120:
+            r, g, b = x, c, 0
+        elif 120 <= hue < 180:
+            r, g, b = 0, c, x
+        elif 180 <= hue < 240:
+            r, g, b = 0, x, c
+        elif 240 <= hue < 300:
+            r, g, b = x, 0, c
+        else:
+            r, g, b = c, 0, x
+
+        r = int((r + m) * 255)
+        g = int((g + m) * 255)
+        b = int((b + m) * 255)
+        return f"{r:02x}{g:02x}{b:02x}"
 
     def _draw_daily_bars(self, records) -> None:
         month_value = self.chart_month_var.get()

@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add yearly report export as a separate XLSX sheet and as a second PDF table after the statement
 - Limit XLSX report import to the first worksheet only
 - Add infographic block to the main window: expense pie chart plus daily/monthly income-expense histograms
+- Group minor expense categories into an "Other" slice in the pie chart
 
 ### Changed
 
