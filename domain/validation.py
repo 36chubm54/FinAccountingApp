@@ -1,11 +1,12 @@
 from datetime import date
 import calendar
+import re
 
 
 def parse_ymd(value: str) -> date:
-    parts = value.split("-")
-    if len(parts) != 3:
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
         raise ValueError("Invalid date format")
+    parts = value.split("-")
     year, month, day = map(int, parts)
     if not (1 <= month <= 12):
         raise ValueError("Invalid month")

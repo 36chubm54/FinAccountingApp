@@ -594,10 +594,6 @@ function generateReport() {
         for (const [cat, data] of Object.entries(grouped)) {
             const balance = data.income - data.expense;
             const block = createElement('div', 'report-category-block');
-            block.style.marginBottom = '20px';
-            block.style.padding = '16px';
-            block.style.background = 'var(--bg-color)';
-            block.style.borderRadius = '8px';
 
             const title = createElement('h4', null, cat);
             title.style.marginBottom = '10px';
@@ -668,35 +664,27 @@ function generateReport() {
         table.appendChild(tbody);
         resultContainer.appendChild(table);
 
-        const summary = createElement('div', null);
-        summary.style.marginTop = '20px';
-        summary.style.padding = '16px';
-        summary.style.background = 'var(--bg-color)';
-        summary.style.borderRadius = '8px';
+        const summary = createElement('div', 'report-summary');
 
         const totalIncomeEl = createElement(
             'p',
-            null,
+            'report-summary-income',
             `Всего доходов: ${formatNumber(totalIncome)} ₸`
         );
-        totalIncomeEl.style.color = 'var(--success-color)';
         summary.appendChild(totalIncomeEl);
 
         const totalExpenseEl = createElement(
             'p',
-            null,
+            'report-summary-expense',
             `Всего расходов: ${formatNumber(totalExpense)} ₸`
         );
-        totalExpenseEl.style.color = 'var(--danger-color)';
         summary.appendChild(totalExpenseEl);
 
         const totalEl = createElement(
             'p',
-            null,
+            'report-summary-total',
             `Итого: ${formatNumber(totalIncome - totalExpense)} ₸`
         );
-        totalEl.style.fontWeight = '700';
-        totalEl.style.fontSize = '1.2rem';
         summary.appendChild(totalEl);
 
         resultContainer.appendChild(summary);

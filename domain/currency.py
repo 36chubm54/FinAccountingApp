@@ -4,6 +4,10 @@ class CurrencyService:
         self._base = base
 
     def convert(self, amount: float, currency: str) -> float:
+        """Convert amount to base currency.
+
+        Raises KeyError if the currency is not present in the rates map.
+        """
         if currency == self._base:
             return amount
         return amount * self._rates[currency]

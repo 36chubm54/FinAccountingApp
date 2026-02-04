@@ -125,6 +125,17 @@ class TestJsonFileRecordRepository:
         assert len(records) == 1  # Only the valid income record
         assert isinstance(records[0], IncomeRecord)
 
+    def test_load_data_missing_mandatory_expenses_key(self):
+        # Ensure missing mandatory_expenses is normalized
+        json_data = {"initial_balance": 10.0, "records": []}
+        with open(self.temp_file.name, "w", encoding="utf-8") as f:
+            json.dump(json_data, f)
+
+        records = self.repo.load_all()
+        assert records == []
+        expenses = self.repo.load_mandatory_expenses()
+        assert expenses == []
+
     def test_delete_by_index_success(self):
         # Setup: add some records
         income1 = IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")

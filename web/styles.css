@@ -470,6 +470,33 @@ tr:hover {
     padding: 40px;
 }
 
+.report-category-block {
+    margin-bottom: 20px;
+    padding: 16px;
+    background: var(--bg-color);
+    border-radius: 8px;
+}
+
+.report-summary {
+    margin-top: 20px;
+    padding: 16px;
+    background: var(--bg-color);
+    border-radius: 8px;
+}
+
+.report-summary-income {
+    color: var(--success-color);
+}
+
+.report-summary-expense {
+    color: var(--danger-color);
+}
+
+.report-summary-total {
+    font-weight: 700;
+    font-size: 1.2rem;
+}
+
 /* Настройки */
 .settings-form {
     background-color: var(--card-bg);
