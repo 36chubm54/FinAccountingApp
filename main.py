@@ -27,20 +27,6 @@ from app.use_cases import (
     DeleteAllMandatoryExpenses,
     AddMandatoryExpenseToReport,
 )
-from utils.csv_utils import (
-    export_mandatory_expenses_to_csv,
-    import_mandatory_expenses_from_csv,
-)
-from utils.excel_utils import (
-    report_from_xlsx,
-    report_to_xlsx,
-    export_mandatory_expenses_to_xlsx,
-    import_mandatory_expenses_from_xlsx,
-)
-from utils.pdf_utils import (
-    report_to_pdf,
-    export_mandatory_expenses_to_pdf,
-)
 from domain.records import IncomeRecord, MandatoryExpenseRecord
 from app.services import CurrencyService
 
@@ -385,6 +371,8 @@ class FinancialApp(tk.Tk):
             )
             if filepath:
                 try:
+                    from utils.excel_utils import report_to_xlsx
+
                     report_to_xlsx(current_report, filepath)
                     messagebox.showinfo("Success", f"Report exported to {filepath}")
                     os.startfile(os.path.dirname(filepath))
@@ -403,6 +391,8 @@ class FinancialApp(tk.Tk):
             )
             if filepath:
                 try:
+                    from utils.pdf_utils import report_to_pdf
+
                     report_to_pdf(current_report, filepath)
                     messagebox.showinfo("Success", f"Report exported to {filepath}")
                     os.startfile(os.path.dirname(filepath))
@@ -556,6 +546,8 @@ class FinancialApp(tk.Tk):
             )
             if not confirm:
                 return
+
+            from utils.excel_utils import report_from_xlsx
 
             report = report_from_xlsx(filepath)
 
@@ -809,6 +801,8 @@ class FinancialApp(tk.Tk):
             )
             if filepath:
                 try:
+                    from utils.csv_utils import export_mandatory_expenses_to_csv
+
                     export_mandatory_expenses_to_csv(expenses, filepath)
                     messagebox.showinfo(
                         "Success", f"Mandatory expenses exported to {filepath}"
@@ -832,6 +826,8 @@ class FinancialApp(tk.Tk):
             )
             if filepath:
                 try:
+                    from utils.excel_utils import export_mandatory_expenses_to_xlsx
+
                     export_mandatory_expenses_to_xlsx(expenses, filepath)
                     messagebox.showinfo(
                         "Success", f"Mandatory expenses exported to {filepath}"
@@ -853,6 +849,8 @@ class FinancialApp(tk.Tk):
             )
             if filepath:
                 try:
+                    from utils.pdf_utils import export_mandatory_expenses_to_pdf
+
                     export_mandatory_expenses_to_pdf(expenses, filepath)
                     messagebox.showinfo(
                         "Success", f"Mandatory expenses exported to {filepath}"
@@ -890,6 +888,8 @@ class FinancialApp(tk.Tk):
                     return
 
                 # Import mandatory expenses
+                from utils.csv_utils import import_mandatory_expenses_from_csv
+
                 expenses = import_mandatory_expenses_from_csv(filepath)
 
                 # Delete all existing mandatory expenses first
@@ -936,6 +936,8 @@ class FinancialApp(tk.Tk):
                 )
                 if not confirm:
                     return
+
+                from utils.excel_utils import import_mandatory_expenses_from_xlsx
 
                 expenses = import_mandatory_expenses_from_xlsx(filepath)
 
