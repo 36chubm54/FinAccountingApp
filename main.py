@@ -1,5 +1,4 @@
 import sys
-import calendar
 import tkinter as tk
 from pathlib import Path
 from tkinter import (
@@ -43,7 +42,8 @@ class FinancialApp(tk.Tk):
         self.geometry("300x450")
 
         # Track open windows so repeated button presses focus them instead of creating new ones
-        self.add_window = None
+        self.add_record_window = None
+        self.add_mandatory_window = None
         self.report_window = None
         self.delete_window = None
         self.manage_window = None
@@ -137,53 +137,53 @@ class FinancialApp(tk.Tk):
 
     def _add_record(self, record_type, use_case_class):
         # If add window already exists, bring it to front and focus it
-        if self.add_window and self.add_window.winfo_exists():
+        if self.add_record_window and self.add_record_window.winfo_exists():
             try:
-                self.add_window.deiconify()
-                self.add_window.lift()
-                self.add_window.focus_force()
+                self.add_record_window.deiconify()
+                self.add_record_window.lift()
+                self.add_record_window.focus_force()
             except Exception:
                 pass
             return
 
         # Create add record window
-        add_window = Toplevel(self)
-        self.add_window = add_window
-        add_window.title(f"Add {record_type}")
-        add_window.geometry("400x300")
+        add_record_window = Toplevel(self)
+        self.add_record_window = add_record_window
+        add_record_window.title(f"Add {record_type}")
+        add_record_window.geometry("400x300")
 
         def _on_add_record_close():
             try:
-                add_window.destroy()
+                add_record_window.destroy()
             except Exception:
                 pass
-            self.add_window = None
+            self.add_record_window = None
 
-        add_window.protocol("WM_DELETE_WINDOW", _on_add_record_close)
+        add_record_window.protocol("WM_DELETE_WINDOW", _on_add_record_close)
 
-        tk.Label(self.add_window, text="Date (YYYY-MM-DD):").grid(
+        tk.Label(self.add_record_window, text="Date (YYYY-MM-DD):").grid(
             row=0, column=0, sticky="w", padx=10, pady=5
         )
-        date_entry = tk.Entry(self.add_window)
+        date_entry = tk.Entry(self.add_record_window)
         date_entry.grid(row=0, column=1, padx=10, pady=5)
 
-        tk.Label(self.add_window, text="Amount:").grid(
+        tk.Label(self.add_record_window, text="Amount:").grid(
             row=1, column=0, sticky="w", padx=10, pady=5
         )
-        amount_entry = tk.Entry(self.add_window)
+        amount_entry = tk.Entry(self.add_record_window)
         amount_entry.grid(row=1, column=1, padx=10, pady=5)
 
-        tk.Label(self.add_window, text="Currency (default KZT):").grid(
+        tk.Label(self.add_record_window, text="Currency (default KZT):").grid(
             row=2, column=0, sticky="w", padx=10, pady=5
         )
-        currency_entry = tk.Entry(self.add_window)
+        currency_entry = tk.Entry(self.add_record_window)
         currency_entry.insert(0, "KZT")
         currency_entry.grid(row=2, column=1, padx=10, pady=5)
 
-        tk.Label(self.add_window, text="Category (default General):").grid(
+        tk.Label(self.add_record_window, text="Category (default General):").grid(
             row=3, column=0, sticky="w", padx=10, pady=5
         )
-        category_entry = tk.Entry(self.add_window)
+        category_entry = tk.Entry(self.add_record_window)
         category_entry.insert(0, "General")
         category_entry.grid(row=3, column=1, padx=10, pady=5)
 
@@ -193,19 +193,10 @@ class FinancialApp(tk.Tk):
                 messagebox.showerror("Error", "Date is required.")
                 return
             try:
-                # Basic validation
-                year, month, day = map(int, date_str.split("-"))
-                if not (
-                    1 <= month <= 12 and 1 <= day <= calendar.monthrange(year, month)[1]
-                ):
-                    raise ValueError("Invalid date components")
-                # Check if date is not in the future
-                from datetime import datetime
+                from domain.validation import parse_ymd, ensure_not_future
 
-                entered_date = datetime(year, month, day).date()
-                today = datetime.now().date()
-                if entered_date > today:
-                    raise ValueError("Date cannot be in the future")
+                entered_date = parse_ymd(date_str)
+                ensure_not_future(entered_date)
             except ValueError as e:
                 messagebox.showerror(
                     "Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD."
@@ -234,15 +225,15 @@ class FinancialApp(tk.Tk):
                     "Success",
                     f"Added {record_type.lower()}: {amount} {currency} on {date_str} (category: {category})",
                 )
-                add_window.destroy()
+                add_record_window.destroy()
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to add record: {str(e)}")
 
-        save_btn = tk.Button(self.add_window, text="Save", command=save_and_close)
+        save_btn = tk.Button(self.add_record_window, text="Save", command=save_and_close)
         save_btn.grid(row=4, column=0, padx=10, pady=15)
 
         cancel_btn = tk.Button(
-            self.add_window, text="Cancel", command=self.add_window.destroy
+            self.add_record_window, text="Cancel", command=self.add_record_window.destroy
         )
         cancel_btn.grid(row=4, column=1, padx=10, pady=15)
 
@@ -325,7 +316,9 @@ class FinancialApp(tk.Tk):
                     groups = report.grouped_by_category()
                     for cat, cat_report in groups.items():
                         result_text.insert(tk.END, f"\nCategory: {cat}\n")
-                        result_text.insert(tk.END, cat_report.as_table() + "\n")
+                        result_text.insert(
+                            tk.END, cat_report.as_table(summary_mode="total_only") + "\n"
+                        )
                 else:
                     groups = report.grouped_by_category()
                     for cat, cat_report in groups.items():
@@ -574,6 +567,7 @@ class FinancialApp(tk.Tk):
 
             # Replace repository data
             self.repository.delete_all()
+            self.repository.save_initial_balance(report.initial_balance)
             imported_count = 0
             for record in report.records():
                 self.repository.save(record)
@@ -663,62 +657,62 @@ class FinancialApp(tk.Tk):
 
         def add_expense():
             # If manage window already exists, bring it to front and focus it
-            if self.add_window and self.add_window.winfo_exists():
+            if self.add_mandatory_window and self.add_mandatory_window.winfo_exists():
                 try:
-                    self.add_window.deiconify()
-                    self.add_window.lift()
-                    self.add_window.focus_force()
+                    self.add_mandatory_window.deiconify()
+                    self.add_mandatory_window.lift()
+                    self.add_mandatory_window.focus_force()
                 except Exception:
                     pass
                 return
 
             # Create add expense window
-            add_window = Toplevel(self)
-            self.add_window = add_window
-            add_window.title("Add Mandatory Expense")
-            add_window.geometry("400x300")
+            add_mandatory_window = Toplevel(self)
+            self.add_mandatory_window = add_mandatory_window
+            add_mandatory_window.title("Add Mandatory Expense")
+            add_mandatory_window.geometry("400x300")
 
             def _on_add_close():
                 try:
-                    add_window.destroy()
+                    add_mandatory_window.destroy()
                 except Exception:
                     pass
-                self.add_window = None
+                self.add_mandatory_window = None
 
-            add_window.protocol("WM_DELETE_WINDOW", _on_add_close)
+            add_mandatory_window.protocol("WM_DELETE_WINDOW", _on_add_close)
 
-            tk.Label(add_window, text="Amount:").grid(
+            tk.Label(add_mandatory_window, text="Amount:").grid(
                 row=0, column=0, sticky="w", padx=10, pady=5
             )
-            amount_entry = tk.Entry(add_window)
+            amount_entry = tk.Entry(add_mandatory_window)
             amount_entry.grid(row=0, column=1, padx=10, pady=5)
 
-            tk.Label(add_window, text="Currency (default KZT):").grid(
+            tk.Label(add_mandatory_window, text="Currency (default KZT):").grid(
                 row=1, column=0, sticky="w", padx=10, pady=5
             )
-            currency_entry = tk.Entry(add_window)
+            currency_entry = tk.Entry(add_mandatory_window)
             currency_entry.insert(0, "KZT")
             currency_entry.grid(row=1, column=1, padx=10, pady=5)
 
-            tk.Label(add_window, text="Category (default Mandatory):").grid(
+            tk.Label(add_mandatory_window, text="Category (default Mandatory):").grid(
                 row=2, column=0, sticky="w", padx=10, pady=5
             )
-            category_entry = tk.Entry(add_window)
+            category_entry = tk.Entry(add_mandatory_window)
             category_entry.insert(0, "Mandatory")
             category_entry.grid(row=2, column=1, padx=10, pady=5)
 
-            tk.Label(add_window, text="Description:").grid(
+            tk.Label(add_mandatory_window, text="Description:").grid(
                 row=3, column=0, sticky="w", padx=10, pady=5
             )
-            description_entry = tk.Entry(add_window)
+            description_entry = tk.Entry(add_mandatory_window)
             description_entry.grid(row=3, column=1, padx=10, pady=5)
 
-            tk.Label(add_window, text="Period:").grid(
+            tk.Label(add_mandatory_window, text="Period:").grid(
                 row=4, column=0, sticky="w", padx=10, pady=5
             )
             period_var = tk.StringVar(value="monthly")
             period_menu = tk.OptionMenu(
-                add_window, period_var, "daily", "weekly", "monthly", "yearly"
+                add_mandatory_window, period_var, "daily", "weekly", "monthly", "yearly"
             )
             period_menu.grid(row=4, column=1, padx=10, pady=5)
 
@@ -745,14 +739,14 @@ class FinancialApp(tk.Tk):
                         period=period,
                     )
                     messagebox.showinfo("Success", "Mandatory expense added.")
-                    add_window.destroy()
+                    add_mandatory_window.destroy()
                     refresh_list()
                 except ValueError as e:
                     messagebox.showerror("Error", str(e))
                 except Exception as e:
                     messagebox.showerror("Error", f"Failed to add expense: {str(e)}")
 
-            save_btn = tk.Button(add_window, text="Save", command=save_expense)
+            save_btn = tk.Button(add_mandatory_window, text="Save", command=save_expense)
             save_btn.grid(row=5, column=0, columnspan=2, pady=20)
 
         def delete_expense():
@@ -799,12 +793,9 @@ class FinancialApp(tk.Tk):
                 return
 
             try:
-                # Basic date validation
-                year, month, day = map(int, date.split("-"))
-                if not (
-                    1 <= month <= 12 and 1 <= day <= calendar.monthrange(year, month)[1]
-                ):
-                    raise ValueError("Invalid date")
+                from domain.validation import parse_ymd
+
+                parse_ymd(date)
 
                 add_to_report_use_case = AddMandatoryExpenseToReport(
                     self.repository, self.currency

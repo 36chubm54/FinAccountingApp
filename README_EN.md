@@ -784,20 +784,23 @@ print(f"Deleted: {deleted}") # True
 **File format `records.json`:**
 
 ```json
-[
-  {
-    "type": "income",
-    "date": "2025-01-15",
-    "amount": 350000.0,
-    "category": "Salary"
-  },
-  {
-    "type": "expense",
-    "date": "2025-01-16",
-    "amount": 25000.0,
-    "category": "Products"
-  }
-]
+{
+  "initial_balance": 0.0,
+  "records": [
+    {
+      "type": "income",
+      "date": "2025-01-15",
+      "amount": 350000.0,
+      "category": "Salary"
+    },
+    {
+      "type": "expense",
+      "date": "2025-01-16",
+      "amount": 25000.0,
+      "category": "Products"
+    }
+  ]
+}
 ```
 
 ---
@@ -911,7 +914,7 @@ project/
 ├── README.md                   # This documentation
 ├── README_EN.md                # English documentation
 ├── CHANGELOG.md                # Project changelog
-├── LICENSE.md                  # License information
+├── LICENSE                     # License information
 │
 ├── app/                        # APPLICATION LAYER
 │ ├── __init__.py

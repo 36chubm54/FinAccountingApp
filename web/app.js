@@ -18,6 +18,23 @@ const currencySymbols = {
     'RUB': '₽'
 };
 
+function clearElement(element) {
+    while (element.firstChild) {
+        element.removeChild(element.firstChild);
+    }
+}
+
+function createElement(tag, className, text) {
+    const el = document.createElement(tag);
+    if (className) {
+        el.className = className;
+    }
+    if (text !== undefined) {
+        el.textContent = text;
+    }
+    return el;
+}
+
 // Курсы валют (по умолчанию, будут обновлены с API)
 let exchangeRates = {
     'KZT': 1,
@@ -120,20 +137,46 @@ async function refreshExchangeRates() {
 // Обновление отображения курсов валют в интерфейсе
 function updateRatesDisplay() {
     const ratesContainer = document.getElementById('rates-display');
-    if (ratesContainer) {
-        const timestamp = localStorage.getItem(RATES_TIMESTAMP_KEY);
-        const date = timestamp ? new Date(parseInt(timestamp)).toLocaleDateString('ru-RU') : 'Н/Д';
-        
-        ratesContainer.innerHTML = `
-            <div class="rates-info">
-                <span class="rates-title">Курсы НБ РК (${date}):</span>
-                <span class="rate-item">USD: ${exchangeRates['USD']?.toFixed(2) || 'Н/Д'} ₸</span>
-                <span class="rate-item">EUR: ${exchangeRates['EUR']?.toFixed(2) || 'Н/Д'} ₸</span>
-                <span class="rate-item">RUB: ${exchangeRates['RUB']?.toFixed(2) || 'Н/Д'} ₸</span>
-                <button class="btn-refresh-rates" onclick="refreshExchangeRates()" title="Обновить курсы">🔄</button>
-            </div>
-        `;
+    if (!ratesContainer) {
+        return;
     }
+
+    clearElement(ratesContainer);
+
+    const timestamp = localStorage.getItem(RATES_TIMESTAMP_KEY);
+    const date = timestamp ? new Date(parseInt(timestamp)).toLocaleDateString('ru-RU') : 'Н/Д';
+
+    const info = createElement('div', 'rates-info');
+    info.appendChild(createElement('span', 'rates-title', `Курсы НБ РК (${date}):`));
+    info.appendChild(
+        createElement(
+            'span',
+            'rate-item',
+            `USD: ${exchangeRates['USD']?.toFixed(2) || 'Н/Д'} ₸`
+        )
+    );
+    info.appendChild(
+        createElement(
+            'span',
+            'rate-item',
+            `EUR: ${exchangeRates['EUR']?.toFixed(2) || 'Н/Д'} ₸`
+        )
+    );
+    info.appendChild(
+        createElement(
+            'span',
+            'rate-item',
+            `RUB: ${exchangeRates['RUB']?.toFixed(2) || 'Н/Д'} ₸`
+        )
+    );
+
+    const refreshButton = createElement('button', 'btn-refresh-rates', '🔄');
+    refreshButton.title = 'Обновить курсы';
+    refreshButton.type = 'button';
+    refreshButton.addEventListener('click', refreshExchangeRates);
+    info.appendChild(refreshButton);
+
+    ratesContainer.appendChild(info);
 }
 
 // Получить текущий курс валюты
@@ -346,12 +389,11 @@ function updateRecentTransactions(records) {
     const container = document.getElementById('recent-list');
     
     if (records.length === 0) {
-        container.innerHTML = `
-            <div class="empty-state">
-                <div class="icon">📝</div>
-                <p>Нет записей. Добавьте первую транзакцию!</p>
-            </div>
-        `;
+        clearElement(container);
+        const emptyState = createElement('div', 'empty-state');
+        emptyState.appendChild(createElement('div', 'icon', '📝'));
+        emptyState.appendChild(createElement('p', null, 'Нет записей. Добавьте первую транзакцию!'));
+        container.appendChild(emptyState);
         return;
     }
     
@@ -360,27 +402,30 @@ function updateRecentTransactions(records) {
         .sort((a, b) => new Date(b.date) - new Date(a.date))
         .slice(0, 5);
     
-    container.innerHTML = recentRecords.map(record => {
+    clearElement(container);
+    recentRecords.forEach(record => {
         const symbol = currencySymbols[record.currency];
         const isIncome = record.type === 'income';
-        
-        return `
-            <div class="transaction-item">
-                <div class="transaction-info">
-                    <div class="transaction-icon ${record.type}">
-                        ${isIncome ? '💵' : '💸'}
-                    </div>
-                    <div class="transaction-details">
-                        <span class="transaction-category">${record.category}</span>
-                        <span class="transaction-date">${formatDate(record.date)}</span>
-                    </div>
-                </div>
-                <span class="transaction-amount ${record.type}">
-                    ${isIncome ? '+' : '-'}${formatNumber(record.amount)} ${symbol}
-                </span>
-            </div>
-        `;
-    }).join('');
+
+        const item = createElement('div', 'transaction-item');
+        const info = createElement('div', 'transaction-info');
+        const icon = createElement('div', `transaction-icon ${record.type}`, isIncome ? '💵' : '💸');
+        const details = createElement('div', 'transaction-details');
+        details.appendChild(createElement('span', 'transaction-category', record.category));
+        details.appendChild(createElement('span', 'transaction-date', formatDate(record.date)));
+        info.appendChild(icon);
+        info.appendChild(details);
+        item.appendChild(info);
+
+        const amount = createElement(
+            'span',
+            `transaction-amount ${record.type}`,
+            `${isIncome ? '+' : '-'}${formatNumber(record.amount)} ${symbol}`
+        );
+        item.appendChild(amount);
+
+        container.appendChild(item);
+    });
 }
 
 // Обновление таблицы доходов
@@ -389,36 +434,46 @@ function updateIncomeTable() {
     const tbody = document.getElementById('income-table-body');
     
     if (records.length === 0) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="5" class="empty-state">
-                    <p>Нет записей о доходах</p>
-                </td>
-            </tr>
-        `;
+        clearElement(tbody);
+        const tr = document.createElement('tr');
+        const td = createElement('td', 'empty-state');
+        td.colSpan = 5;
+        td.appendChild(createElement('p', null, 'Нет записей о доходах'));
+        tr.appendChild(td);
+        tbody.appendChild(tr);
         return;
     }
     
-    tbody.innerHTML = records
+    clearElement(tbody);
+    records
         .sort((a, b) => new Date(b.date) - new Date(a.date))
-        .map(record => {
+        .forEach(record => {
             const symbol = currencySymbols[record.currency];
-            return `
-                <tr>
-                    <td>${formatDate(record.date)}</td>
-                    <td>${record.category}</td>
-                    <td style="color: var(--success-color); font-weight: 600;">
-                        +${formatNumber(record.amount)} ${symbol}
-                    </td>
-                    <td>${record.currency}</td>
-                    <td>
-                        <button class="action-btn delete" onclick="deleteRecord(${record.id})">
-                            Удалить
-                        </button>
-                    </td>
-                </tr>
-            `;
-        }).join('');
+            const tr = document.createElement('tr');
+
+            tr.appendChild(createElement('td', null, formatDate(record.date)));
+            tr.appendChild(createElement('td', null, record.category));
+
+            const amountTd = createElement(
+                'td',
+                null,
+                `+${formatNumber(record.amount)} ${symbol}`
+            );
+            amountTd.style.color = 'var(--success-color)';
+            amountTd.style.fontWeight = '600';
+            tr.appendChild(amountTd);
+
+            tr.appendChild(createElement('td', null, record.currency));
+
+            const actionTd = document.createElement('td');
+            const button = createElement('button', 'action-btn delete', 'Удалить');
+            button.type = 'button';
+            button.addEventListener('click', () => deleteRecord(record.id));
+            actionTd.appendChild(button);
+            tr.appendChild(actionTd);
+
+            tbody.appendChild(tr);
+        });
 }
 
 // Обновление таблицы расходов
@@ -427,36 +482,46 @@ function updateExpensesTable() {
     const tbody = document.getElementById('expenses-table-body');
     
     if (records.length === 0) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="5" class="empty-state">
-                    <p>Нет записей о расходах</p>
-                </td>
-            </tr>
-        `;
+        clearElement(tbody);
+        const tr = document.createElement('tr');
+        const td = createElement('td', 'empty-state');
+        td.colSpan = 5;
+        td.appendChild(createElement('p', null, 'Нет записей о расходах'));
+        tr.appendChild(td);
+        tbody.appendChild(tr);
         return;
     }
     
-    tbody.innerHTML = records
+    clearElement(tbody);
+    records
         .sort((a, b) => new Date(b.date) - new Date(a.date))
-        .map(record => {
+        .forEach(record => {
             const symbol = currencySymbols[record.currency];
-            return `
-                <tr>
-                    <td>${formatDate(record.date)}</td>
-                    <td>${record.category}</td>
-                    <td style="color: var(--danger-color); font-weight: 600;">
-                        -${formatNumber(record.amount)} ${symbol}
-                    </td>
-                    <td>${record.currency}</td>
-                    <td>
-                        <button class="action-btn delete" onclick="deleteRecord(${record.id})">
-                            Удалить
-                        </button>
-                    </td>
-                </tr>
-            `;
-        }).join('');
+            const tr = document.createElement('tr');
+
+            tr.appendChild(createElement('td', null, formatDate(record.date)));
+            tr.appendChild(createElement('td', null, record.category));
+
+            const amountTd = createElement(
+                'td',
+                null,
+                `-${formatNumber(record.amount)} ${symbol}`
+            );
+            amountTd.style.color = 'var(--danger-color)';
+            amountTd.style.fontWeight = '600';
+            tr.appendChild(amountTd);
+
+            tr.appendChild(createElement('td', null, record.currency));
+
+            const actionTd = document.createElement('td');
+            const button = createElement('button', 'action-btn delete', 'Удалить');
+            button.type = 'button';
+            button.addEventListener('click', () => deleteRecord(record.id));
+            actionTd.appendChild(button);
+            tr.appendChild(actionTd);
+
+            tbody.appendChild(tr);
+        });
 }
 
 // Обновление фильтра категорий
@@ -465,9 +530,12 @@ function updateCategoryFilter() {
     const categories = [...new Set(records.map(r => r.category))];
     const select = document.getElementById('report-category');
     
-    // Сохраняем первый option
-    select.innerHTML = '<option value="">Все категории</option>';
-    
+    clearElement(select);
+    const firstOption = document.createElement('option');
+    firstOption.value = '';
+    firstOption.textContent = 'Все категории';
+    select.appendChild(firstOption);
+
     categories.forEach(cat => {
         const option = document.createElement('option');
         option.value = cat;
@@ -497,12 +565,11 @@ function generateReport() {
     }
     
     if (filteredRecords.length === 0) {
-        resultContainer.innerHTML = `
-            <div class="empty-state">
-                <div class="icon">📊</div>
-                <p>Нет данных для отображения</p>
-            </div>
-        `;
+        clearElement(resultContainer);
+        const emptyState = createElement('div', 'empty-state');
+        emptyState.appendChild(createElement('div', 'icon', '📊'));
+        emptyState.appendChild(createElement('p', null, 'Нет данных для отображения'));
+        resultContainer.appendChild(emptyState);
         return;
     }
     
@@ -522,73 +589,117 @@ function generateReport() {
             grouped[r.category].records.push(r);
         });
         
-        let html = '<div class="report-grouped">';
+        clearElement(resultContainer);
+        const wrapper = createElement('div', 'report-grouped');
         for (const [cat, data] of Object.entries(grouped)) {
             const balance = data.income - data.expense;
-            html += `
-                <div class="report-category-block" style="margin-bottom: 20px; padding: 16px; background: var(--bg-color); border-radius: 8px;">
-                    <h4 style="margin-bottom: 10px;">${cat}</h4>
-                    <p style="color: var(--success-color);">Доходы: ${formatNumber(data.income)} ₸</p>
-                    <p style="color: var(--danger-color);">Расходы: ${formatNumber(data.expense)} ₸</p>
-                    <p style="font-weight: 600;">Баланс: ${formatNumber(balance)} ₸</p>
-                </div>
-            `;
+            const block = createElement('div', 'report-category-block');
+            block.style.marginBottom = '20px';
+            block.style.padding = '16px';
+            block.style.background = 'var(--bg-color)';
+            block.style.borderRadius = '8px';
+
+            const title = createElement('h4', null, cat);
+            title.style.marginBottom = '10px';
+            block.appendChild(title);
+
+            const income = createElement('p', null, `Доходы: ${formatNumber(data.income)} ₸`);
+            income.style.color = 'var(--success-color)';
+            block.appendChild(income);
+
+            const expense = createElement('p', null, `Расходы: ${formatNumber(data.expense)} ₸`);
+            expense.style.color = 'var(--danger-color)';
+            block.appendChild(expense);
+
+            const balanceEl = createElement('p', null, `Баланс: ${formatNumber(balance)} ₸`);
+            balanceEl.style.fontWeight = '600';
+            block.appendChild(balanceEl);
+
+            wrapper.appendChild(block);
         }
-        html += '</div>';
-        resultContainer.innerHTML = html;
+        resultContainer.appendChild(wrapper);
     } else {
         // Общая таблица
         let totalIncome = 0;
         let totalExpense = 0;
-        
-        let html = `
-            <table style="width: 100%;">
-                <thead>
-                    <tr>
-                        <th>Дата</th>
-                        <th>Тип</th>
-                        <th>Категория</th>
-                        <th>Сумма</th>
-                    </tr>
-                </thead>
-                <tbody>
-        `;
-        
+
+        clearElement(resultContainer);
+        const table = document.createElement('table');
+        table.style.width = '100%';
+
+        const thead = document.createElement('thead');
+        const headRow = document.createElement('tr');
+        ['Дата', 'Тип', 'Категория', 'Сумма'].forEach(text => {
+            headRow.appendChild(createElement('th', null, text));
+        });
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
         filteredRecords
             .sort((a, b) => new Date(b.date) - new Date(a.date))
             .forEach(r => {
                 const symbol = currencySymbols[r.currency];
                 const amountInKZT = r.amount * exchangeRates[r.currency];
-                
+
                 if (r.type === 'income') {
                     totalIncome += amountInKZT;
                 } else {
                     totalExpense += amountInKZT;
                 }
-                
-                html += `
-                    <tr>
-                        <td>${formatDate(r.date)}</td>
-                        <td>${r.type === 'income' ? 'Доход' : 'Расход'}</td>
-                        <td>${r.category}</td>
-                        <td style="color: ${r.type === 'income' ? 'var(--success-color)' : 'var(--danger-color)'}; font-weight: 600;">
-                            ${r.type === 'income' ? '+' : '-'}${formatNumber(r.amount)} ${symbol}
-                        </td>
-                    </tr>
-                `;
+
+                const tr = document.createElement('tr');
+                tr.appendChild(createElement('td', null, formatDate(r.date)));
+                tr.appendChild(createElement('td', null, r.type === 'income' ? 'Доход' : 'Расход'));
+                tr.appendChild(createElement('td', null, r.category));
+
+                const amountTd = createElement(
+                    'td',
+                    null,
+                    `${r.type === 'income' ? '+' : '-'}${formatNumber(r.amount)} ${symbol}`
+                );
+                amountTd.style.color =
+                    r.type === 'income' ? 'var(--success-color)' : 'var(--danger-color)';
+                amountTd.style.fontWeight = '600';
+                tr.appendChild(amountTd);
+
+                tbody.appendChild(tr);
             });
-        
-        html += `
-                </tbody>
-            </table>
-            <div style="margin-top: 20px; padding: 16px; background: var(--bg-color); border-radius: 8px;">
-                <p style="color: var(--success-color);">Всего доходов: ${formatNumber(totalIncome)} ₸</p>
-                <p style="color: var(--danger-color);">Всего расходов: ${formatNumber(totalExpense)} ₸</p>
-                <p style="font-weight: 700; font-size: 1.2rem;">Итого: ${formatNumber(totalIncome - totalExpense)} ₸</p>
-            </div>
-        `;
-        
-        resultContainer.innerHTML = html;
+        table.appendChild(tbody);
+        resultContainer.appendChild(table);
+
+        const summary = createElement('div', null);
+        summary.style.marginTop = '20px';
+        summary.style.padding = '16px';
+        summary.style.background = 'var(--bg-color)';
+        summary.style.borderRadius = '8px';
+
+        const totalIncomeEl = createElement(
+            'p',
+            null,
+            `Всего доходов: ${formatNumber(totalIncome)} ₸`
+        );
+        totalIncomeEl.style.color = 'var(--success-color)';
+        summary.appendChild(totalIncomeEl);
+
+        const totalExpenseEl = createElement(
+            'p',
+            null,
+            `Всего расходов: ${formatNumber(totalExpense)} ₸`
+        );
+        totalExpenseEl.style.color = 'var(--danger-color)';
+        summary.appendChild(totalExpenseEl);
+
+        const totalEl = createElement(
+            'p',
+            null,
+            `Итого: ${formatNumber(totalIncome - totalExpense)} ₸`
+        );
+        totalEl.style.fontWeight = '700';
+        totalEl.style.fontSize = '1.2rem';
+        summary.appendChild(totalEl);
+
+        resultContainer.appendChild(summary);
     }
     
     showToast('Отчёт сформирован', 'success');
@@ -632,8 +743,8 @@ function exportCSV() {
     ]);
     
     const csvContent = [
-        headers.join(','),
-        ...rows.map(row => row.join(','))
+        headers.map(csvEscape).join(','),
+        ...rows.map(row => row.map(csvEscape).join(','))
     ].join('\n');
     
     // Скачивание файла
@@ -695,6 +806,14 @@ function formatNumber(num) {
 function formatDate(dateStr) {
     const date = new Date(dateStr);
     return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function csvEscape(value) {
+    const str = String(value ?? '');
+    if (/[",\n\r]/.test(str)) {
+        return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
 }
 
 // Уведомления

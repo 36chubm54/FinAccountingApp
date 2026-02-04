@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Enable online currency rates by default and refactor parsing
+- Refactor online currency rates fetching (online mode remains opt-in)
 - Replace CLI with Tkinter GUI for financial accounting
 
 ### Documentation

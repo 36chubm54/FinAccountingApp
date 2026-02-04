@@ -30,7 +30,7 @@ class Report:
                 groups[record.category] = []
             groups[record.category].append(record)
         return {
-            cat: Report(recs, self._initial_balance) for cat, recs in groups.items()
+            cat: Report(recs, 0.0) for cat, recs in groups.items()
         }
 
     def sorted_by_date(self) -> "Report":
@@ -41,6 +41,10 @@ class Report:
 
     def records(self) -> list[Record]:
         return list(self._records)
+
+    @property
+    def initial_balance(self) -> float:
+        return self._initial_balance
 
     @staticmethod
     def _parse_year_month(date_str: str) -> Optional[Tuple[int, int]]:
@@ -87,21 +91,24 @@ class Report:
 
         up_to_month = max(1, min(12, up_to_month))
 
+        aggregates: Dict[Tuple[int, int], Tuple[float, float]] = {}
+        for record in self._records:
+            parsed = self._parse_year_month(record.date)
+            if not parsed:
+                continue
+            rec_year, rec_month = parsed
+            if rec_year != year or not (1 <= rec_month <= up_to_month):
+                continue
+            income_total, expense_total = aggregates.get((rec_year, rec_month), (0.0, 0.0))
+            if isinstance(record, IncomeRecord):
+                income_total += record.amount
+            else:
+                expense_total += abs(record.amount)
+            aggregates[(rec_year, rec_month)] = (income_total, expense_total)
+
         rows: List[Tuple[str, float, float]] = []
         for month in range(1, up_to_month + 1):
-            income_total = 0.0
-            expense_total = 0.0
-            for record in self._records:
-                parsed = self._parse_year_month(record.date)
-                if not parsed:
-                    continue
-                rec_year, rec_month = parsed
-                if rec_year != year or rec_month != month:
-                    continue
-                if isinstance(record, IncomeRecord):
-                    income_total += record.amount
-                else:
-                    expense_total += abs(record.amount)
+            income_total, expense_total = aggregates.get((year, month), (0.0, 0.0))
             rows.append((f"{year}-{month:02d}", income_total, expense_total))
 
         return year, rows
@@ -125,8 +132,13 @@ class Report:
         )
         return str(table)
 
-    def as_table(self) -> str:
-        """Return a string representation of records in table format."""
+    def as_table(self, summary_mode: str = "full") -> str:
+        """Return a string representation of records in table format.
+
+        summary_mode:
+            - "full": show SUBTOTAL + FINAL BALANCE
+            - "total_only": show a single TOTAL row
+        """
         table = PrettyTable()
         table.field_names = ["Date", "Type", "Category", "Amount (KZT)"]
 
@@ -155,23 +167,26 @@ class Report:
             )
             table.add_row([record.date, record_type, record.category, amount_str])
 
-        # Add total row for records
+        # Add summary rows
         records_total = sum(r.signed_amount() for r in self._records)
         records_total_str = (
             f"{records_total:.2f}"
             if records_total >= 0
             else f"({abs(records_total):.2f})"
         )
-        table.add_row(["SUBTOTAL", "", "", records_total_str], divider=True)
 
-        # Add final balance row
         final_balance = self.total()
         final_balance_str = (
             f"{final_balance:.2f}"
             if final_balance >= 0
             else f"({abs(final_balance):.2f})"
         )
-        table.add_row(["FINAL BALANCE", "", "", final_balance_str], divider=True)
+
+        if summary_mode == "total_only":
+            table.add_row(["TOTAL", "", "", final_balance_str], divider=True)
+        else:
+            table.add_row(["SUBTOTAL", "", "", records_total_str], divider=True)
+            table.add_row(["FINAL BALANCE", "", "", final_balance_str], divider=True)
 
         return str(table)
 

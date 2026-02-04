@@ -173,3 +173,16 @@ class TestImportFromCSV:
             mock_repo.delete_all.assert_called_once()
             assert mock_repo.save.call_count == 3
             assert result == 3
+
+    def test_execute_saves_initial_balance(self):
+        mock_repo = Mock(spec=RecordRepository)
+        with patch("app.use_cases.Report") as mock_report_class:
+            mock_report = Mock()
+            mock_report.records.return_value = []
+            mock_report.initial_balance = 123.45
+            mock_report_class.from_csv.return_value = mock_report
+
+            use_case = ImportFromCSV(repository=mock_repo)
+            use_case.execute("test.csv")
+
+            mock_repo.save_initial_balance.assert_called_once_with(123.45)

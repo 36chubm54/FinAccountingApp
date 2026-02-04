@@ -443,7 +443,7 @@ web/
 ├────────────────────────────────────────────────────────────────┤
 │                         UTILITIES                              │
 │           utils/csv_utils.py  (импорт/экспорт CSV)             │
-│           utils/xlsx_utils.py (импорт/экспорт XLSX)            │
+│           utils/excel_utils.py (импорт/экспорт XLSX)           │
 │           utils/pdf_utils.py  (импорт/экспорт PDF)             │
 └────────────────────────────────────────────────────────────────┘
 ```
@@ -784,20 +784,23 @@ print(f"Удалено: {deleted}")  # True
 **Формат файла `records.json`:**
 
 ```json
-[
-  {
-    "type": "income",
-    "date": "2025-01-15",
-    "amount": 350000.0,
-    "category": "Зарплата"
-  },
-  {
-    "type": "expense",
-    "date": "2025-01-16",
-    "amount": 25000.0,
-    "category": "Продукты"
-  }
-]
+{
+  "initial_balance": 0.0,
+  "records": [
+    {
+      "type": "income",
+      "date": "2025-01-15",
+      "amount": 350000.0,
+      "category": "Зарплата"
+    },
+    {
+      "type": "expense",
+      "date": "2025-01-16",
+      "amount": 25000.0,
+      "category": "Продукты"
+    }
+  ]
+}
 ```
 
 ---
@@ -911,7 +914,7 @@ project/
 ├── README.md                   # Эта документация
 ├── README_EN.md                # Документация на английском
 ├── CHANGELOG.md                # История изменений
-├── LICENSE.md                  # Лицензия
+├── LICENSE                     # Лицензия
 │
 ├── app/                        # APPLICATION LAYER
 │   ├── __init__.py
@@ -947,7 +950,7 @@ project/
 └── utils/                      # UTILITIES
     ├── __init__.py
     ├── csv_utils.py            # Импорт/экспорт CSV
-    ├── xlsx_utils.py           # Импорт/экспорт XLSX
+    ├── excel_utils.py          # Импорт/экспорт XLSX
     └── pdf_utils.py            # Импорт/экспорт PDF
 ```
 

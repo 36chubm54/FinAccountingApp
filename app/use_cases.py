@@ -68,6 +68,7 @@ class ImportFromCSV:
 
         # Delete all existing records first
         self._repository.delete_all()
+        self._repository.save_initial_balance(report.initial_balance)
 
         # Import new records
         imported_count = 0
@@ -91,18 +92,9 @@ class CreateMandatoryExpense:
         description: str,
         period: str,
     ):
-        from typing import Literal
+        from domain.validation import ensure_valid_period
 
-        valid_periods: list[Literal["daily", "weekly", "monthly", "yearly"]] = [
-            "daily",
-            "weekly",
-            "monthly",
-            "yearly",
-        ]
-        if period not in valid_periods:
-            raise ValueError(
-                f"Invalid period: {period}. Must be one of {valid_periods}"
-            )
+        ensure_valid_period(period)
 
         normalized = self._currency.convert(amount, currency)
         expense = MandatoryExpenseRecord(

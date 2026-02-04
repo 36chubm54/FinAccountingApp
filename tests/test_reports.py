@@ -73,6 +73,16 @@ class TestReport:
         assert groups["Salary"].total() == 150.0  # 100 + 50
         assert groups["Food"].total() == -50.0  # -30 - 20
 
+    def test_grouped_by_category_does_not_include_initial_balance(self):
+        records = [
+            IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
+            ExpenseRecord(date="2025-01-02", amount=30.0, category="Food"),
+        ]
+        report = Report(records, initial_balance=500.0)
+        groups = report.grouped_by_category()
+        assert groups["Salary"].total() == 100.0
+        assert groups["Food"].total() == -30.0
+
     def test_sorted_by_date(self):
         records = [
             IncomeRecord(date="2025-01-03", amount=50.0, category="Bonus"),

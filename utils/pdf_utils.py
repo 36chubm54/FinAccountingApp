@@ -68,8 +68,8 @@ def report_to_pdf(report: Report, filepath: str) -> None:
     header = ["Date", "Type", "Category", "Amount (KZT)"]
     data.append(header)
 
-    if getattr(report, "_initial_balance", 0) != 0:
-        data.append(["", "Initial Balance", "", f"{report._initial_balance:.2f}"])
+    if getattr(report, "initial_balance", 0) != 0:
+        data.append(["", "Initial Balance", "", f"{report.initial_balance:.2f}"])
 
     for record in sorted(report.records(), key=lambda r: r.date):
         if isinstance(record, IncomeRecord):

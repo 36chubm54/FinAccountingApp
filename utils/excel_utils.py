@@ -24,8 +24,8 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
     ws.append(["Date", "Type", "Category", "Amount (KZT)"])
 
     # initial balance
-    if getattr(report, "_initial_balance", 0) != 0:
-        ws.append(["", "Initial Balance", "", f"{report._initial_balance:.2f}"])
+    if getattr(report, "initial_balance", 0) != 0:
+        ws.append(["", "Initial Balance", "", f"{report.initial_balance:.2f}"])
 
     for record in sorted(report.records(), key=lambda r: r.date):
         if isinstance(record, IncomeRecord):

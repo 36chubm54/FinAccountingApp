@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 from abc import ABC, abstractmethod
 from domain.records import Record, IncomeRecord, ExpenseRecord, MandatoryExpenseRecord
 
@@ -62,15 +64,38 @@ class JsonFileRecordRepository(RecordRepository):
             with open(self._file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
-            return {"initial_balance": 0.0, "records": []}
+            return {"initial_balance": 0.0, "records": [], "mandatory_expenses": []}
         if isinstance(data, list):
             # Migrate old format
-            return {"initial_balance": 0.0, "records": data}
+            data = {"initial_balance": 0.0, "records": data}
+        if not isinstance(data, dict):
+            data = {"initial_balance": 0.0, "records": [], "mandatory_expenses": []}
+
+        if "initial_balance" not in data or not isinstance(
+            data.get("initial_balance"), (int, float)
+        ):
+            data["initial_balance"] = 0.0
+        if "records" not in data or not isinstance(data.get("records"), list):
+            data["records"] = []
+        if "mandatory_expenses" not in data or not isinstance(
+            data.get("mandatory_expenses"), list
+        ):
+            data["mandatory_expenses"] = []
         return data
 
     def _save_data(self, data: dict) -> None:
-        with open(self._file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        directory = os.path.dirname(self._file_path) or "."
+        fd, tmp_path = tempfile.mkstemp(prefix=".records_", suffix=".json", dir=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            os.replace(tmp_path, self._file_path)
+        finally:
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except Exception:
+                pass
 
     def save(self, record: Record) -> None:
         data = self._load_data()

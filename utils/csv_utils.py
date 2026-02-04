@@ -13,9 +13,9 @@ def report_to_csv(report: Report, filepath: str) -> None:
         writer.writerow(["Date", "Type", "Category", "Amount (KZT)"])
 
         # Add initial balance row if not zero
-        if report._initial_balance != 0:
+        if report.initial_balance != 0:
             writer.writerow(
-                ["", "Initial Balance", "", f"{report._initial_balance:.2f}"]
+                ["", "Initial Balance", "", f"{report.initial_balance:.2f}"]
             )
 
         for record in sorted_records:
