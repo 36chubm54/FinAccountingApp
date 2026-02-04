@@ -66,8 +66,8 @@ After running `python main.py`, a window with nine buttons will open:
 - **Delete All Records** - Delete all records
 - **Set Initial Balance** — Setting the initial balance
 - **Manage Mandatory** - Management of mandatory expenses
-- Format selector for import/export (CSV, XLSX, PDF)
-- **Import** — Import data from a file of the selected format (CSV, XLSX, PDF)
+- Format selector for import/export (CSV, XLSX)
+- **Import** — Import data from a file of the selected format
 
 ### Adding income/expense
 
@@ -76,7 +76,7 @@ After running `python main.py`, a window with nine buttons will open:
 3. Enter the amount (floating point number).
 4. Enter the currency (default KZT). Supported any currency (USD, EUR, RUB, etc.).
 5. Enter a category (default is "General").
-6. Click OK.
+6. Click "Save" or "Cancel".
 
 The amount is automatically converted into the base currency (KZT) at the current rate.
 

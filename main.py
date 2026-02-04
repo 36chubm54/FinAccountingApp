@@ -57,6 +57,7 @@ class FinancialApp(tk.Tk):
         self.geometry("300x450")
 
         # Track open windows so repeated button presses focus them instead of creating new ones
+        self.add_window = None
         self.report_window = None
         self.delete_window = None
         self.manage_window = None
@@ -149,55 +150,115 @@ class FinancialApp(tk.Tk):
         self._add_record("Expense", CreateExpense)
 
     def _add_record(self, record_type, use_case_class):
-        date = simpledialog.askstring("Date", "Enter date (YYYY-MM-DD):", parent=self)
-        if not date:
-            return
-        try:
-            # Basic validation
-            year, month, day = map(int, date.split("-"))
-            if not (
-                1 <= month <= 12 and 1 <= day <= calendar.monthrange(year, month)[1]
-            ):
-                raise ValueError("Invalid date components")
-            # Check if date is not in the future
-            from datetime import datetime
-
-            entered_date = datetime(year, month, day).date()
-            today = datetime.now().date()
-            if entered_date > today:
-                raise ValueError("Date cannot be in the future")
-        except ValueError as e:
-            messagebox.showerror("Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD.")
+        # If add window already exists, bring it to front and focus it
+        if self.add_window and self.add_window.winfo_exists():
+            try:
+                self.add_window.deiconify()
+                self.add_window.lift()
+                self.add_window.focus_force()
+            except Exception:
+                pass
             return
 
-        amount_str = simpledialog.askstring("Amount", "Enter amount:", parent=self)
-        if not amount_str:
-            return
-        try:
-            amount = float(amount_str)
-        except ValueError:
-            messagebox.showerror("Error", "Invalid amount.")
-            return
+        # Create add record window
+        add_window = Toplevel(self)
+        self.add_window = add_window
+        add_window.title(f"Add {record_type}")
+        add_window.geometry("400x300")
 
-        currency = (
-            simpledialog.askstring(
-                "Currency", "Enter currency (default KZT):", parent=self
-            )
-            or "KZT"
+        def _on_add_record_close():
+            try:
+                add_window.destroy()
+            except Exception:
+                pass
+            self.add_window = None
+
+        add_window.protocol("WM_DELETE_WINDOW", _on_add_record_close)
+
+        tk.Label(self.add_window, text="Date (YYYY-MM-DD):").grid(
+            row=0, column=0, sticky="w", padx=10, pady=5
         )
-        category = (
-            simpledialog.askstring(
-                "Category", "Enter category (default General):", parent=self
-            )
-            or "General"
-        )
+        date_entry = tk.Entry(self.add_window)
+        date_entry.grid(row=0, column=1, padx=10, pady=5)
 
-        use_case = use_case_class(self.repository, self.currency)
-        use_case.execute(date=date, amount=amount, currency=currency, category=category)
-        messagebox.showinfo(
-            "Success",
-            f"Added {record_type.lower()}: {amount} {currency} on {date} (category: {category})",
+        tk.Label(self.add_window, text="Amount:").grid(
+            row=1, column=0, sticky="w", padx=10, pady=5
         )
+        amount_entry = tk.Entry(self.add_window)
+        amount_entry.grid(row=1, column=1, padx=10, pady=5)
+
+        tk.Label(self.add_window, text="Currency (default KZT):").grid(
+            row=2, column=0, sticky="w", padx=10, pady=5
+        )
+        currency_entry = tk.Entry(self.add_window)
+        currency_entry.insert(0, "KZT")
+        currency_entry.grid(row=2, column=1, padx=10, pady=5)
+
+        tk.Label(self.add_window, text="Category (default General):").grid(
+            row=3, column=0, sticky="w", padx=10, pady=5
+        )
+        category_entry = tk.Entry(self.add_window)
+        category_entry.insert(0, "General")
+        category_entry.grid(row=3, column=1, padx=10, pady=5)
+
+        def save_and_close():
+            date_str = date_entry.get().strip()
+            if not date_str:
+                messagebox.showerror("Error", "Date is required.")
+                return
+            try:
+                # Basic validation
+                year, month, day = map(int, date_str.split("-"))
+                if not (
+                    1 <= month <= 12 and 1 <= day <= calendar.monthrange(year, month)[1]
+                ):
+                    raise ValueError("Invalid date components")
+                # Check if date is not in the future
+                from datetime import datetime
+
+                entered_date = datetime(year, month, day).date()
+                today = datetime.now().date()
+                if entered_date > today:
+                    raise ValueError("Date cannot be in the future")
+            except ValueError as e:
+                messagebox.showerror(
+                    "Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD."
+                )
+                return
+
+            amount_str = amount_entry.get().strip()
+            if not amount_str:
+                messagebox.showerror("Error", "Amount is required.")
+                return
+            try:
+                amount = float(amount_str)
+            except ValueError:
+                messagebox.showerror("Error", "Invalid amount.")
+                return
+
+            currency = (currency_entry.get() or "KZT").strip()
+            category = (category_entry.get() or "General").strip()
+
+            try:
+                use_case = use_case_class(self.repository, self.currency)
+                use_case.execute(
+                    date=date_str, amount=amount, currency=currency, category=category
+                )
+                messagebox.showinfo(
+                    "Success",
+                    f"Added {record_type.lower()}: {amount} {currency} on {date_str} (category: {category})",
+                )
+                add_window.destroy()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to add record: {str(e)}")
+
+        save_btn = tk.Button(self.add_window, text="Save", command=save_and_close)
+        save_btn.grid(row=4, column=0, padx=10, pady=15)
+
+        cancel_btn = tk.Button(
+            self.add_window, text="Cancel", command=self.add_window.destroy
+        )
+        cancel_btn.grid(row=4, column=1, padx=10, pady=15)
 
     def generate_report(self):
         # If report window already exists, bring it to front and focus it
@@ -981,4 +1042,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        messagebox.showinfo("Info", "Application closed by user.")
