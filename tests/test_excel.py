@@ -1,6 +1,8 @@
 import tempfile
 import os
 
+from openpyxl import load_workbook
+
 from domain.records import (
     IncomeRecord,
     ExpenseRecord,
@@ -32,6 +34,13 @@ def test_report_xlsx_roundtrip():
         tmp_path = tmp.name
     try:
         report_to_xlsx(report, tmp_path)
+        wb = load_workbook(tmp_path, data_only=True)
+        try:
+            assert "Yearly Report" in wb.sheetnames
+            summary_ws = wb["Yearly Report"]
+            assert summary_ws.cell(1, 1).value == "Month (2025)"
+        finally:
+            wb.close()
         imported = report_from_xlsx(tmp_path)
         assert len(imported.records()) == 2
         assert abs(imported._initial_balance - 50.0) < 1e-6

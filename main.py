@@ -307,6 +307,19 @@ class FinancialApp(tk.Tk):
             current_report = report  # Store the report
 
             result_text.delete(1.0, tk.END)
+            summary_year = None
+            summary_up_to_month = None
+            if period:
+                try:
+                    parts = period.split("-")
+                    if parts and parts[0].isdigit():
+                        summary_year = int(parts[0])
+                    if len(parts) > 1 and parts[1].isdigit():
+                        summary_up_to_month = int(parts[1])
+                except Exception:
+                    summary_year = None
+                    summary_up_to_month = None
+
             if group_var.get():
                 if table_var.get():
                     groups = report.grouped_by_category()
@@ -329,6 +342,14 @@ class FinancialApp(tk.Tk):
                 )
                 result_text.insert(tk.END, f"Records Total: {records_total:.2f} KZT\n")
                 result_text.insert(tk.END, f"Final Balance: {final_balance:.2f} KZT\n")
+
+            summary_table = report.monthly_income_expense_table(
+                year=summary_year, up_to_month=summary_up_to_month
+            )
+            result_text.insert(
+                tk.END, "\n\nMonthly Income/Expense Summary (Past & Current Months)\n"
+            )
+            result_text.insert(tk.END, summary_table + "\n")
 
         generate_btn = tk.Button(report_window, text="Generate", command=generate)
         generate_btn.grid(row=4, column=0, pady=10)

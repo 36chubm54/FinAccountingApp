@@ -91,9 +91,9 @@ The amount is automatically converted into the base currency (KZT) at the curren
    - **Display as table**: Output in table format.
 4. Click "Generate".
 
-The result will be displayed in the text field. For tables, a formatted table with a total is used.
+The result will be displayed in the text field. For tables, a formatted table with a total is used. After the main output, a monthly income/expense summary for past and current months is appended (based on the selected period or the latest year with data).
 
-Additionally: in the report generation window, the **Export** button is available to save the report in any available format. The file contains the `Report` sheet with the `Date, Type, Category, Amount (KZT)` columns. If an initial balance is specified, it is written on a separate line with `Type = Initial Balance`.
+Additionally: in the report generation window, the **Export** button is available to save the report in any available format. The Excel file contains a `Report` sheet with the `Date, Type, Category, Amount (KZT)` columns and a separate `Yearly Report` sheet with a monthly income/expense summary. In the PDF file, the summary is added as the second table right after the statement. If an initial balance is specified, it is written on a separate line with `Type = Initial Balance`.
 
 ### Deleting an entry
 
@@ -185,6 +185,8 @@ XLSX file format:
 - Columns: `Date`, `Type`, `Category`, `Amount (KZT)` (first row as headers)
 - Initial balance can be specified as a row with empty `Date` and `Type = Initial Balance`.
 
+On export, a `Yearly Report` sheet is also added with a monthly income/expense summary (imports read only the first worksheet; all other sheets are ignored).
+
 Import rules follow CSV rules: invalid rows are skipped; supported types are `Income`, `Expense`, and `Mandatory Expense`.
 
 **Import rules:**
@@ -222,7 +224,7 @@ Amount (KZT),Category,Description,Period
 20000.00,Internet,Home internet connection,monthly
 ```
 
-> **Note:** The PDF format for mandatory expenses is similar to CSV.
+> **Note:** CSV format is required for data backup. The PDF format for mandatory expenses has a tabular structure with appropriate columns and headings. It is only supported for export, PDF import is not supported.
 
 #### Import mandatory expenses
 

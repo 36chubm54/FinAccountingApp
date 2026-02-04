@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add Excel import/export for mandatory expenses (sheet `Mandatory` with columns `Amount (KZT),Category,Description,Period`)
 - Add PDF export support for reports and mandatory expenses
 - UI: replace separate import/export buttons with format dropdowns and single Import/Export buttons (supports CSV, XLSX, PDF)
+- Add monthly income/expense summary for past and current months in report output
+- Add yearly report export as a separate XLSX sheet and as a second PDF table after the statement
+- Limit XLSX report import to the first worksheet only
 
 ### Changed
 

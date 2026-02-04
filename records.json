@@ -108,6 +108,12 @@
       "category": "Подписка",
       "description": "",
       "period": "monthly"
+    },
+    {
+      "type": "income",
+      "date": "2025-01-01",
+      "amount": 500.0,
+      "category": "General"
     }
   ],
   "mandatory_expenses": [

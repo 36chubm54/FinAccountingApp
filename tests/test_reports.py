@@ -122,3 +122,33 @@ class TestReport:
         assert "70.00" in table_str  # 100 - 30
         assert "FINAL BALANCE" in table_str
         assert "120.00" in table_str  # 50 + 70
+
+    def test_monthly_income_expense_rows_defaults_to_latest_year(self):
+        records = [
+            IncomeRecord(date="2024-12-31", amount=40.0, category="Old"),
+            IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
+            ExpenseRecord(date="2025-02-01", amount=30.0, category="Food"),
+        ]
+        report = Report(records)
+        year, rows = report.monthly_income_expense_rows()
+        assert year == 2025
+        assert len(rows) == 2
+        assert rows[0][0] == "2025-01"
+        assert rows[0][1] == 100.0
+        assert rows[0][2] == 0.0
+        assert rows[1][0] == "2025-02"
+        assert rows[1][1] == 0.0
+        assert rows[1][2] == 30.0
+
+    def test_monthly_income_expense_rows_with_month_limit(self):
+        records = [
+            IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
+            ExpenseRecord(date="2025-02-01", amount=30.0, category="Food"),
+            IncomeRecord(date="2025-03-01", amount=50.0, category="Bonus"),
+        ]
+        report = Report(records)
+        year, rows = report.monthly_income_expense_rows(year=2025, up_to_month=2)
+        assert year == 2025
+        assert len(rows) == 2
+        assert rows[0][0] == "2025-01"
+        assert rows[1][0] == "2025-02"

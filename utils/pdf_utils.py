@@ -6,7 +6,7 @@ import gc
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Spacer
 from reportlab.lib import colors
 
 
@@ -130,6 +130,44 @@ def report_to_pdf(report: Report, filepath: str) -> None:
     )
     table.setStyle(style)
     elems = [table]
+
+    summary_year, monthly_rows = report.monthly_income_expense_rows()
+    summary_header = [f"Month ({summary_year})", "Income (KZT)", "Expense (KZT)"]
+    summary_data = [summary_header]
+    total_income = 0.0
+    total_expense = 0.0
+    for month_label, income, expense in monthly_rows:
+        total_income += income
+        total_expense += expense
+        summary_data.append(
+            [month_label, f"{income:.2f}", f"{expense:.2f}"]
+        )
+    summary_data.append(
+        ["TOTAL", f"{total_income:.2f}", f"{total_expense:.2f}"]
+    )
+
+    summary_col_widths = [
+        available_width * 0.30,
+        available_width * 0.35,
+        available_width * 0.35,
+    ]
+    summary_table = Table(summary_data, colWidths=summary_col_widths, repeatRows=1)
+    summary_style = TableStyle(
+        [
+            ("FONT", (0, 0), (-1, -1), font_name),
+            ("FONTSIZE", (0, 0), (-1, -1), 10),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ]
+    )
+    summary_table.setStyle(summary_style)
+    elems.append(Spacer(1, 14))
+    elems.append(summary_table)
+
     doc.build(elems)
     gc.collect()
 

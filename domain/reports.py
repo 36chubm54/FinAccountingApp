@@ -1,4 +1,5 @@
-from typing import Iterable, Dict
+from typing import Iterable, Dict, Optional, Tuple, List
+from datetime import date
 from prettytable import PrettyTable
 from .records import Record, IncomeRecord, MandatoryExpenseRecord
 
@@ -40,6 +41,89 @@ class Report:
 
     def records(self) -> list[Record]:
         return list(self._records)
+
+    @staticmethod
+    def _parse_year_month(date_str: str) -> Optional[Tuple[int, int]]:
+        try:
+            parts = date_str.split("-")
+            if len(parts) < 2:
+                return None
+            year = int(parts[0])
+            month = int(parts[1])
+            if 1 <= month <= 12:
+                return year, month
+        except Exception:
+            return None
+        return None
+
+    def _year_months(self) -> List[Tuple[int, int]]:
+        year_months: List[Tuple[int, int]] = []
+        for record in self._records:
+            parsed = self._parse_year_month(record.date)
+            if parsed:
+                year_months.append(parsed)
+        return year_months
+
+    def monthly_income_expense_rows(
+        self, year: Optional[int] = None, up_to_month: Optional[int] = None
+    ) -> Tuple[int, List[Tuple[str, float, float]]]:
+        year_months = self._year_months()
+        today = date.today()
+
+        if year is None:
+            if year_months:
+                year, _ = max(year_months)
+            else:
+                year, _ = today.year, today.month
+        else:
+            _ = None
+
+        if up_to_month is None:
+            months_in_year = [m for y, m in year_months if y == year]
+            if months_in_year:
+                up_to_month = max(months_in_year)
+            else:
+                up_to_month = today.month if year == today.year else 12
+
+        up_to_month = max(1, min(12, up_to_month))
+
+        rows: List[Tuple[str, float, float]] = []
+        for month in range(1, up_to_month + 1):
+            income_total = 0.0
+            expense_total = 0.0
+            for record in self._records:
+                parsed = self._parse_year_month(record.date)
+                if not parsed:
+                    continue
+                rec_year, rec_month = parsed
+                if rec_year != year or rec_month != month:
+                    continue
+                if isinstance(record, IncomeRecord):
+                    income_total += record.amount
+                else:
+                    expense_total += abs(record.amount)
+            rows.append((f"{year}-{month:02d}", income_total, expense_total))
+
+        return year, rows
+
+    def monthly_income_expense_table(
+        self, year: Optional[int] = None, up_to_month: Optional[int] = None
+    ) -> str:
+        year, rows = self.monthly_income_expense_rows(year, up_to_month)
+        table = PrettyTable()
+        table.field_names = ["Month", "Income (KZT)", "Expense (KZT)"]
+
+        total_income = 0.0
+        total_expense = 0.0
+        for month_label, income, expense in rows:
+            total_income += income
+            total_expense += expense
+            table.add_row([month_label, f"{income:.2f}", f"{expense:.2f}"])
+
+        table.add_row(
+            ["TOTAL", f"{total_income:.2f}", f"{total_expense:.2f}"], divider=True
+        )
+        return str(table)
 
     def as_table(self) -> str:
         """Return a string representation of records in table format."""

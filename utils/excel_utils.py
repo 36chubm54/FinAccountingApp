@@ -41,6 +41,21 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
     ws.append(["SUBTOTAL", "", "", f"{records_total:.2f}"])
     ws.append(["FINAL BALANCE", "", "", f"{total:.2f}"])
 
+    summary_year, monthly_rows = report.monthly_income_expense_rows()
+    summary_ws = wb.create_sheet("Yearly Report")
+    summary_ws.append(
+        [f"Month ({summary_year})", "Income (KZT)", "Expense (KZT)"]
+    )
+    total_income = 0.0
+    total_expense = 0.0
+    for month_label, income, expense in monthly_rows:
+        total_income += income
+        total_expense += expense
+        summary_ws.append(
+            [month_label, f"{income:.2f}", f"{expense:.2f}"]
+        )
+    summary_ws.append(["TOTAL", f"{total_income:.2f}", f"{total_expense:.2f}"])
+
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
         filepath
     ) else None
@@ -62,7 +77,9 @@ def report_from_xlsx(filepath: str) -> Report:
         raise FileNotFoundError(f"XLSX file not found: {filepath}")
 
     wb = load_workbook(filepath, data_only=True)
-    ws = wb.active
+    if not wb.worksheets:
+        return Report([], 0.0)
+    ws = wb.worksheets[0]
 
     rows = list(ws.iter_rows(values_only=True))
     if not rows:
