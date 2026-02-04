@@ -11,6 +11,7 @@ from tkinter import (
     filedialog,
 )
 import os
+from datetime import datetime
 
 from infrastructure.repositories import JsonFileRecordRepository
 from app.use_cases import (
@@ -28,6 +29,13 @@ from app.use_cases import (
 )
 from domain.records import IncomeRecord, MandatoryExpenseRecord
 from app.services import CurrencyService
+from utils.charting import (
+    aggregate_expenses_by_category,
+    aggregate_daily_cashflow,
+    aggregate_monthly_cashflow,
+    extract_months,
+    extract_years,
+)
 
 # Ensure project package root is on sys.path so imports work regardless of CWD
 _ROOT = Path(__file__).resolve().parent
@@ -39,7 +47,8 @@ class FinancialApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Financial Accounting")
-        self.geometry("300x450")
+        self.geometry("1000x700")
+        self.minsize(900, 600)
 
         # Track open windows so repeated button presses focus them instead of creating new ones
         self.add_record_window = None
@@ -53,12 +62,26 @@ class FinancialApp(tk.Tk):
         )
         self.currency = CurrencyService()
 
+        main_frame = tk.Frame(self)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Left: Buttons
+        buttons_frame = tk.Frame(main_frame)
+        buttons_frame.grid(row=0, column=0, sticky="ns", padx=20, pady=20)
+
+        # Right: Charts
+        charts_frame = tk.Frame(main_frame)
+        charts_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=20)
+
+        main_frame.grid_columnconfigure(1, weight=1)
+        main_frame.grid_rowconfigure(0, weight=1)
+
         # Buttons
         button_width = 15  # Set uniform width for all buttons
         padding = 10
 
         self.add_income_btn = tk.Button(
-            self,
+            buttons_frame,
             text="Add Income",
             command=self.add_income,
             width=button_width,
@@ -66,7 +89,7 @@ class FinancialApp(tk.Tk):
         self.add_income_btn.pack(pady=padding)
 
         self.add_expense_btn = tk.Button(
-            self,
+            buttons_frame,
             text="Add Expense",
             command=self.add_expense,
             width=button_width,
@@ -74,7 +97,7 @@ class FinancialApp(tk.Tk):
         self.add_expense_btn.pack(pady=padding)
 
         self.report_btn = tk.Button(
-            self,
+            buttons_frame,
             text="Generate Report",
             command=self.generate_report,
             width=button_width,
@@ -82,7 +105,7 @@ class FinancialApp(tk.Tk):
         self.report_btn.pack(pady=padding)
 
         self.delete_btn = tk.Button(
-            self,
+            buttons_frame,
             text="Delete Record",
             command=self.delete_record,
             width=button_width,
@@ -90,7 +113,7 @@ class FinancialApp(tk.Tk):
         self.delete_btn.pack(pady=padding)
 
         self.delete_all_btn = tk.Button(
-            self,
+            buttons_frame,
             text="Delete All Records",
             command=self.delete_all_records,
             width=button_width,
@@ -98,7 +121,7 @@ class FinancialApp(tk.Tk):
         self.delete_all_btn.pack(pady=padding)
 
         self.set_initial_balance_btn = tk.Button(
-            self,
+            buttons_frame,
             text="Set Initial Balance",
             command=self.set_initial_balance,
             width=button_width,
@@ -106,7 +129,7 @@ class FinancialApp(tk.Tk):
         self.set_initial_balance_btn.pack(pady=padding)
 
         self.manage_mandatory_btn = tk.Button(
-            self,
+            buttons_frame,
             text="Manage Mandatory",
             command=self.manage_mandatory_expenses,
             width=button_width,
@@ -116,18 +139,21 @@ class FinancialApp(tk.Tk):
         # Import format selector and single Import button
         self.import_format_var = tk.StringVar(value="CSV")
         self.import_format_menu = tk.OptionMenu(
-            self, self.import_format_var, "CSV", "XLSX"
+            buttons_frame, self.import_format_var, "CSV", "XLSX"
         )
         self.import_format_menu.config(width=button_width - 3)
         self.import_format_menu.pack(pady=padding)
 
         self.import_btn = tk.Button(
-            self,
+            buttons_frame,
             text="Import",
             command=self._import_handler,
             width=button_width,
         )
         self.import_btn.pack(pady=padding)
+
+        self._build_charts(charts_frame)
+        self.refresh_charts()
 
     def add_income(self):
         self._add_record("Income", CreateIncome)
@@ -225,6 +251,7 @@ class FinancialApp(tk.Tk):
                     "Success",
                     f"Added {record_type.lower()}: {amount} {currency} on {date_str} (category: {category})",
                 )
+                self.refresh_charts()
                 add_record_window.destroy()
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to add record: {str(e)}")
@@ -434,6 +461,309 @@ class FinancialApp(tk.Tk):
         report_window.grid_rowconfigure(5, weight=1)
         report_window.grid_columnconfigure(1, weight=1)
 
+    def _build_charts(self, parent: tk.Frame) -> None:
+        title = tk.Label(parent, text="Инфографика", font=("Segoe UI", 14, "bold"))
+        title.grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 10))
+
+        pie_frame = tk.LabelFrame(parent, text="Расходы по категориям")
+        pie_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+
+        daily_frame = tk.LabelFrame(parent, text="Доходы/расходы по дням месяца")
+        daily_frame.grid(row=1, column=1, sticky="nsew", padx=10, pady=10)
+
+        monthly_frame = tk.LabelFrame(parent, text="Доходы/расходы по месяцам года")
+        monthly_frame.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
+
+        parent.grid_columnconfigure(0, weight=1)
+        parent.grid_columnconfigure(1, weight=1)
+        parent.grid_rowconfigure(1, weight=1)
+        parent.grid_rowconfigure(2, weight=1)
+
+        self.expense_pie_canvas = tk.Canvas(
+            pie_frame, height=240, bg="white", highlightthickness=0
+        )
+        self.expense_pie_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        self.expense_legend_frame = tk.Frame(pie_frame)
+        self.expense_legend_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+        daily_controls = tk.Frame(daily_frame)
+        daily_controls.pack(fill=tk.X, padx=10, pady=(10, 0))
+        tk.Label(daily_controls, text="Месяц:").pack(side=tk.LEFT)
+
+        self.chart_month_var = tk.StringVar()
+        self.chart_month_menu = tk.OptionMenu(
+            daily_controls, self.chart_month_var, ""
+        )
+        self.chart_month_menu.pack(side=tk.LEFT, padx=6)
+        self.chart_month_var.trace_add("write", self._on_chart_filter_change)
+
+        self.daily_bar_canvas = tk.Canvas(
+            daily_frame, height=220, bg="white", highlightthickness=0
+        )
+        self.daily_bar_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        monthly_controls = tk.Frame(monthly_frame)
+        monthly_controls.pack(fill=tk.X, padx=10, pady=(10, 0))
+        tk.Label(monthly_controls, text="Год:").pack(side=tk.LEFT)
+
+        self.chart_year_var = tk.StringVar()
+        self.chart_year_menu = tk.OptionMenu(
+            monthly_controls, self.chart_year_var, ""
+        )
+        self.chart_year_menu.pack(side=tk.LEFT, padx=6)
+        self.chart_year_var.trace_add("write", self._on_chart_filter_change)
+
+        self.monthly_bar_canvas = tk.Canvas(
+            monthly_frame, height=220, bg="white", highlightthickness=0
+        )
+        self.monthly_bar_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        self._chart_refresh_suspended = False
+
+        def _redraw(_event=None):
+            self.refresh_charts()
+
+        self.expense_pie_canvas.bind("<Configure>", _redraw)
+        self.daily_bar_canvas.bind("<Configure>", _redraw)
+        self.monthly_bar_canvas.bind("<Configure>", _redraw)
+
+    def _on_chart_filter_change(self, *_args) -> None:
+        if self._chart_refresh_suspended:
+            return
+        self.refresh_charts()
+
+    def refresh_charts(self) -> None:
+        records = self.repository.load_all()
+
+        self._chart_refresh_suspended = True
+        self._update_month_options(records)
+        self._update_year_options(records)
+        self._chart_refresh_suspended = False
+
+        self._draw_expense_pie(records)
+        self._draw_daily_bars(records)
+        self._draw_monthly_bars(records)
+
+    def _update_month_options(self, records) -> None:
+        months = extract_months(records)
+        current_month = datetime.now().strftime("%Y-%m")
+        if current_month not in months:
+            months.append(current_month)
+        months = sorted(set(months))
+
+        menu = self.chart_month_menu["menu"]
+        menu.delete(0, "end")
+        for month in months:
+            menu.add_command(
+                label=month, command=lambda value=month: self.chart_month_var.set(value)
+            )
+
+        if not self.chart_month_var.get() or self.chart_month_var.get() not in months:
+            self.chart_month_var.set(months[-1])
+
+    def _update_year_options(self, records) -> None:
+        years = extract_years(records)
+        current_year = datetime.now().year
+        if current_year not in years:
+            years.append(current_year)
+        years = sorted(set(years))
+
+        menu = self.chart_year_menu["menu"]
+        menu.delete(0, "end")
+        for year in years:
+            menu.add_command(
+                label=str(year),
+                command=lambda value=year: self.chart_year_var.set(str(value)),
+            )
+
+        if not self.chart_year_var.get() or int(self.chart_year_var.get()) not in years:
+            self.chart_year_var.set(str(years[-1]))
+
+    def _draw_expense_pie(self, records) -> None:
+        totals = aggregate_expenses_by_category(records)
+        data = [(k, v) for k, v in totals.items() if v > 0]
+        data.sort(key=lambda item: item[1], reverse=True)
+
+        self.expense_pie_canvas.delete("all")
+        for child in self.expense_legend_frame.winfo_children():
+            child.destroy()
+
+        if not data:
+            self.expense_pie_canvas.create_text(
+                10,
+                10,
+                anchor="nw",
+                text="Нет расходов для отображения",
+                fill="#6b7280",
+                font=("Segoe UI", 11),
+            )
+            return
+
+        width = max(self.expense_pie_canvas.winfo_width(), 240)
+        height = max(self.expense_pie_canvas.winfo_height(), 240)
+        size = min(width, height) - 30
+        x0 = (width - size) / 2
+        y0 = (height - size) / 2
+        x1 = x0 + size
+        y1 = y0 + size
+
+        colors = [
+            "#4f46e5",
+            "#06b6d4",
+            "#f59e0b",
+            "#10b981",
+            "#ec4899",
+            "#8b5cf6",
+            "#14b8a6",
+            "#ef4444",
+        ]
+
+        total = sum(value for _, value in data)
+        start = 0
+        for index, (category, value) in enumerate(data):
+            extent = (value / total) * 360
+            color = colors[index % len(colors)]
+            self.expense_pie_canvas.create_arc(
+                x0, y0, x1, y1, start=start, extent=extent, fill=color, outline="white"
+            )
+            start += extent
+
+            legend_row = tk.Frame(self.expense_legend_frame)
+            legend_row.pack(anchor="w", pady=2)
+            color_box = tk.Canvas(
+                legend_row, width=12, height=12, highlightthickness=0
+            )
+            color_box.create_rectangle(0, 0, 12, 12, fill=color, outline=color)
+            color_box.pack(side=tk.LEFT)
+            tk.Label(
+                legend_row,
+                text=f"{category}: {value:.2f} KZT",
+                font=("Segoe UI", 9),
+            ).pack(side=tk.LEFT, padx=6)
+
+    def _draw_daily_bars(self, records) -> None:
+        month_value = self.chart_month_var.get()
+        if not month_value:
+            return
+        year, month = map(int, month_value.split("-"))
+        income, expense = aggregate_daily_cashflow(records, year, month)
+        labels = [str(i + 1) for i in range(len(income))]
+        self._draw_bar_chart(
+            self.daily_bar_canvas, labels, income, expense, max_labels=8
+        )
+
+    def _draw_monthly_bars(self, records) -> None:
+        year_value = self.chart_year_var.get()
+        if not year_value:
+            return
+        year = int(year_value)
+        income, expense = aggregate_monthly_cashflow(records, year)
+        labels = [
+            "Янв",
+            "Фев",
+            "Мар",
+            "Апр",
+            "Май",
+            "Июн",
+            "Июл",
+            "Авг",
+            "Сен",
+            "Окт",
+            "Ноя",
+            "Дек",
+        ]
+        self._draw_bar_chart(self.monthly_bar_canvas, labels, income, expense, 12)
+
+    def _draw_bar_chart(
+        self,
+        canvas: tk.Canvas,
+        labels,
+        income_values,
+        expense_values,
+        max_labels: int,
+    ) -> None:
+        canvas.delete("all")
+        width = max(canvas.winfo_width(), 300)
+        height = max(canvas.winfo_height(), 220)
+
+        max_income = max(income_values) if income_values else 0
+        max_expense = max(expense_values) if expense_values else 0
+        max_value = max(max_income, max_expense)
+
+        if max_value <= 0:
+            canvas.create_text(
+                10,
+                10,
+                anchor="nw",
+                text="Нет данных для отображения",
+                fill="#6b7280",
+                font=("Segoe UI", 11),
+            )
+            return
+
+        padding = {"left": 40, "right": 20, "top": 20, "bottom": 30}
+        chart_w = width - padding["left"] - padding["right"]
+        chart_h = height - padding["top"] - padding["bottom"]
+        zero_y = padding["top"] + chart_h / 2
+        scale = (chart_h / 2 - 10) / max_value
+
+        canvas.create_line(
+            padding["left"], zero_y, padding["left"] + chart_w, zero_y, fill="#d1d5db"
+        )
+
+        group_width = chart_w / max(1, len(labels))
+        bar_width = max(6, min(18, group_width * 0.35))
+
+        for idx, label in enumerate(labels):
+            x_center = padding["left"] + group_width * idx + group_width / 2
+            income_h = income_values[idx] * scale
+            expense_h = expense_values[idx] * scale
+
+            canvas.create_rectangle(
+                x_center - bar_width - 2,
+                zero_y - income_h,
+                x_center - 2,
+                zero_y,
+                fill="#10b981",
+                outline="",
+            )
+            canvas.create_rectangle(
+                x_center + 2,
+                zero_y,
+                x_center + bar_width + 2,
+                zero_y + expense_h,
+                fill="#ef4444",
+                outline="",
+            )
+
+            label_step = max(1, len(labels) // max_labels)
+            if idx % label_step == 0 or len(labels) <= max_labels:
+                canvas.create_text(
+                    x_center,
+                    padding["top"] + chart_h + 10,
+                    text=label,
+                    fill="#6b7280",
+                    font=("Segoe UI", 9),
+                )
+
+        canvas.create_text(
+            padding["left"],
+            padding["top"] - 6,
+            text="Доходы",
+            fill="#10b981",
+            anchor="sw",
+            font=("Segoe UI", 9),
+        )
+        canvas.create_text(
+            padding["left"] + 60,
+            padding["top"] - 6,
+            text="Расходы",
+            fill="#ef4444",
+            anchor="sw",
+            font=("Segoe UI", 9),
+        )
+
     def delete_record(self):
         all_records = self.repository.load_all()
         if not all_records:
@@ -487,6 +817,7 @@ class FinancialApp(tk.Tk):
             delete_use_case = DeleteRecord(self.repository)
             if delete_use_case.execute(index):
                 messagebox.showinfo("Success", f"Deleted record at index {index}.")
+                self.refresh_charts()
                 # Close and clear tracked window reference, then reopen to refresh list
                 try:
                     delete_window.destroy()
@@ -510,6 +841,7 @@ class FinancialApp(tk.Tk):
             delete_all_use_case = DeleteAllRecords(self.repository)
             delete_all_use_case.execute()
             messagebox.showinfo("Success", "All records have been deleted.")
+            self.refresh_charts()
 
     def import_from_csv(self):
         # File selection dialog
@@ -538,6 +870,7 @@ class FinancialApp(tk.Tk):
                 "Success",
                 f"Successfully imported {imported_count} records from CSV file.\nAll existing records have been replaced.",
             )
+            self.refresh_charts()
 
         except FileNotFoundError:
             messagebox.showerror("Error", f"File not found: {filepath}")
@@ -577,6 +910,7 @@ class FinancialApp(tk.Tk):
                 "Success",
                 f"Successfully imported {imported_count} records from Excel file.\nAll existing records have been replaced.",
             )
+            self.refresh_charts()
 
         except FileNotFoundError:
             messagebox.showerror("Error", f"File not found: {filepath}")
@@ -739,6 +1073,7 @@ class FinancialApp(tk.Tk):
                         period=period,
                     )
                     messagebox.showinfo("Success", "Mandatory expense added.")
+                    self.refresh_charts()
                     add_mandatory_window.destroy()
                     refresh_list()
                 except ValueError as e:
@@ -763,6 +1098,7 @@ class FinancialApp(tk.Tk):
                 delete_use_case = DeleteMandatoryExpense(self.repository)
                 if delete_use_case.execute(index):
                     messagebox.showinfo("Success", "Mandatory expense deleted.")
+                    self.refresh_charts()
                     refresh_list()
                 else:
                     messagebox.showerror("Error", "Failed to delete expense.")
@@ -775,6 +1111,7 @@ class FinancialApp(tk.Tk):
                 delete_all_use_case = DeleteAllMandatoryExpenses(self.repository)
                 delete_all_use_case.execute()
                 messagebox.showinfo("Success", "All mandatory expenses deleted.")
+                self.refresh_charts()
                 refresh_list()
 
         def add_to_report():
@@ -804,6 +1141,7 @@ class FinancialApp(tk.Tk):
                     messagebox.showinfo(
                         "Success", f"Mandatory expense added to report for {date}."
                     )
+                    self.refresh_charts()
                 else:
                     messagebox.showerror("Error", "Failed to add expense to report.")
             except ValueError as e:
@@ -946,6 +1284,7 @@ class FinancialApp(tk.Tk):
                     f"Successfully imported {len(expenses)} mandatory expenses from CSV file.\nAll existing mandatory expenses have been replaced.",
                 )
                 refresh_list()
+                self.refresh_charts()
 
             except FileNotFoundError:
                 messagebox.showerror("Error", f"File not found: {filepath}")
@@ -995,6 +1334,7 @@ class FinancialApp(tk.Tk):
                     f"Successfully imported {len(expenses)} mandatory expenses from XLSX file.\nAll existing mandatory expenses have been replaced.",
                 )
                 refresh_list()
+                self.refresh_charts()
 
             except FileNotFoundError:
                 messagebox.showerror("Error", f"File not found: {filepath}")

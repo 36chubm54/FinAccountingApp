@@ -92,6 +92,50 @@
                         <!-- Транзакции будут добавлены через JS -->
                     </div>
                 </div>
+
+                <div class="charts-section">
+                    <div class="charts-header">
+                        <h3>Инфографика</h3>
+                    </div>
+                    <div class="charts-grid">
+                        <div class="chart-card">
+                            <div class="chart-card-header">
+                                <h4>Расходы по категориям</h4>
+                                <span class="chart-note">Круговая диаграмма</span>
+                            </div>
+                            <div class="chart-canvas-wrap">
+                                <canvas id="expenses-category-chart"></canvas>
+                            </div>
+                            <div class="chart-legend" id="expenses-category-legend"></div>
+                        </div>
+
+                        <div class="chart-card">
+                            <div class="chart-card-header">
+                                <h4>Доходы/расходы по дням</h4>
+                                <div class="chart-controls">
+                                    <label for="daily-month-select">Месяц:</label>
+                                    <input type="month" id="daily-month-select">
+                                </div>
+                            </div>
+                            <div class="chart-canvas-wrap">
+                                <canvas id="daily-cashflow-chart"></canvas>
+                            </div>
+                        </div>
+
+                        <div class="chart-card">
+                            <div class="chart-card-header">
+                                <h4>Доходы/расходы по месяцам</h4>
+                                <div class="chart-controls">
+                                    <label for="monthly-year-select">Год:</label>
+                                    <select id="monthly-year-select"></select>
+                                </div>
+                            </div>
+                            <div class="chart-canvas-wrap">
+                                <canvas id="monthly-cashflow-chart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </section>
 
             <!-- Секция: Доходы -->

@@ -57,7 +57,7 @@ After launch, the graphical window of the Financial Accounting application will 
 
 ### Main window
 
-After running `python main.py`, a window with nine buttons will open:
+After running `python main.py`, a window with nine buttons and an infographic block will open:
 
 - **Add Income** - Adding income
 - **Add Expense** - Adding an expense
@@ -68,6 +68,13 @@ After running `python main.py`, a window with nine buttons will open:
 - **Manage Mandatory** - Management of mandatory expenses
 - Format selector for import/export (CSV, XLSX)
 - **Import** — Import data from a file of the selected format
+
+On the right, the infographic shows:
+- A pie chart of expenses by category
+- A daily income/expense histogram (with month switcher)
+- A monthly income/expense histogram (with year switcher)
+
+Income is shown in green above the zero line, expenses are red below it.
 
 ### Adding income/expense
 

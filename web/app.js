@@ -218,6 +218,9 @@ async function initApp() {
     
     // Инициализация навигации
     initNavigation();
+
+    // Инициализация инфографики
+    initCharts();
     
     // Загрузка и отображение данных
     refreshAllData();
@@ -352,6 +355,7 @@ function refreshAllData() {
     updateIncomeTable();
     updateExpensesTable();
     updateCategoryFilter();
+    updateCharts();
 }
 
 // Обновление дашборда
@@ -542,6 +546,359 @@ function updateCategoryFilter() {
         option.textContent = cat;
         select.appendChild(option);
     });
+}
+
+// Инфографика
+const chartPalette = [
+    '#4f46e5',
+    '#06b6d4',
+    '#f59e0b',
+    '#10b981',
+    '#ec4899',
+    '#8b5cf6',
+    '#14b8a6',
+    '#ef4444'
+];
+
+function initCharts() {
+    const monthInput = document.getElementById('daily-month-select');
+    const yearSelect = document.getElementById('monthly-year-select');
+    const today = new Date();
+    const defaultMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+
+    if (monthInput && !monthInput.value) {
+        monthInput.value = defaultMonth;
+    }
+
+    if (monthInput) {
+        monthInput.addEventListener('change', updateCharts);
+    }
+
+    if (yearSelect) {
+        yearSelect.addEventListener('change', updateCharts);
+    }
+
+    window.addEventListener('resize', () => {
+        updateCharts();
+    });
+}
+
+function updateCharts() {
+    const records = getRecords();
+    updateYearOptions(records);
+    updateExpenseCategoryChart(records);
+    updateDailyCashflowChart(records);
+    updateMonthlyCashflowChart(records);
+}
+
+function updateYearOptions(records) {
+    const select = document.getElementById('monthly-year-select');
+    if (!select) {
+        return;
+    }
+
+    const years = new Set();
+    records.forEach(record => {
+        const year = new Date(record.date).getFullYear();
+        if (!isNaN(year)) {
+            years.add(year);
+        }
+    });
+    years.add(new Date().getFullYear());
+
+    const sortedYears = [...years].sort((a, b) => a - b);
+    const currentValue = select.value || String(new Date().getFullYear());
+
+    clearElement(select);
+    sortedYears.forEach(year => {
+        const option = document.createElement('option');
+        option.value = String(year);
+        option.textContent = String(year);
+        select.appendChild(option);
+    });
+
+    if (sortedYears.includes(parseInt(currentValue, 10))) {
+        select.value = currentValue;
+    } else {
+        select.value = String(sortedYears[sortedYears.length - 1]);
+    }
+}
+
+function updateExpenseCategoryChart(records) {
+    const canvas = document.getElementById('expenses-category-chart');
+    const legend = document.getElementById('expenses-category-legend');
+    if (!canvas || !legend) {
+        return;
+    }
+
+    const selectedCurrency = document.getElementById('currency-select').value;
+    const totals = {};
+
+    records
+        .filter(r => r.type === 'expense')
+        .forEach(r => {
+            const amount = convertAmountToSelected(r, selectedCurrency);
+            totals[r.category] = (totals[r.category] || 0) + amount;
+        });
+
+    const entries = Object.entries(totals)
+        .filter(([, value]) => value > 0)
+        .sort((a, b) => b[1] - a[1]);
+
+    const wrapper = canvas.parentElement;
+    if (entries.length === 0) {
+        setChartEmpty(wrapper, 'Нет расходов для диаграммы');
+        clearElement(legend);
+        return;
+    }
+
+    setChartEmpty(wrapper, null);
+
+    const data = entries.map(([label, value], index) => ({
+        label,
+        value,
+        color: chartPalette[index % chartPalette.length]
+    }));
+
+    renderPieChart(canvas, data);
+    renderLegend(legend, data, selectedCurrency);
+}
+
+function updateDailyCashflowChart(records) {
+    const canvas = document.getElementById('daily-cashflow-chart');
+    if (!canvas) {
+        return;
+    }
+
+    const monthInput = document.getElementById('daily-month-select');
+    const selectedMonth = monthInput?.value;
+    if (!selectedMonth) {
+        return;
+    }
+
+    const [yearStr, monthStr] = selectedMonth.split('-');
+    const year = parseInt(yearStr, 10);
+    const monthIndex = parseInt(monthStr, 10) - 1;
+    if (isNaN(year) || isNaN(monthIndex)) {
+        return;
+    }
+
+    const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+    const income = Array(daysInMonth).fill(0);
+    const expense = Array(daysInMonth).fill(0);
+
+    const selectedCurrency = document.getElementById('currency-select').value;
+
+    records.forEach(record => {
+        const date = new Date(record.date);
+        if (date.getFullYear() === year && date.getMonth() === monthIndex) {
+            const dayIndex = date.getDate() - 1;
+            const amount = convertAmountToSelected(record, selectedCurrency);
+            if (record.type === 'income') {
+                income[dayIndex] += amount;
+            } else {
+                expense[dayIndex] += amount;
+            }
+        }
+    });
+
+    const labels = Array.from({ length: daysInMonth }, (_, i) => String(i + 1));
+    renderCashflowBars(canvas, labels, income, expense, 'Нет данных за выбранный месяц');
+}
+
+function updateMonthlyCashflowChart(records) {
+    const canvas = document.getElementById('monthly-cashflow-chart');
+    const yearSelect = document.getElementById('monthly-year-select');
+    if (!canvas || !yearSelect) {
+        return;
+    }
+
+    const selectedYear = parseInt(yearSelect.value, 10);
+    if (isNaN(selectedYear)) {
+        return;
+    }
+
+    const income = Array(12).fill(0);
+    const expense = Array(12).fill(0);
+    const selectedCurrency = document.getElementById('currency-select').value;
+
+    records.forEach(record => {
+        const date = new Date(record.date);
+        if (date.getFullYear() === selectedYear) {
+            const monthIndex = date.getMonth();
+            const amount = convertAmountToSelected(record, selectedCurrency);
+            if (record.type === 'income') {
+                income[monthIndex] += amount;
+            } else {
+                expense[monthIndex] += amount;
+            }
+        }
+    });
+
+    const labels = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
+    renderCashflowBars(canvas, labels, income, expense, 'Нет данных за выбранный год');
+}
+
+function convertAmountToSelected(record, selectedCurrency) {
+    const amountInKZT = record.amount * exchangeRates[record.currency];
+    return amountInKZT / exchangeRates[selectedCurrency];
+}
+
+function renderLegend(container, data, selectedCurrency) {
+    clearElement(container);
+    data.forEach(item => {
+        const row = createElement('div', 'legend-item');
+        const color = createElement('span', 'legend-color');
+        color.style.backgroundColor = item.color;
+        row.appendChild(color);
+
+        const label = createElement(
+            'span',
+            null,
+            `${item.label}: ${formatNumber(item.value)} ${currencySymbols[selectedCurrency]}`
+        );
+        row.appendChild(label);
+        container.appendChild(row);
+    });
+}
+
+function setChartEmpty(wrapper, message) {
+    const canvas = wrapper.querySelector('canvas');
+    let empty = wrapper.querySelector('.chart-empty');
+
+    if (!message) {
+        if (empty) {
+            empty.remove();
+        }
+        if (canvas) {
+            canvas.style.display = 'block';
+        }
+        return;
+    }
+
+    if (!empty) {
+        empty = createElement('div', 'chart-empty');
+        wrapper.appendChild(empty);
+    }
+    empty.textContent = message;
+    if (canvas) {
+        canvas.style.display = 'none';
+    }
+}
+
+function prepareCanvas(canvas) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return ctx;
+}
+
+function renderPieChart(canvas, data) {
+    const ctx = prepareCanvas(canvas);
+    const { width, height } = canvas.getBoundingClientRect();
+    const radius = Math.min(width, height) / 2 - 10;
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const total = data.reduce((sum, item) => sum + item.value, 0);
+
+    ctx.clearRect(0, 0, width, height);
+
+    let startAngle = -Math.PI / 2;
+    data.forEach(item => {
+        const sliceAngle = (item.value / total) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY);
+        ctx.arc(centerX, centerY, radius, startAngle, startAngle + sliceAngle);
+        ctx.closePath();
+        ctx.fillStyle = item.color;
+        ctx.fill();
+        startAngle += sliceAngle;
+    });
+
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius * 0.55, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fill();
+}
+
+function renderCashflowBars(canvas, labels, incomeValues, expenseValues, emptyMessage) {
+    const wrapper = canvas.parentElement;
+    const maxIncome = Math.max(...incomeValues);
+    const maxExpense = Math.max(...expenseValues);
+    const maxValue = Math.max(maxIncome, maxExpense);
+
+    if (maxValue <= 0) {
+        setChartEmpty(wrapper, emptyMessage);
+        return;
+    }
+
+    setChartEmpty(wrapper, null);
+    const ctx = prepareCanvas(canvas);
+    const { width, height } = canvas.getBoundingClientRect();
+    ctx.clearRect(0, 0, width, height);
+
+    const padding = { top: 16, right: 16, bottom: 28, left: 36 };
+    const chartWidth = width - padding.left - padding.right;
+    const chartHeight = height - padding.top - padding.bottom;
+    const zeroLineY = padding.top + chartHeight / 2;
+
+    ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, zeroLineY);
+    ctx.lineTo(padding.left + chartWidth, zeroLineY);
+    ctx.stroke();
+
+    const maxAbs = Math.max(...incomeValues.map(v => Math.abs(v)), ...expenseValues.map(v => Math.abs(v)), 1);
+    const barGroupWidth = chartWidth / labels.length;
+    const barWidth = Math.max(6, Math.min(18, barGroupWidth * 0.4));
+
+    labels.forEach((label, index) => {
+        const xCenter = padding.left + barGroupWidth * index + barGroupWidth / 2;
+        const income = incomeValues[index] || 0;
+        const expense = expenseValues[index] || 0;
+
+        const incomeHeight = (income / maxAbs) * (chartHeight / 2 - 10);
+        const expenseHeight = (expense / maxAbs) * (chartHeight / 2 - 10);
+
+        ctx.fillStyle = '#10b981';
+        ctx.fillRect(
+            xCenter - barWidth - 2,
+            zeroLineY - incomeHeight,
+            barWidth,
+            incomeHeight
+        );
+
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(
+            xCenter + 2,
+            zeroLineY,
+            barWidth,
+            expenseHeight
+        );
+
+        const labelStep = Math.ceil(labels.length / 8);
+        if (index % labelStep === 0 || labels.length <= 12) {
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.font = '11px Segoe UI, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(label, xCenter, padding.top + chartHeight + 16);
+        }
+    });
+
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.font = '12px Segoe UI, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('Доходы', padding.left, padding.top + 12);
+    ctx.fillStyle = '#10b981';
+    ctx.fillRect(padding.left + 60, padding.top + 4, 10, 10);
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillText('Расходы', padding.left + 80, padding.top + 12);
+    ctx.fillStyle = '#ef4444';
+    ctx.fillRect(padding.left + 145, padding.top + 4, 10, 10);
 }
 
 // Генерация отчёта
@@ -820,7 +1177,7 @@ function showToast(message, type = 'info') {
 }
 
 // Обработчик изменения валюты
-document.getElementById('currency-select').addEventListener('change', updateDashboard);
+document.getElementById('currency-select').addEventListener('change', refreshAllData);
 
 // Закрытие модального окна при клике вне его
 document.getElementById('record-modal').addEventListener('click', (e) => {

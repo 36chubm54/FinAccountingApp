@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add monthly income/expense summary for past and current months in report output
 - Add yearly report export as a separate XLSX sheet and as a second PDF table after the statement
 - Limit XLSX report import to the first worksheet only
+- Add infographic block to the main window: expense pie chart plus daily/monthly income-expense histograms
 
 ### Changed
 
@@ -36,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed link to the "Web application" title in the README_EN.md table of contents
 - Improve README formatting and add test setup note
 - Add web application section to README.md with features, setup, and structure details
+- Document main window infographics in README.md and README_EN.md
 
 ### Initial
 
