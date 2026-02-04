@@ -641,10 +641,30 @@ class FinancialApp(tk.Tk):
                 )
 
         def add_expense():
+            # If manage window already exists, bring it to front and focus it
+            if self.add_window and self.add_window.winfo_exists():
+                try:
+                    self.add_window.deiconify()
+                    self.add_window.lift()
+                    self.add_window.focus_force()
+                except Exception:
+                    pass
+                return
+
             # Create add expense window
-            add_window = Toplevel(manage_window)
+            add_window = Toplevel(self)
+            self.add_window = add_window
             add_window.title("Add Mandatory Expense")
             add_window.geometry("400x300")
+
+            def _on_add_close():
+                try:
+                    add_window.destroy()
+                except Exception:
+                    pass
+                self.add_window = None
+
+            add_window.protocol("WM_DELETE_WINDOW", _on_add_close)
 
             tk.Label(add_window, text="Amount:").grid(
                 row=0, column=0, sticky="w", padx=10, pady=5
