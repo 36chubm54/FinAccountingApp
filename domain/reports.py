@@ -183,7 +183,7 @@ class Report:
         )
 
         if summary_mode == "total_only":
-            table.add_row(["TOTAL", "", "", final_balance_str], divider=True)
+            table.add_row(["SUBTOTAL", "", "", final_balance_str], divider=True)
         else:
             table.add_row(["SUBTOTAL", "", "", records_total_str], divider=True)
             table.add_row(["FINAL BALANCE", "", "", final_balance_str], divider=True)

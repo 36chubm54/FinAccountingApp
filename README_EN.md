@@ -117,7 +117,8 @@ At the bottom, an additional table “Monthly Income/Expense Summary” is displ
 Export report:
 
 - Formats: `CSV`, `XLSX`, `PDF`.
-- A `Yearly Report` sheet with a monthly summary is added to `XLSX`.
+- A `Yearly Report` sheet with a monthly summary is added to `XLSX`. A second, intermediate sheet `By Category` is also created with records grouped by categories and subtotals.
+- In `PDF` the monthly summary remains, and after the main statement, tables are added broken down by category (each category is a separate table with a subtotal).
 
 ### Deleting an entry
 
