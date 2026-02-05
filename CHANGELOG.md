@@ -43,4 +43,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Initial
 
-- Initial commit: Финансовый учёт - backend с domain, application и infrastructure слоями
+- Initial commit: Financial accounting - backend with domain, application and infrastructure layers

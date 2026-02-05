@@ -1,12 +1,12 @@
 # FinAccountingApp
 
-Desktop and web application for personal finance tracking with multi‑currency support, categories, and reports.
+Graphical and web application for personal financial accounting with multicurrency, categories and reports.
 
 ## 📋 Contents
 
 - [Quick start](#-quick-start)
 - [Using the application](#️-using-the-application)
-- [Web application](#-web-application)
+- [Web application](#-web application)
 - [Project architecture](#️-project-architecture)
 - [Software API](#-software-api)
 - [File structure](#-file-structure)
@@ -26,7 +26,7 @@ Desktop and web application for personal finance tracking with multi‑currency 
 
 ```bash
 # Go to the project directory
-cd "Проект ФУ/project"
+cd "FU Project/project"
 
 # Create a virtual environment
 python -m venv .venv
@@ -50,115 +50,122 @@ pip install -r requirements.txt
 python main.py
 ```
 
+After launch, the graphical window of the Financial Accounting application will open.
+
 ---
 
 ## 🖥️ Using the application
 
 ### Main window
 
-After running `python main.py`, you will see buttons and an infographic panel.
+After running `python main.py`, a window with control buttons and an infographic block will open.
 
 Buttons and actions:
 
-- `Add Income` — add income.
-- `Add Expense` — add expense.
-- `Generate Report` — generate a report with filters.
-- `Delete Record` — delete a single record.
-- `Delete All Records` — delete all records.
-- `Set Initial Balance` — set opening balance.
-- `Manage Mandatory` — manage mandatory expenses.
-- Import format selector (`CSV`, `XLSX`) and `Import` button for records.
+- `Add Income` - Add income.
+- `Add Expense` - Add expense.
+- `Generate Report` — Generate a report with filters.
+- `Delete Record` — Delete one record.
+- `Delete All Records` - Delete all records.
+- `Set Initial Balance` — Set the initial balance.
+- `Manage Mandatory` - Management of mandatory expenses.
+- Import format (`CSV`, `XLSX`) and `Import` button - import of financial records.
 
-Infographics:
+Infographic on the right:
 
-- Expense pie chart by category with month filter.
-- Daily income/expense bars for a selected month.
-- Monthly income/expense bars for a selected year.
+- Pie chart of expenses by category with month filter.
+- Histogram of income/expenses by day of the month.
+- Histogram of income/expenses by month of the year.
 
-Income is green, expenses are red. Small categories are grouped into “Other”. The legend list is scrollable.
+Income is displayed in green, expenses in red. For a pie chart, small categories are aggregated into "Other". The list of categories in the legend scrolls.
 
-### Add income/expense
+### Adding income/expense
 
 1. Click `Add Income` or `Add Expense`.
-2. Enter date `YYYY-MM-DD` (future dates are not allowed).
-3. Enter amount.
-4. Choose currency (default `KZT`).
-5. Enter category (default `General`).
+2. Enter the date in the format `YYYY-MM-DD` (the date cannot be in the future).
+3. Enter the amount.
+4. Specify the currency (default is `KZT`).
+5. Specify the category (default is `General`).
 6. Click `Save`.
 
-Amounts are converted to base currency `KZT`.
+The amount is converted into the base currency `KZT` at the current rates of the currency service.
 
-### Generate report
+### Report generation
 
 1. Click `Generate Report`.
-2. Optional filters:
+2. Enter filters (optional):
 
-- `Period` — date prefix (`2025` or `2025-01`).
-- `Category` — category filter.
+- `Period` - date prefix (for example, `2025` or `2025-01`).
+- `Category` — filter by category.
 
-1. Options:
+1. Enable options:
 
-- `Group by category`.
-- `Display as table`.
+- `Group by category` - grouping by category.
+- `Display as table` - table format.
 
 1. Click `Generate`.
+At the bottom, an additional table “Monthly Income/Expense Summary” is displayed for the selected year and months.
 
-A monthly income/expense summary table is appended at the bottom.
+Export report:
 
-Export formats:
+- Formats: `CSV`, `XLSX`, `PDF`.
+- A `Yearly Report` sheet with a monthly summary is added to `XLSX`.
 
-- `CSV`, `XLSX`, `PDF`.
-- `XLSX` includes a `Yearly Report` sheet with a monthly summary.
-
-### Delete record
+### Deleting an entry
 
 1. Click `Delete Record`.
-2. Select a row and confirm.
+2. Select an entry from the list.
+3. Click `Delete Selected` and confirm deletion.
 
-### Set initial balance
+### Setting the initial balance
 
 1. Click `Set Initial Balance`.
 2. Enter the amount (can be negative).
+3. Confirm.
 
-### Manage mandatory expenses
+The opening balance is taken into account in the final balance sheet.
 
-Buttons:
+### Managing mandatory expenses
 
-- `Add` — add mandatory expense.
-- `Delete` — delete selected.
-- `Delete All` — delete all.
-- `Add to Report` — add selected expense to report with a date.
-- `Import` — import mandatory expenses.
-- `Export` — export mandatory expenses.
+The following operations are available in the `Manage Mandatory` window:
+
+- `Add` — add a mandatory expense.
+- `Delete` — delete the selected one.
+- `Delete All` - delete everything.
+- `Add to Report` — add the selected expense to the report with the specified date.
+- `Import` — import of mandatory expenses.
+- `Export` — export of mandatory expenses.
 
 Mandatory expense fields:
 
 - `Amount`, `Currency`, `Category` (default `Mandatory`), `Description` (required), `Period` (`daily`, `weekly`, `monthly`, `yearly`).
 
-Import/Export:
+Import/export of mandatory expenses:
 
 - Import: `CSV`, `XLSX`.
 - Export: `CSV`, `XLSX`, `PDF`.
 
-### Import financial records
+### Importing financial records
 
-Use `Import` in the main window.
+Import is performed via `Import` in the main window.
 
 Formats:
 
 - `CSV`, `XLSX`.
-- Existing records are fully replaced by the imported data.
+- All existing entries are replaced with data from the file.
 
-Format rules:
+Data format:
 
 - Columns: `Date,Type,Category,Amount (KZT)`.
 - `Type`: `Income`, `Expense`, `Mandatory Expense`.
-- Optional `Initial Balance` row with empty date.
-- `SUBTOTAL` and `FINAL BALANCE` rows are ignored on import.
+- The string `Initial Balance` with an empty date is acceptable.
+- The `SUBTOTAL` and `FINAL BALANCE` lines are ignored during import.
 
 ### Data storage
 
-Stored in `records.json` in the project root.
+The data is stored in `records.json` at the root of the project.
+
+Format:
 
 ```json
 {
@@ -174,7 +181,7 @@ Stored in `records.json` in the project root.
       "type": "expense",
       "date": "2025-01-16",
       "amount": 25000.0,
-      "category": "Food"
+      "category": "Products"
     },
     {
       "type": "mandatory_expense",
@@ -201,30 +208,30 @@ Stored in `records.json` in the project root.
 
 ## 🌐 Web application
 
-The web version lives in `web/` and runs fully in the browser without a server. Data is stored in `localStorage`.
+The web version is located in `web/` and runs entirely on the client (no server). The data is stored in the browser's `localStorage`.
 
-Highlights:
+Features:
 
-- Dashboard, income, expenses, reports, settings.
-- Built‑in charts and summaries.
-- Exchange rates from NBRK RSS (`rates_all.xml`) with daily cache in `localStorage`.
-- CSV export (web version).
+- Separate sections for income, expenses, reports and settings.
+- Built-in charts and dashboard.
+- Support for rates of the National Bank of the Republic of Kazakhstan via RSS (`rates_all.xml`) with daily caching in `localStorage`.
+- Export report to `CSV` (web version).
 
-Launch: open `web/index.html` in a browser.
+To run: Open `web/index.html` in a browser.
 
 ---
 
 ## 🏗️ Project architecture
 
-Layered architecture:
+The project follows a layered architecture:
 
-- `domain/` — business models and rules (records, reports, validation, currency).
-- `app/` — use cases and currency adapter.
-- `infrastructure/` — JSON repository.
-- `utils/` — import/export and chart helpers.
-- `web/` — standalone web app.
+- `domain/` - business models and rules (records, reports, validation of dates and periods, currencies).
+- `app/` — use cases and currency service adapter.
+- `infrastructure/` — data storage (JSON repository).
+- `utils/` — import/export and preparation of data for graphs.
+- `web/` is a standalone web application.
 
-GUI flow:
+Data flow for GUI:
 
 - UI (Tkinter) → `app/use_cases.py` → `infrastructure/repositories.py` → `records.json`.
 
@@ -232,49 +239,108 @@ GUI flow:
 
 ## 📝 Software API
 
+Below are the key classes and functions synchronized with the actual code.
+
 ### Domain
 
 `domain/records.py`
 
-- `Record`, `IncomeRecord`, `ExpenseRecord`, `MandatoryExpenseRecord`.
+- `Record` - base record (abstract class).
+- `IncomeRecord` - income.
+- `ExpenseRecord` - expense.
+- `MandatoryExpenseRecord` - mandatory expense with `description` and `period`.
 
 `domain/currency.py`
 
-- `CurrencyService` — base currency conversion.
+- `CurrencyService` - conversion of currencies to base (`KZT`).
 
 `domain/reports.py`
 
-- `Report(records, initial_balance=0.0)`.
-- `total()`, `filter_by_period()`, `filter_by_category()`, `grouped_by_category()`.
-- `monthly_income_expense_rows()` and `monthly_income_expense_table()`.
-- `as_table(summary_mode="full"|"total_only")`.
-- `to_csv()` / `from_csv()`.
+- `Report(records, initial_balance=0.0)` — report.
+- `total()` — final balance taking into account the initial balance.
+- `filter_by_period(prefix)` - filtering by date prefix.
+- `filter_by_category(category)` — filtering by category.
+- `grouped_by_category()` - grouping by categories.
+- `monthly_income_expense_rows(year=None, up_to_month=None)` - monthly aggregates.
+- `monthly_income_expense_table(year=None, up_to_month=None)` — table by month.
+- `as_table(summary_mode="full"|"total_only")` - tabular output.
+- `to_csv(filepath)` and `from_csv(filepath)` - CSV export/import.
 
 `domain/validation.py`
 
-- `parse_ymd()`, `ensure_not_future()`, `ensure_valid_period()`.
+- `parse_ymd(value)` - parsing and validating the date `YYYY-MM-DD`.
+- `ensure_not_future(date)` - prohibition of future dates.
+- `ensure_valid_period(period)` — period validation.
 
 ### Application
 
 `app/services.py`
 
-- `CurrencyService(rates=None, base="KZT", use_online=False)` with NBRK RSS caching to `currency_rates.json`.
+- `CurrencyService(rates=None, base="KZT", use_online=False)` - adapter for domain service.
+- When `use_online=True` tries to load the rates of the National Bank of the Republic of Kazakhstan and caches them in `currency_rates.json`.
 
 `app/use_cases.py`
 
-- `CreateIncome`, `CreateExpense`, `GenerateReport`, `DeleteRecord`, `DeleteAllRecords`.
-- `ImportFromCSV`.
-- `CreateMandatoryExpense`, `GetMandatoryExpenses`, `DeleteMandatoryExpense`, `DeleteAllMandatoryExpenses`, `AddMandatoryExpenseToReport`.
+- `CreateIncome.execute(date, amount, currency, category)`.
+- `CreateExpense.execute(date, amount, currency, category)`.
+- `GenerateReport.execute()` → `Report` taking into account the initial balance.
+- `DeleteRecord.execute(index)`.
+- `DeleteAllRecords.execute()`.
+- `ImportFromCSV.execute(filepath)` - import and complete replacement of records.
+- `CreateMandatoryExpense.execute(amount, currency, category, description, period)`.
+- `GetMandatoryExpenses.execute()`.
+- `DeleteMandatoryExpense.execute(index)`.
+- `DeleteAllMandatoryExpenses.execute()`.
+- `AddMandatoryExpenseToReport.execute(index, date)`.
 
 ### Infrastructure
 
 `infrastructure/repositories.py`
 
-- `RecordRepository`, `JsonFileRecordRepository` with methods for records, initial balance, and mandatory expenses.
+- `RecordRepository` — repository interface.
+- `JsonFileRecordRepository(file_path="records.json")` - JSON storage.
+
+Methods:
+
+- `save(record)`.
+- `load_all()`.
+- `delete_by_index(index)`.
+- `delete_all()`.
+- `save_initial_balance(balance)`.
+- `load_initial_balance()`.
+- `save_mandatory_expense(expense)`.
+- `load_mandatory_expenses()`.
+- `delete_mandatory_expense_by_index(index)`.
+- `delete_all_mandatory_expenses()`.
 
 ### Utils
 
-`utils/csv_utils.py`, `utils/excel_utils.py`, `utils/pdf_utils.py`, `utils/charting.py`.
+`utils/csv_utils.py`
+
+- `report_to_csv(report, filepath)`.
+- `report_from_csv(filepath)`.
+- `export_mandatory_expenses_to_csv(expenses, filepath)`.
+- `import_mandatory_expenses_from_csv(filepath)`.
+
+`utils/excel_utils.py`
+
+- `report_to_xlsx(report, filepath)`.
+- `report_from_xlsx(filepath)`.
+- `export_mandatory_expenses_to_xlsx(expenses, filepath)`.
+- `import_mandatory_expenses_from_xlsx(filepath)`.
+
+`utils/pdf_utils.py`
+
+- `report_to_pdf(report, filepath)`.
+- `export_mandatory_expenses_to_pdf(expenses, filepath)`.
+
+`utils/charting.py`
+
+- `aggregate_expenses_by_category(records)`.
+- `aggregate_daily_cashflow(records, year, month)`.
+- `aggregate_monthly_cashflow(records, year)`.
+- `extract_years(records)`.
+- `extract_months(records)`.
 
 ---
 
@@ -283,44 +349,44 @@ GUI flow:
 ```
 project/
 │
-├── main.py                     # Tkinter GUI entry
-├── records.json                # Records storage (auto‑created)
-├── currency_rates.json         # Rates cache (use_online=True)
-├── requirements.txt
-├── pytest.ini
-├── README.md
-├── README_EN.md
-├── CHANGELOG.md
-├── LICENSE
+├── main.py # GUI entry point (Tkinter)
+├── records.json # Record storage (created automatically)
+├── currency_rates.json # Currency rate cache (use_online=True)
+├── requirements.txt # Python dependencies
+├── pytest.ini # pytest settings
+├── README.md # This documentation
+├── README_EN.md # Documentation in English
+├── CHANGELOG.md # History of changes
+├── LICENSE # License
 │
-├── app/
-│   ├── __init__.py
-│   ├── services.py
-│   └── use_cases.py
+├── app/ # Application layer
+│ ├── __init__.py
+│ ├── services.py # CurrencyService adapter
+│ └── use_cases.py # Use cases
 │
-├── domain/
-│   ├── __init__.py
-│   ├── records.py
-│   ├── reports.py
-│   ├── currency.py
-│   └── validation.py
+├── domain/ # Domain layer
+│ ├── __init__.py
+│ ├── records.py # Records
+│ ├── reports.py # Reports
+│ ├── currency.py # Domain CurrencyService
+│ └── validation.py # Validation of dates and periods
 │
-├── infrastructure/
-│   └── repositories.py
+├── infrastructure/ # Infrastructure layer
+│ └── repositories.py # JSON repository
 │
-├── utils/
-│   ├── __init__.py
-│   ├── csv_utils.py
-│   ├── excel_utils.py
-│   ├── pdf_utils.py
-│   └── charting.py
+├── utils/ # Import/export and graphs
+│ ├── __init__.py
+│ ├── csv_utils.py
+│ ├── excel_utils.py
+│ ├── pdf_utils.py
+│ └── charting.py
 │
-├── web/
-│   ├── index.html
-│   ├── styles.css
-│   └── app.js
+├── web/ # Web application
+│ ├── index.html
+│ ├── styles.css
+│ └── app.js
 │
-└── tests/
+└── tests/ # Tests
     ├── __init__.py
     ├── test_charting.py
     ├── test_csv.py
@@ -339,13 +405,22 @@ project/
 
 ## 🧪 Tests
 
-### Running tests
+### Launch
 
 ```bash
-cd "Проект ФУ/project"
+# Go to project directory
+cd "FU Project/project"
+
+# Run all tests
 pytest
+
+# With verbose output
 pytest -v
+
+# Specific file
 pytest tests/test_records.py -v
+
+# Specific test
 pytest tests/test_reports.py::test_report_total -v
 ```
 
@@ -357,11 +432,13 @@ pytest --cov=. --cov-report=term-missing
 pytest --cov=. --cov-report=html
 ```
 
-Note: tests expect `CurrencyService` default to `use_online=False`.
+Note: The tests expect the `CurrencyService` to use local courses by default (parameter `use_online=False`).
 
 ---
 
 ## 💱 Supported currencies
+
+Default application rates:
 
 | Currency          | Code | Default rate | Description     |
 | ----------------- | ---- | ------------ | --------------- |
@@ -370,10 +447,10 @@ Note: tests expect `CurrencyService` default to `use_online=False`.
 | Euro              | EUR  | 590.0        | 1 EUR = 590 KZT |
 | Russian ruble     | RUB  | 6.5          | 1 RUB = 6.5 KZT |
 
-If you create `CurrencyService(use_online=True)`, rates are loaded from NBRK and cached in `currency_rates.json`.
+If you create `CurrencyService(use_online=True)`, then the rates will be downloaded from the National Bank of the Republic of Kazakhstan and saved in `currency_rates.json`.
 
 ---
 
 ## 📄 License
 
-MIT License — free to use, modify, and distribute.
+MIT License - free to use, modify and distribute.
