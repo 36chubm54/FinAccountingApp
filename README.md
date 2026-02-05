@@ -229,6 +229,7 @@ python main.py
 - `app/` — сценарии использования (use cases) и адаптер сервиса валют.
 - `infrastructure/` — хранилище данных (JSON‑репозиторий).
 - `utils/` — импорт/экспорт и подготовка данных для графиков.
+- `gui/` — GUI слой (Tkinter).
 - `web/` — автономное веб‑приложение.
 
 Поток данных для GUI:
@@ -349,7 +350,7 @@ python main.py
 ```
 project/
 │
-├── main.py                     # GUI точка входа (Tkinter)
+├── main.py                     # Точка входа приложения
 ├── records.json                # Хранилище записей (создаётся автоматически)
 ├── currency_rates.json         # Кэш курсов валют (use_online=True)
 ├── requirements.txt            # Python-зависимости
@@ -380,6 +381,10 @@ project/
 │   ├── excel_utils.py
 │   ├── pdf_utils.py
 │   └── charting.py
+│
+├── gui/                        # GUI слой (Tkinter)
+│   ├── __init__.py
+│   └── tkinter_gui.py
 │
 ├── web/                        # Веб-приложение
 │   ├── index.html

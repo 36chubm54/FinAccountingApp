@@ -229,6 +229,7 @@ The project follows a layered architecture:
 - `app/` — use cases and currency service adapter.
 - `infrastructure/` — data storage (JSON repository).
 - `utils/` — import/export and preparation of data for graphs.
+- `gui/` — GUI layer (Tkinter).
 - `web/` is a standalone web application.
 
 Data flow for GUI:
@@ -349,44 +350,48 @@ Methods:
 ```
 project/
 │
-├── main.py # GUI entry point (Tkinter)
-├── records.json # Record storage (created automatically)
-├── currency_rates.json # Currency rate cache (use_online=True)
-├── requirements.txt # Python dependencies
-├── pytest.ini # pytest settings
-├── README.md # This documentation
-├── README_EN.md # Documentation in English
-├── CHANGELOG.md # History of changes
-├── LICENSE # License
+├── main.py                     # Application entry point
+├── records.json                # Record storage (created automatically)
+├── currency_rates.json         # Currency rate cache (use_online=True)
+├── requirements.txt            # Python dependencies
+├── pytest.ini                  # pytest settings
+├── README.md                   # This documentation
+├── README_EN.md                # Documentation in English
+├── CHANGELOG.md                # History of changes
+├── LICENSE                     # License
 │
-├── app/ # Application layer
+├── app/                        # Application layer
 │ ├── __init__.py
-│ ├── services.py # CurrencyService adapter
-│ └── use_cases.py # Use cases
+│ ├── services.py               # CurrencyService adapter
+│ └── use_cases.py              # Use cases
 │
-├── domain/ # Domain layer
+├── domain/                     # Domain layer
 │ ├── __init__.py
-│ ├── records.py # Records
-│ ├── reports.py # Reports
-│ ├── currency.py # Domain CurrencyService
-│ └── validation.py # Validation of dates and periods
+│ ├── records.py                # Records
+│ ├── reports.py                # Reports
+│ ├── currency.py               # Domain CurrencyService
+│ └── validation.py             # Validation of dates and periods
 │
-├── infrastructure/ # Infrastructure layer
-│ └── repositories.py # JSON repository
+├── infrastructure/             # Infrastructure layer
+│ └── repositories.py           # JSON repository
 │
-├── utils/ # Import/export and graphs
+├── utils/                      # Import/export and graphs
 │ ├── __init__.py
 │ ├── csv_utils.py
 │ ├── excel_utils.py
 │ ├── pdf_utils.py
 │ └── charting.py
 │
-├── web/ # Web application
+├── gui/                        # GUI layer (Tkinter)
+│ ├── __init__.py
+│ └── tkinter_gui.py
+│
+├── web/                        # Web application
 │ ├── index.html
 │ ├── styles.css
 │ └── app.js
 │
-└── tests/ # Tests
+└── tests/                      # Tests
     ├── __init__.py
     ├── test_charting.py
     ├── test_csv.py
