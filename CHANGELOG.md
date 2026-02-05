@@ -28,11 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add infographic block to the main window: expense pie chart plus daily/monthly income-expense histograms
 - Group minor expense categories into an "Other" slice in the pie chart
 - Add time filter for the pie chart and make the category list scrollable
+- Refactor: move export/import UI logic into `gui/exporters.py` and `gui/importers.py` and add `gui/helpers.py`.
+- Unit tests: add tests for `gui.exporters` and `gui.importers`.
 
 ### Changed
 
 - Refactor online currency rates fetching (online mode remains opt-in)
 - Replace CLI with Tkinter GUI for financial accounting
+
+- Improve PDF font registration to support Cyrillic on Windows/Linux, with multiple fallbacks.
+- Improve GUI error handling: export/import handlers now log exceptions for diagnostics.
 
 ### Documentation
 
@@ -40,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improve README formatting and add test setup note
 - Add web application section to README.md with features, setup, and structure details
 - Document main window infographics in README.md and README_EN.md
+ - Update READMEs and CHANGELOG to reflect GUI refactor, improved logging and font handling
 
 ### Initial
 

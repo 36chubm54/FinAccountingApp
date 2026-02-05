@@ -5,7 +5,8 @@ __pycache__/
 .obsidian/
 .vscode/
 *.png
-records.json
-currency_rates.json
+*.csv
+*.xlsx
+*.pdf
 records.json
 currency_rates.json

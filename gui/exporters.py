@@ -1,0 +1,57 @@
+import logging
+import os
+from typing import Iterable
+
+logger = logging.getLogger(__name__)
+
+
+def export_report(report, filepath: str, fmt: str) -> None:
+    fmt = (fmt or "csv").lower()
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
+        filepath
+    ) else None
+    try:
+        if fmt == "csv":
+            from utils.csv_utils import report_to_csv
+
+            report_to_csv(report, filepath)
+        elif fmt in ("xlsx", "xls"):
+            from utils.excel_utils import report_to_xlsx
+
+            report_to_xlsx(report, filepath)
+        elif fmt == "pdf":
+            from utils.pdf_utils import report_to_pdf
+
+            report_to_pdf(report, filepath)
+        else:
+            raise ValueError(f"Unsupported export format: {fmt}")
+    except Exception:
+        logger.exception("Failed to export report to %s (%s)", filepath, fmt)
+        raise
+
+
+def export_mandatory_expenses(expenses: Iterable, filepath: str, fmt: str) -> None:
+    fmt = (fmt or "csv").lower()
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
+        filepath
+    ) else None
+    try:
+        if fmt == "csv":
+            from utils.csv_utils import export_mandatory_expenses_to_csv
+
+            export_mandatory_expenses_to_csv(list(expenses), filepath)
+        elif fmt in ("xlsx", "xls"):
+            from utils.excel_utils import export_mandatory_expenses_to_xlsx
+
+            export_mandatory_expenses_to_xlsx(list(expenses), filepath)
+        elif fmt == "pdf":
+            from utils.pdf_utils import export_mandatory_expenses_to_pdf
+
+            export_mandatory_expenses_to_pdf(list(expenses), filepath)
+        else:
+            raise ValueError(f"Unsupported export format: {fmt}")
+    except Exception:
+        logger.exception(
+            "Failed to export mandatory expenses to %s (%s)", filepath, fmt
+        )
+        raise

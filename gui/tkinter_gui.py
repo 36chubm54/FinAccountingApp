@@ -1,5 +1,6 @@
 import sys
 import tkinter as tk
+import logging
 from pathlib import Path
 from tkinter import (
     messagebox,
@@ -36,6 +37,11 @@ from utils.charting import (
     extract_months,
     extract_years,
 )
+
+from gui.helpers import open_in_file_manager, safe_destroy, safe_focus
+
+logger = logging.getLogger(__name__)
+
 
 # Ensure project package root is on sys.path so imports work regardless of CWD
 _ROOT = Path(__file__).resolve().parent.parent
@@ -164,12 +170,7 @@ class FinancialApp(tk.Tk):
     def _add_record(self, record_type, use_case_class):
         # If add window already exists, bring it to front and focus it
         if self.add_record_window and self.add_record_window.winfo_exists():
-            try:
-                self.add_record_window.deiconify()
-                self.add_record_window.lift()
-                self.add_record_window.focus_force()
-            except Exception:
-                pass
+            safe_focus(self.add_record_window)
             return
 
         # Create add record window
@@ -179,10 +180,7 @@ class FinancialApp(tk.Tk):
         add_record_window.geometry("400x300")
 
         def _on_add_record_close():
-            try:
-                add_record_window.destroy()
-            except Exception:
-                pass
+            safe_destroy(add_record_window)
             self.add_record_window = None
 
         add_record_window.protocol("WM_DELETE_WINDOW", _on_add_record_close)
@@ -264,19 +262,14 @@ class FinancialApp(tk.Tk):
         cancel_btn = tk.Button(
             self.add_record_window,
             text="Cancel",
-            command=self.add_record_window.destroy,
+            command=lambda: safe_destroy(self.add_record_window),
         )
         cancel_btn.grid(row=4, column=1, padx=10, pady=15)
 
     def generate_report(self):
         # If report window already exists, bring it to front and focus it
         if self.report_window and self.report_window.winfo_exists():
-            try:
-                self.report_window.deiconify()
-                self.report_window.lift()
-                self.report_window.focus_force()
-            except Exception:
-                pass
+            safe_focus(self.report_window)
             return
 
         report_window = Toplevel(self)
@@ -285,10 +278,7 @@ class FinancialApp(tk.Tk):
         report_window.geometry("800x400")
 
         def _on_report_close():
-            try:
-                report_window.destroy()
-            except Exception:
-                pass
+            safe_destroy(report_window)
             self.report_window = None
 
         report_window.protocol("WM_DELETE_WINDOW", _on_report_close)
@@ -398,11 +388,13 @@ class FinancialApp(tk.Tk):
             )
             if filepath:
                 try:
-                    current_report.to_csv(filepath)
+                    from gui.exporters import export_report
+
+                    export_report(current_report, filepath, "csv")
                     messagebox.showinfo("Success", f"Report exported to {filepath}")
-                    # Open the folder containing the file
-                    os.startfile(os.path.dirname(filepath))
+                    open_in_file_manager(os.path.dirname(filepath))
                 except Exception as e:
+                    logger.exception("Failed to export report to %s", filepath)
                     messagebox.showerror("Error", f"Failed to export: {str(e)}")
 
         def export_excel():
@@ -417,12 +409,13 @@ class FinancialApp(tk.Tk):
             )
             if filepath:
                 try:
-                    from utils.excel_utils import report_to_xlsx
+                    from gui.exporters import export_report
 
-                    report_to_xlsx(current_report, filepath)
+                    export_report(current_report, filepath, "xlsx")
                     messagebox.showinfo("Success", f"Report exported to {filepath}")
-                    os.startfile(os.path.dirname(filepath))
+                    open_in_file_manager(os.path.dirname(filepath))
                 except Exception as e:
+                    logger.exception("Failed to export report to xlsx %s", filepath)
                     messagebox.showerror("Error", f"Failed to export Excel: {str(e)}")
 
         def export_pdf():
@@ -437,12 +430,13 @@ class FinancialApp(tk.Tk):
             )
             if filepath:
                 try:
-                    from utils.pdf_utils import report_to_pdf
+                    from gui.exporters import export_report
 
-                    report_to_pdf(current_report, filepath)
+                    export_report(current_report, filepath, "pdf")
                     messagebox.showinfo("Success", f"Report exported to {filepath}")
-                    os.startfile(os.path.dirname(filepath))
+                    open_in_file_manager(os.path.dirname(filepath))
                 except Exception as e:
+                    logger.exception("Failed to export report to pdf %s", filepath)
                     messagebox.showerror("Error", f"Failed to export PDF: {str(e)}")
 
         def export_any():
@@ -507,7 +501,9 @@ class FinancialApp(tk.Tk):
         )
         self.expense_legend_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         legend_scroll = tk.Scrollbar(
-            legend_container, orient="vertical", command=self.expense_legend_canvas.yview
+            legend_container,
+            orient="vertical",
+            command=self.expense_legend_canvas.yview,
         )
         legend_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.expense_legend_canvas.configure(yscrollcommand=legend_scroll.set)
@@ -926,12 +922,7 @@ class FinancialApp(tk.Tk):
 
         # If delete window already exists, bring it to front and focus it
         if self.delete_window and self.delete_window.winfo_exists():
-            try:
-                self.delete_window.deiconify()
-                self.delete_window.lift()
-                self.delete_window.focus_force()
-            except Exception:
-                pass
+            safe_focus(self.delete_window)
             return
 
         delete_window = Toplevel(self)
@@ -940,10 +931,7 @@ class FinancialApp(tk.Tk):
         delete_window.geometry("500x400")
 
         def _on_delete_close():
-            try:
-                delete_window.destroy()
-            except Exception:
-                pass
+            safe_destroy(delete_window)
             self.delete_window = None
 
         delete_window.protocol("WM_DELETE_WINDOW", _on_delete_close)
@@ -1048,9 +1036,9 @@ class FinancialApp(tk.Tk):
             if not confirm:
                 return
 
-            from utils.excel_utils import report_from_xlsx
+            from gui.importers import import_report_from_xlsx
 
-            report = report_from_xlsx(filepath)
+            report = import_report_from_xlsx(filepath)
 
             # Replace repository data
             self.repository.delete_all()
@@ -1067,8 +1055,10 @@ class FinancialApp(tk.Tk):
             self.refresh_charts()
 
         except FileNotFoundError:
+            logger.exception("Excel import file not found: %s", filepath)
             messagebox.showerror("Error", f"File not found: {filepath}")
         except Exception as e:
+            logger.exception("Failed to import Excel from %s", filepath)
             messagebox.showerror("Error", f"Failed to import Excel: {str(e)}")
 
     def _import_handler(self):
@@ -1100,12 +1090,7 @@ class FinancialApp(tk.Tk):
     def manage_mandatory_expenses(self):
         # If manage window already exists, bring it to front and focus it
         if self.manage_window and self.manage_window.winfo_exists():
-            try:
-                self.manage_window.deiconify()
-                self.manage_window.lift()
-                self.manage_window.focus_force()
-            except Exception:
-                pass
+            safe_focus(self.manage_window)
             return
 
         manage_window = Toplevel(self)
@@ -1114,10 +1099,7 @@ class FinancialApp(tk.Tk):
         manage_window.geometry("650x400")
 
         def _on_manage_close():
-            try:
-                manage_window.destroy()
-            except Exception:
-                pass
+            safe_destroy(manage_window)
             self.manage_window = None
 
         manage_window.protocol("WM_DELETE_WINDOW", _on_manage_close)
@@ -1146,12 +1128,7 @@ class FinancialApp(tk.Tk):
         def add_expense():
             # If manage window already exists, bring it to front and focus it
             if self.add_mandatory_window and self.add_mandatory_window.winfo_exists():
-                try:
-                    self.add_mandatory_window.deiconify()
-                    self.add_mandatory_window.lift()
-                    self.add_mandatory_window.focus_force()
-                except Exception:
-                    pass
+                safe_focus(self.add_mandatory_window)
                 return
 
             # Create add expense window
@@ -1327,14 +1304,13 @@ class FinancialApp(tk.Tk):
             )
             if filepath:
                 try:
-                    from utils.csv_utils import export_mandatory_expenses_to_csv
+                    from gui.exporters import export_mandatory_expenses
 
-                    export_mandatory_expenses_to_csv(expenses, filepath)
+                    export_mandatory_expenses(expenses, filepath, "csv")
                     messagebox.showinfo(
                         "Success", f"Mandatory expenses exported to {filepath}"
                     )
-                    # Open the folder containing the file
-                    os.startfile(os.path.dirname(filepath))
+                    open_in_file_manager(os.path.dirname(filepath))
                 except Exception as e:
                     messagebox.showerror("Error", f"Failed to export: {str(e)}")
 
@@ -1352,13 +1328,13 @@ class FinancialApp(tk.Tk):
             )
             if filepath:
                 try:
-                    from utils.excel_utils import export_mandatory_expenses_to_xlsx
+                    from gui.exporters import export_mandatory_expenses
 
-                    export_mandatory_expenses_to_xlsx(expenses, filepath)
+                    export_mandatory_expenses(expenses, filepath, "xlsx")
                     messagebox.showinfo(
                         "Success", f"Mandatory expenses exported to {filepath}"
                     )
-                    os.startfile(os.path.dirname(filepath))
+                    open_in_file_manager(os.path.dirname(filepath))
                 except Exception as e:
                     messagebox.showerror("Error", f"Failed to export XLSX: {str(e)}")
 
@@ -1375,13 +1351,13 @@ class FinancialApp(tk.Tk):
             )
             if filepath:
                 try:
-                    from utils.pdf_utils import export_mandatory_expenses_to_pdf
+                    from gui.exporters import export_mandatory_expenses
 
-                    export_mandatory_expenses_to_pdf(expenses, filepath)
+                    export_mandatory_expenses(expenses, filepath, "pdf")
                     messagebox.showinfo(
                         "Success", f"Mandatory expenses exported to {filepath}"
                     )
-                    os.startfile(os.path.dirname(filepath))
+                    open_in_file_manager(os.path.dirname(filepath))
                 except Exception as e:
                     messagebox.showerror("Error", f"Failed to export PDF: {str(e)}")
 
@@ -1414,7 +1390,7 @@ class FinancialApp(tk.Tk):
                     return
 
                 # Import mandatory expenses
-                from utils.csv_utils import import_mandatory_expenses_from_csv
+                from gui.importers import import_mandatory_expenses_from_csv
 
                 expenses = import_mandatory_expenses_from_csv(filepath)
 
@@ -1464,7 +1440,7 @@ class FinancialApp(tk.Tk):
                 if not confirm:
                     return
 
-                from utils.excel_utils import import_mandatory_expenses_from_xlsx
+                from gui.importers import import_mandatory_expenses_from_xlsx
 
                 expenses = import_mandatory_expenses_from_xlsx(filepath)
 

@@ -2,6 +2,9 @@ from typing import Optional, Dict
 from domain.currency import CurrencyService as DomainCurrencyService
 from pathlib import Path
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class CurrencyService:
@@ -54,7 +57,7 @@ class CurrencyService:
             import requests
             import xml.etree.ElementTree as ET
         except ImportError as e:
-            print(f"Missing dependencies for online fetching: {e}")
+            logger.warning("Missing dependencies for online fetching: %s", e)
             return self._load_cached()
 
         try:
@@ -62,13 +65,13 @@ class CurrencyService:
             resp.raise_for_status()
             root = ET.fromstring(resp.text)
         except requests.RequestException as e:
-            print(f"Network error fetching rates: {e}")
+            logger.warning("Network error fetching rates: %s", e)
             return self._load_cached()
         except ET.ParseError as e:
-            print(f"XML parsing error: {e}")
+            logger.warning("XML parsing error: %s", e)
             return self._load_cached()
         except Exception as e:
-            print(f"Unexpected error fetching rates: {e}")
+            logger.exception("Unexpected error fetching rates: %s", e)
             return self._load_cached()
 
         rates: Dict[str, float] = {}
@@ -89,17 +92,19 @@ class CurrencyService:
                     rate = float(rate_text.replace(",", "."))
                     rates[code] = rate
                 except ValueError as e:
-                    print(f"Invalid rate value for {code}: {rate_text} ({e})")
+                    logger.warning(
+                        "Invalid rate value for %s: %s (%s)", code, rate_text, e
+                    )
                     continue
 
         if rates:
             try:
                 self._save_cache(rates)
             except Exception as e:
-                print(f"Failed to save cache: {e}")
+                logger.warning("Failed to save cache: %s", e)
             return rates
         else:
-            print("No valid rates found in XML")
+            logger.warning("No valid rates found in XML")
             return self._load_cached()
 
     def _load_cached(self) -> Optional[Dict[str, float]]:
@@ -109,7 +114,8 @@ class CurrencyService:
                     data = json.load(f)
                     # Expect mapping code->rate
                     return {k: float(v) for k, v in data.items()}
-        except Exception:
+        except Exception as e:
+            logger.exception("Failed to load cached currency rates: %s", e)
             return None
         return None
 
@@ -117,5 +123,5 @@ class CurrencyService:
         try:
             with open(self.CACHE_FILE, "w", encoding="utf-8") as f:
                 json.dump(rates, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.exception("Failed to save currency cache: %s", e)

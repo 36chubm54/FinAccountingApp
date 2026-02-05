@@ -1,8 +1,11 @@
 import json
 import os
 import tempfile
+import logging
 from abc import ABC, abstractmethod
 from domain.records import Record, IncomeRecord, ExpenseRecord, MandatoryExpenseRecord
+
+logger = logging.getLogger(__name__)
 
 
 class RecordRepository(ABC):
@@ -64,6 +67,9 @@ class JsonFileRecordRepository(RecordRepository):
             with open(self._file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
+            logger.warning(
+                "Failed to load JSON data from %s, using empty dataset", self._file_path
+            )
             return {"initial_balance": 0.0, "records": [], "mandatory_expenses": []}
         if isinstance(data, list):
             # Migrate old format
@@ -85,7 +91,9 @@ class JsonFileRecordRepository(RecordRepository):
 
     def _save_data(self, data: dict) -> None:
         directory = os.path.dirname(self._file_path) or "."
-        fd, tmp_path = tempfile.mkstemp(prefix=".records_", suffix=".json", dir=directory)
+        fd, tmp_path = tempfile.mkstemp(
+            prefix=".records_", suffix=".json", dir=directory
+        )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -121,27 +129,39 @@ class JsonFileRecordRepository(RecordRepository):
     def load_all(self) -> list[Record]:
         data = self._load_data()
         records = []
-        for item in data["records"]:
-            category = item.get("category", "General")
-            if item["type"] == "income":
-                record = IncomeRecord(
-                    date=item["date"], amount=item["amount"], category=category
-                )
-            elif item["type"] == "expense":
-                record = ExpenseRecord(
-                    date=item["date"], amount=item["amount"], category=category
-                )
-            elif item["type"] == "mandatory_expense":
-                record = MandatoryExpenseRecord(
-                    date=item["date"],
-                    amount=item["amount"],
-                    category=category,
-                    description=item["description"],
-                    period=item["period"],
-                )
-            else:
+        for index, item in enumerate(data.get("records", [])):
+            if not isinstance(item, dict):
+                logger.warning("Skipping non-dict record at index %s", index)
                 continue
-            records.append(record)
+            try:
+                typ = item.get("type", "income")
+                date = item.get("date", "")
+                amount = item.get("amount", 0.0)
+                category = item.get("category", "General")
+
+                if typ == "income":
+                    record = IncomeRecord(date=date, amount=amount, category=category)
+                elif typ == "expense":
+                    record = ExpenseRecord(date=date, amount=amount, category=category)
+                elif typ == "mandatory_expense":
+                    description = item.get("description", "")
+                    period = item.get("period", "monthly")
+                    record = MandatoryExpenseRecord(
+                        date=date,
+                        amount=amount,
+                        category=category,
+                        description=description,
+                        period=period,
+                    )
+                else:
+                    logger.warning(
+                        "Unknown record type '%s' at index %s, skipping", typ, index
+                    )
+                    continue
+                records.append(record)
+            except Exception as e:
+                logger.exception("Skipping invalid record at index %s: %s", index, e)
+                continue
         return records
 
     def delete_by_index(self, index: int) -> bool:

@@ -2,7 +2,7 @@ from typing import List
 import os
 import io
 import csv
-import gc
+import logging
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -12,6 +12,8 @@ from reportlab.lib import colors
 
 from domain.records import IncomeRecord, MandatoryExpenseRecord
 from domain.reports import Report
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_str(value):
@@ -24,40 +26,89 @@ def _register_cyrillic_font() -> str:
     Tries common locations for DejaVuSans and Windows Arial. Falls back to
     built-in Helvetica (may not render Cyrillic correctly).
     """
-    # Candidate paths
-    candidates = []
-    # Common Linux path for DejaVu
-    candidates.append("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
-    # Windows Fonts
+    # Candidate static paths
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+
+    # Windows Fonts directory
     windir = os.environ.get("WINDIR") or os.environ.get("SystemRoot")
     if windir:
-        candidates.append(os.path.join(windir, "Fonts", "DejaVuSans.ttf"))
-        candidates.append(os.path.join(windir, "Fonts", "Arial.ttf"))
-        candidates.append(os.path.join(windir, "Fonts", "Times.ttf"))
-    # Try venv/share or local
+        fonts_dir = os.path.join(windir, "Fonts")
+        candidates.append(os.path.join(fonts_dir, "DejaVuSans.ttf"))
+        candidates.append(os.path.join(fonts_dir, "Arial.ttf"))
+        candidates.append(os.path.join(fonts_dir, "Times.ttf"))
+        candidates.append(os.path.join(fonts_dir, "seguisym.ttf"))
+
+    # Local candidates
     candidates.append("DejaVuSans.ttf")
 
+    # Try explicit candidate files first
     for path in candidates:
         try:
             if path and os.path.exists(path):
                 name = os.path.splitext(os.path.basename(path))[0]
                 try:
                     pdfmetrics.registerFont(TTFont(name, path))
+                    logger.debug("Registered font %s from %s", name, path)
                     return name
                 except Exception:
+                    logger.debug(
+                        "Failed to register font %s at %s", name, path, exc_info=True
+                    )
                     continue
         except Exception:
             continue
 
-    # Last resort: try to register by name (may work if font already available)
-    for name in ("DejaVuSans", "Arial", "TimesNewRoman"):
+    # If fonts directory exists, try to find a TTF that likely supports Cyrillic
+    search_dirs = [
+        "/usr/share/fonts/truetype",
+    ]
+    if windir and fonts_dir and os.path.isdir(fonts_dir):
+        search_dirs.insert(0, fonts_dir)
+
+    tried = set()
+    for d in search_dirs:
         try:
-            pdfmetrics.registerFont(TTFont(name, name))
-            return name
+            for fname in os.listdir(d):
+                if not fname.lower().endswith(".ttf"):
+                    continue
+                # prefer common fonts known to contain Cyrillic glyphs
+                if any(
+                    k in fname.lower()
+                    for k in ("dejavu", "arial", "verdana", "times", "segoe", "roboto")
+                ):
+                    path = os.path.join(d, fname)
+                    if path in tried:
+                        continue
+                    tried.add(path)
+                    try:
+                        name = os.path.splitext(os.path.basename(path))[0]
+                        pdfmetrics.registerFont(TTFont(name, path))
+                        logger.debug(
+                            "Registered font %s from discovered path %s", name, path
+                        )
+                        return name
+                    except Exception:
+                        logger.debug(
+                            "Failed to register discovered font %s", path, exc_info=True
+                        )
+                        continue
         except Exception:
             continue
 
-    # Fallback to a built-in font
+    # Last resort: try to register some common names if available in the environment
+    for name in ("DejaVuSans", "Arial", "TimesNewRoman", "Verdana", "SegoeUI"):
+        try:
+            pdfmetrics.registerFont(TTFont(name, name))
+            logger.debug("Registered font by name: %s", name)
+            return name
+        except Exception:
+            logger.debug("Failed to register font by name: %s", name, exc_info=True)
+            continue
+
+    # Fallback to built-in font
+    logger.warning("No suitable TTF font found for Cyrillic; falling back to Helvetica")
     return "Helvetica"
 
 
@@ -139,12 +190,8 @@ def report_to_pdf(report: Report, filepath: str) -> None:
     for month_label, income, expense in monthly_rows:
         total_income += income
         total_expense += expense
-        summary_data.append(
-            [month_label, f"{income:.2f}", f"{expense:.2f}"]
-        )
-    summary_data.append(
-        ["TOTAL", f"{total_income:.2f}", f"{total_expense:.2f}"]
-    )
+        summary_data.append([month_label, f"{income:.2f}", f"{expense:.2f}"])
+    summary_data.append(["TOTAL", f"{total_income:.2f}", f"{total_expense:.2f}"])
 
     summary_col_widths = [
         available_width * 0.30,
@@ -165,11 +212,12 @@ def report_to_pdf(report: Report, filepath: str) -> None:
         ]
     )
     summary_table.setStyle(summary_style)
-    elems.append(Spacer(1, 14))
+    WIDTH = 1
+    HEIGHT = 14
+    elems.append(Spacer(WIDTH, HEIGHT))
     elems.append(summary_table)
 
     doc.build(elems)
-    gc.collect()
 
 
 def export_mandatory_expenses_to_pdf(
@@ -250,4 +298,3 @@ def export_mandatory_expenses_to_pdf(
     table.setStyle(style)
     elems = [table]
     doc.build(elems)
-    gc.collect()

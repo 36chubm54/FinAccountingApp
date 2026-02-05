@@ -15,6 +15,14 @@ Graphical and web application for personal financial accounting with multicurren
 
 ---
 
+## 🛠️ Recent Improvements
+
+- Refactored GUI: export/import logic moved to `gui/exporters.py` and `gui/importers.py` and common helpers to `gui/helpers.py` for clearer separation of responsibilities.
+- Improved error logging in GUI export/import handlers (exceptions are logged for diagnostics before showing dialogs).
+- Enhanced PDF font registration with multiple fallbacks to better support Cyrillic on Windows and Linux.
+- Cross-platform file manager opening (`open_in_file_manager`) improved with safer detection and logging.
+- Added unit tests for `gui.exporters` and `gui.importers`; test suite validated successfully.
+
 ## 🚀 Quick start
 
 ### System requirements
@@ -62,14 +70,14 @@ After running `python main.py`, a window with control buttons and an infographic
 
 Buttons and actions:
 
-- `Add Income` - Add income.
-- `Add Expense` - Add expense.
+- `Add Income` — Add income.
+- `Add Expense` — Add expense.
 - `Generate Report` — Generate a report with filters.
 - `Delete Record` — Delete one record.
-- `Delete All Records` - Delete all records.
+- `Delete All Records` — Delete all records.
 - `Set Initial Balance` — Set the initial balance.
-- `Manage Mandatory` - Management of mandatory expenses.
-- Import format (`CSV`, `XLSX`) and `Import` button - import of financial records.
+- `Manage Mandatory` — Management of mandatory expenses.
+- Import format (`CSV`, `XLSX`) and `Import` button — import of financial records.
 
 Infographic on the right:
 
@@ -95,13 +103,13 @@ The amount is converted into the base currency `KZT` at the current rates of the
 1. Click `Generate Report`.
 2. Enter filters (optional):
 
-- `Period` - date prefix (for example, `2025` or `2025-01`).
+- `Period` — date prefix (for example, `2025` or `2025-01`).
 - `Category` — filter by category.
 
 1. Enable options:
 
-- `Group by category` - grouping by category.
-- `Display as table` - table format.
+- `Group by category` — grouping by category.
+- `Display as table` — table format.
 
 1. Click `Generate`.
 At the bottom, an additional table “Monthly Income/Expense Summary” is displayed for the selected year and months.
@@ -131,7 +139,7 @@ The following operations are available in the `Manage Mandatory` window:
 
 - `Add` — add a mandatory expense.
 - `Delete` — delete the selected one.
-- `Delete All` - delete everything.
+- `Delete All` — delete everything.
 - `Add to Report` — add the selected expense to the report with the specified date.
 - `Import` — import of mandatory expenses.
 - `Export` — export of mandatory expenses.
@@ -225,7 +233,7 @@ To run: Open `web/index.html` in a browser.
 
 The project follows a layered architecture:
 
-- `domain/` - business models and rules (records, reports, validation of dates and periods, currencies).
+- `domain/` — business models and rules (records, reports, validation of dates and periods, currencies).
 - `app/` — use cases and currency service adapter.
 - `infrastructure/` — data storage (JSON repository).
 - `utils/` — import/export and preparation of data for graphs.
@@ -246,31 +254,31 @@ Below are the key classes and functions synchronized with the actual code.
 
 `domain/records.py`
 
-- `Record` - base record (abstract class).
-- `IncomeRecord` - income.
-- `ExpenseRecord` - expense.
-- `MandatoryExpenseRecord` - mandatory expense with `description` and `period`.
+- `Record` – base record (abstract class).
+- `IncomeRecord` – income.
+- `ExpenseRecord` – expense.
+- `MandatoryExpenseRecord` – mandatory expense with `description` and `period`.
 
 `domain/currency.py`
 
-- `CurrencyService` - conversion of currencies to base (`KZT`).
+- `CurrencyService` – conversion of currencies to base (`KZT`).
 
 `domain/reports.py`
 
 - `Report(records, initial_balance=0.0)` — report.
 - `total()` — final balance taking into account the initial balance.
-- `filter_by_period(prefix)` - filtering by date prefix.
+- `filter_by_period(prefix)` – filtering by date prefix.
 - `filter_by_category(category)` — filtering by category.
-- `grouped_by_category()` - grouping by categories.
-- `monthly_income_expense_rows(year=None, up_to_month=None)` - monthly aggregates.
+- `grouped_by_category()` — grouping by categories.
+- `monthly_income_expense_rows(year=None, up_to_month=None)` – monthly aggregates.
 - `monthly_income_expense_table(year=None, up_to_month=None)` — table by month.
-- `as_table(summary_mode="full"|"total_only")` - tabular output.
-- `to_csv(filepath)` and `from_csv(filepath)` - CSV export/import.
+- `as_table(summary_mode="full"|"total_only")` — tabular output.
+- `to_csv(filepath)` and `from_csv(filepath)` — CSV export/import.
 
 `domain/validation.py`
 
-- `parse_ymd(value)` - parsing and validating the date `YYYY-MM-DD`.
-- `ensure_not_future(date)` - prohibition of future dates.
+- `parse_ymd(value)` — parsing and validating the date `YYYY-MM-DD`.
+- `ensure_not_future(date)` — prohibition of future dates.
 - `ensure_valid_period(period)` — period validation.
 
 ### Application
@@ -287,7 +295,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `GenerateReport.execute()` → `Report` taking into account the initial balance.
 - `DeleteRecord.execute(index)`.
 - `DeleteAllRecords.execute()`.
-- `ImportFromCSV.execute(filepath)` - import and complete replacement of records.
+- `ImportFromCSV.execute(filepath)` — import and complete replacement of records.
 - `CreateMandatoryExpense.execute(amount, currency, category, description, period)`.
 - `GetMandatoryExpenses.execute()`.
 - `DeleteMandatoryExpense.execute(index)`.
@@ -313,6 +321,41 @@ Methods:
 - `load_mandatory_expenses()`.
 - `delete_mandatory_expense_by_index(index)`.
 - `delete_all_mandatory_expenses()`.
+
+### GUI
+
+`gui/tkinter_gui.py`
+
+- `FinancialAccountingApp` — basic GUI application class.
+
+Methods:
+
+- `add_income()`.
+- `add_expense()`.
+- `generate_report()`.
+- `delete_record()`.
+- `delete_all_records()`.
+- `import_from_csv()`.
+- `import_from_xlsx()`.
+- `set_initial_balance()`.
+- `manage_mandatory_expenses()`.
+
+`gui/exporters.py`
+
+- `export_report(report, filepath, fmt)`.
+- `export_mandatory_expenses(expenses, filepath, fmt)`.
+
+`gui/importers.py`
+
+- `import_report_from_xlsx(filepath)`
+- `import_mandatory_expenses_from_csv(filepath)`
+- `import_mandatory_expenses_from_xlsx(filepath)`
+
+`gui/helpers.py`
+
+- `open_in_file_manager(path)`
+- `safe_destroy(window)` — safe destruction of the window.
+- `safe_focus(window)` — safe window focusing.
 
 ### Utils
 
@@ -380,11 +423,14 @@ project/
 │ ├── csv_utils.py
 │ ├── excel_utils.py
 │ ├── pdf_utils.py
-│ └── charting.py
+│ └── charting.py               # Graphs and Aggregations
 │
 ├── gui/                        # GUI layer (Tkinter)
 │ ├── __init__.py
-│ └── tkinter_gui.py
+│ ├── tkinter_gui.py            # Main GUI application
+│ ├── exporters.py              # Export reports and mandatory expenses
+│ ├── importers.py              # Import mandatory expenses
+│ └── helpers.py                # Helpers for GUI
 │
 ├── web/                        # Web application
 │ ├── index.html
@@ -397,6 +443,7 @@ project/
     ├── test_csv.py
     ├── test_currency.py
     ├── test_excel.py
+    ├── test_gui_exporters_importers.py
     ├── test_pdf.py
     ├── test_records.py
     ├── test_reports.py
@@ -437,7 +484,7 @@ pytest --cov=. --cov-report=term-missing
 pytest --cov=. --cov-report=html
 ```
 
-Note: The tests expect the `CurrencyService` to use local courses by default (parameter `use_online=False`).
+> **Note:** The tests expect the `CurrencyService` to use local courses by default (parameter `use_online=False`).
 
 ---
 
@@ -458,4 +505,4 @@ If you create `CurrencyService(use_online=True)`, then the rates will be downloa
 
 ## 📄 License
 
-MIT License - free to use, modify and distribute.
+MIT License — free to use, modify and distribute.
