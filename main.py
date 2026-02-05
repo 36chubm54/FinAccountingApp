@@ -47,7 +47,7 @@ class FinancialApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Financial Accounting")
-        self.geometry("1000x700")
+        self.geometry("1000x800")
         self.minsize(900, 600)
 
         # Track open windows so repeated button presses focus them instead of creating new ones
@@ -256,11 +256,15 @@ class FinancialApp(tk.Tk):
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to add record: {str(e)}")
 
-        save_btn = tk.Button(self.add_record_window, text="Save", command=save_and_close)
+        save_btn = tk.Button(
+            self.add_record_window, text="Save", command=save_and_close
+        )
         save_btn.grid(row=4, column=0, padx=10, pady=15)
 
         cancel_btn = tk.Button(
-            self.add_record_window, text="Cancel", command=self.add_record_window.destroy
+            self.add_record_window,
+            text="Cancel",
+            command=self.add_record_window.destroy,
         )
         cancel_btn.grid(row=4, column=1, padx=10, pady=15)
 
@@ -344,7 +348,8 @@ class FinancialApp(tk.Tk):
                     for cat, cat_report in groups.items():
                         result_text.insert(tk.END, f"\nCategory: {cat}\n")
                         result_text.insert(
-                            tk.END, cat_report.as_table(summary_mode="total_only") + "\n"
+                            tk.END,
+                            cat_report.as_table(summary_mode="total_only") + "\n",
                         )
                 else:
                     groups = report.grouped_by_category()
@@ -468,11 +473,22 @@ class FinancialApp(tk.Tk):
         pie_frame = tk.LabelFrame(parent, text="Расходы по категориям")
         pie_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
 
+        pie_controls = tk.Frame(pie_frame)
+        pie_controls.pack(fill=tk.X, padx=10, pady=(10, 0))
+        tk.Label(pie_controls, text="Месяц:").pack(side=tk.LEFT)
+
+        self.pie_month_var = tk.StringVar()
+        self.pie_month_menu = tk.OptionMenu(pie_controls, self.pie_month_var, "")
+        self.pie_month_menu.pack(side=tk.LEFT, padx=6)
+        self.pie_month_var.trace_add("write", self._on_chart_filter_change)
+
         daily_frame = tk.LabelFrame(parent, text="Доходы/расходы по дням месяца")
         daily_frame.grid(row=1, column=1, sticky="nsew", padx=10, pady=10)
 
         monthly_frame = tk.LabelFrame(parent, text="Доходы/расходы по месяцам года")
-        monthly_frame.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
+        monthly_frame.grid(
+            row=2, column=0, columnspan=2, sticky="nsew", padx=10, pady=10
+        )
 
         parent.grid_columnconfigure(0, weight=1)
         parent.grid_columnconfigure(1, weight=1)
@@ -482,19 +498,42 @@ class FinancialApp(tk.Tk):
         self.expense_pie_canvas = tk.Canvas(
             pie_frame, height=240, bg="white", highlightthickness=0
         )
-        self.expense_pie_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.expense_pie_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 6))
 
-        self.expense_legend_frame = tk.Frame(pie_frame)
-        self.expense_legend_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        legend_container = tk.Frame(pie_frame)
+        legend_container.pack(fill=tk.BOTH, expand=False, padx=10, pady=(0, 10))
+        self.expense_legend_canvas = tk.Canvas(
+            legend_container, height=110, highlightthickness=0
+        )
+        self.expense_legend_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        legend_scroll = tk.Scrollbar(
+            legend_container, orient="vertical", command=self.expense_legend_canvas.yview
+        )
+        legend_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.expense_legend_canvas.configure(yscrollcommand=legend_scroll.set)
+
+        self.expense_legend_frame = tk.Frame(self.expense_legend_canvas)
+        self.expense_legend_canvas.create_window(
+            (0, 0), window=self.expense_legend_frame, anchor="nw"
+        )
+
+        def _update_legend_scroll(_event=None):
+            self.expense_legend_canvas.configure(
+                scrollregion=self.expense_legend_canvas.bbox("all")
+            )
+
+        self.expense_legend_frame.bind("<Configure>", _update_legend_scroll)
+        self.expense_legend_canvas.bind("<MouseWheel>", self._on_legend_mousewheel)
+        self.expense_legend_frame.bind("<MouseWheel>", self._on_legend_mousewheel)
+
+        self.bind_all("<MouseWheel>", self._on_legend_mousewheel)
 
         daily_controls = tk.Frame(daily_frame)
         daily_controls.pack(fill=tk.X, padx=10, pady=(10, 0))
         tk.Label(daily_controls, text="Месяц:").pack(side=tk.LEFT)
 
         self.chart_month_var = tk.StringVar()
-        self.chart_month_menu = tk.OptionMenu(
-            daily_controls, self.chart_month_var, ""
-        )
+        self.chart_month_menu = tk.OptionMenu(daily_controls, self.chart_month_var, "")
         self.chart_month_menu.pack(side=tk.LEFT, padx=6)
         self.chart_month_var.trace_add("write", self._on_chart_filter_change)
 
@@ -508,9 +547,7 @@ class FinancialApp(tk.Tk):
         tk.Label(monthly_controls, text="Год:").pack(side=tk.LEFT)
 
         self.chart_year_var = tk.StringVar()
-        self.chart_year_menu = tk.OptionMenu(
-            monthly_controls, self.chart_year_var, ""
-        )
+        self.chart_year_menu = tk.OptionMenu(monthly_controls, self.chart_year_var, "")
         self.chart_year_menu.pack(side=tk.LEFT, padx=6)
         self.chart_year_var.trace_add("write", self._on_chart_filter_change)
 
@@ -520,13 +557,19 @@ class FinancialApp(tk.Tk):
         self.monthly_bar_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         self._chart_refresh_suspended = False
+        self._chart_redraw_job = None
 
-        def _redraw(_event=None):
-            self.refresh_charts()
+        def _schedule_redraw(_event=None):
+            if self._chart_redraw_job is not None:
+                try:
+                    self.after_cancel(self._chart_redraw_job)
+                except Exception:
+                    pass
+            self._chart_redraw_job = self.after(120, self.refresh_charts)
 
-        self.expense_pie_canvas.bind("<Configure>", _redraw)
-        self.daily_bar_canvas.bind("<Configure>", _redraw)
-        self.monthly_bar_canvas.bind("<Configure>", _redraw)
+        self.expense_pie_canvas.bind("<Configure>", _schedule_redraw)
+        self.daily_bar_canvas.bind("<Configure>", _schedule_redraw)
+        self.monthly_bar_canvas.bind("<Configure>", _schedule_redraw)
 
     def _on_chart_filter_change(self, *_args) -> None:
         if self._chart_refresh_suspended:
@@ -538,6 +581,7 @@ class FinancialApp(tk.Tk):
 
         self._chart_refresh_suspended = True
         self._update_month_options(records)
+        self._update_pie_month_options(records)
         self._update_year_options(records)
         self._chart_refresh_suspended = False
 
@@ -558,9 +602,32 @@ class FinancialApp(tk.Tk):
             menu.add_command(
                 label=month, command=lambda value=month: self.chart_month_var.set(value)
             )
-
         if not self.chart_month_var.get() or self.chart_month_var.get() not in months:
             self.chart_month_var.set(months[-1])
+
+    def _update_pie_month_options(self, records) -> None:
+        months = extract_months(records)
+        current_month = datetime.now().strftime("%Y-%m")
+        if current_month not in months:
+            months.append(current_month)
+        months = sorted(set(months))
+
+        menu = self.pie_month_menu["menu"]
+        menu.delete(0, "end")
+        menu.add_command(
+            label="Все время", command=lambda value="all": self.pie_month_var.set(value)
+        )
+        for month in months:
+            menu.add_command(
+                label=month, command=lambda value=month: self.pie_month_var.set(value)
+            )
+
+        current_value = self.pie_month_var.get()
+        if not current_value:
+            self.pie_month_var.set("all")
+            return
+        if current_value != "all" and current_value not in months:
+            self.pie_month_var.set(months[-1] if months else "all")
 
     def _update_year_options(self, records) -> None:
         years = extract_years(records)
@@ -576,12 +643,15 @@ class FinancialApp(tk.Tk):
                 label=str(year),
                 command=lambda value=year: self.chart_year_var.set(str(value)),
             )
-
         if not self.chart_year_var.get() or int(self.chart_year_var.get()) not in years:
             self.chart_year_var.set(str(years[-1]))
 
     def _draw_expense_pie(self, records) -> None:
-        totals = aggregate_expenses_by_category(records)
+        month_value = self.pie_month_var.get()
+        filtered = records
+        if month_value and month_value != "all":
+            filtered = self._filter_records_by_month(records, month_value)
+        totals = aggregate_expenses_by_category(filtered)
         data = [(k, v) for k, v in totals.items() if v > 0]
         data.sort(key=lambda item: item[1], reverse=True)
         data = self._group_minor_categories(data, max_slices=10)
@@ -623,9 +693,7 @@ class FinancialApp(tk.Tk):
 
             legend_row = tk.Frame(self.expense_legend_frame)
             legend_row.pack(anchor="w", pady=2)
-            color_box = tk.Canvas(
-                legend_row, width=12, height=12, highlightthickness=0
-            )
+            color_box = tk.Canvas(legend_row, width=12, height=12, highlightthickness=0)
             color_box.create_rectangle(0, 0, 12, 12, fill=color, outline=color)
             color_box.pack(side=tk.LEFT)
             tk.Label(
@@ -642,6 +710,22 @@ class FinancialApp(tk.Tk):
         other_total = sum(value for _, value in data[max_slices - 1 :])
         major.append(("Прочее", other_total))
         return major
+
+    def _filter_records_by_month(self, records, month_value: str):
+        try:
+            year, month = map(int, month_value.split("-"))
+        except Exception:
+            return records
+
+        filtered = []
+        for record in records:
+            try:
+                dt = datetime.strptime(record.date, "%Y-%m-%d")
+            except Exception:
+                continue
+            if dt.year == year and dt.month == month:
+                filtered.append(record)
+        return filtered
 
     def _generate_colors(self, count: int) -> list[str]:
         if count <= 0:
@@ -732,6 +816,18 @@ class FinancialApp(tk.Tk):
             "Дек",
         ]
         self._draw_bar_chart(self.monthly_bar_canvas, labels, income, expense, 12)
+
+    def _on_legend_mousewheel(self, event) -> None:
+        if not hasattr(self, "expense_legend_canvas"):
+            return
+
+        widget = self.winfo_containing(event.x_root, event.y_root)
+        while widget is not None:
+            if widget == self.expense_legend_canvas:
+                delta = -1 if event.delta > 0 else 1
+                self.expense_legend_canvas.yview_scroll(delta, "units")
+                return
+            widget = widget.master
 
     def _draw_bar_chart(
         self,
@@ -1139,7 +1235,9 @@ class FinancialApp(tk.Tk):
                 except Exception as e:
                     messagebox.showerror("Error", f"Failed to add expense: {str(e)}")
 
-            save_btn = tk.Button(add_mandatory_window, text="Save", command=save_expense)
+            save_btn = tk.Button(
+                add_mandatory_window, text="Save", command=save_expense
+            )
             save_btn.grid(row=5, column=0, columnspan=2, pady=20)
 
         def delete_expense():
