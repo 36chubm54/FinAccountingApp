@@ -13,6 +13,10 @@ def parse_ymd(value: str) -> date:
     last_day = calendar.monthrange(year, month)[1]
     if not (1 <= day <= last_day):
         raise ValueError("Invalid day")
+    if len(str(year)) != 4:
+        raise ValueError("Year must be 4 digits")
+    if not value:
+        raise ValueError("Date value is empty")
     return date(year, month, day)
 
 

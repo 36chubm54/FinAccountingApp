@@ -17,6 +17,8 @@ def test_parse_ymd_valid():
         "2025/02/01",
         "2025-2-1",
         "2025-02",
+        "20265-01-02",
+        "",
     ],
 )
 def test_parse_ymd_invalid(value):

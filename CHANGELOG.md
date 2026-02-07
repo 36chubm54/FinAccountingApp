@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add time filter for the pie chart and make the category list scrollable
 - Unit tests: add tests for `gui.exporters` and `gui.importers`.
 - Add export of grouped category tables to Excel/PDF report after the main statement.
+- Modified GUI (tabs, error handling, and visual feedback).
 
 ### Changed
 
