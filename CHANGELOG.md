@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Improve PDF font registration to support Cyrillic on Windows/Linux, with multiple fallbacks.
 - Improve GUI error handling: export/import handlers now log exceptions for diagnostics.
+- Redesign GUI (tabs, error handling, and visual feedback).
 
 ### Documentation
 

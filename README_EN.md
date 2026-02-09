@@ -17,11 +17,8 @@ Graphical and web application for personal financial accounting with multicurren
 
 ## 🛠️ Recent Improvements
 
-- Refactored GUI: export/import logic moved to `gui/exporters.py` and `gui/importers.py` and common helpers to `gui/helpers.py` for clearer separation of responsibilities.
-- Improved error logging in GUI export/import handlers (exceptions are logged for diagnostics before showing dialogs).
-- Enhanced PDF font registration with multiple fallbacks to better support Cyrillic on Windows and Linux.
-- Cross-platform file manager opening (`open_in_file_manager`) improved with safer detection and logging.
-- Added unit tests for `gui.exporters` and `gui.importers`; test suite validated successfully.
+- Completely redesigned GUI (fewer unnecessary elements, improved navigation and user experience).
+- Minor typing errors have been fixed, checks have been added for None attributes, for the correctness of the font, as well as for the correctness of data entry.
 
 ## 🚀 Quick start
 
@@ -66,20 +63,16 @@ After launch, the graphical window of the Financial Accounting application will 
 
 ### Main window
 
-After running `python main.py`, a window with control buttons and an infographic block will open.
+After running `python main.py`, a window will open with control tabs and an infographic block.
 
-Buttons and actions:
+Tabs and actions:
 
-- `Add Income` — Add income.
-- `Add Expense` — Add expense.
-- `Generate Report` — Generate a report with filters.
-- `Delete Record` — Delete one record.
-- `Delete All Records` — Delete all records.
-- `Set Initial Balance` — Set the initial balance.
-- `Manage Mandatory` — Management of mandatory expenses.
-- Import format (`CSV`, `XLSX`) and `Import` button — import of financial records.
+- `Infographics` - displays infographics (pie charts, histograms) with the ability to filter by month/year.
+- `Operations` - adding/deleting records, setting the initial balance.
+- `Reports` — report generation, export.
+- `Settings` - management of mandatory expenses.
 
-Infographic on the right:
+Infographics:
 
 - Pie chart of expenses by category with month filter.
 - Histogram of income/expenses by day of the month.
@@ -89,59 +82,64 @@ Income is displayed in green, expenses in red. For a pie chart, small categories
 
 ### Adding income/expense
 
-1. Click `Add Income` or `Add Expense`.
-2. Enter the date in the format `YYYY-MM-DD` (the date cannot be in the future).
-3. Enter the amount.
-4. Specify the currency (default is `KZT`).
-5. Specify the category (default is `General`).
-6. Click `Save`.
+1. Open the `Operations` tab.
+2. In the `Add operation` block, select the type of operation (`Income` or `Expense`).
+3. Enter the date in the format `YYYY-MM-DD` (the date cannot be in the future).
+4. Enter the amount.
+5. Specify the currency (default is `KZT`).
+6. Specify a category (default is `General`).
+7. Click `Save`.
 
-The amount is converted into the base currency `KZT` at the current rates of the currency service.
+The amount is converted into the base currency `KZT` at the current rates of the currency service. Once an entry is added, the list is automatically updated.
 
 ### Report generation
 
-1. Click `Generate Report`.
+1. Open the `Reports` tab.
 2. Enter filters (optional):
+    - `Period` - date prefix (for example, `2025` or `2025-01`).
+    - `Category` — filter by category.
+3. Enable options:
+    - `Group by category` - grouping by category.
+    - `Display as table` - table format.
+4. Click `Generate`.
 
-- `Period` — date prefix (for example, `2025` or `2025-01`).
-- `Category` — filter by category.
-
-1. Enable options:
-
-- `Group by category` — grouping by category.
-- `Display as table` — table format.
-
-1. Click `Generate`.
 At the bottom, an additional table “Monthly Income/Expense Summary” is displayed for the selected year and months.
 
 Export report:
 
 - Formats: `CSV`, `XLSX`, `PDF`.
-- A `Yearly Report` sheet with a monthly summary is added to `XLSX`. A second, intermediate sheet `By Category` is also created with records grouped by categories and subtotals.
+- In addition to the main records, a `Yearly Report` sheet with a monthly summary is added to `XLSX`. A second, intermediate sheet `By Category` is also created with records grouped by categories and subtotals.
 - In `PDF` the monthly summary remains, and after the main statement, tables are added broken down by category (each category is a separate table with a subtotal).
 
 ### Deleting an entry
 
-1. Click `Delete Record`.
+1. Open the `Operations` tab.
 2. Select an entry from the list.
-3. Click `Delete Selected` and confirm deletion.
+3. Click `Delete Selected`. A deletion message appears with the index of the entry.
+
+### Delete all entries
+
+1. Open the `Operations` tab.
+2. In the `List of operation` block, select an entry from the list.
+3. Click `Delete All Records` and confirm the deletion. The entries will be permanently deleted and the list of entries will be updated.
 
 ### Setting the initial balance
 
-1. Click `Set Initial Balance`.
+1. Open the `Settings` tab.
 2. Enter the amount (can be negative).
-3. Confirm.
+3. Confirm by clicking `Save`.
 
 The opening balance is taken into account in the final balance sheet.
 
 ### Managing mandatory expenses
 
-The following operations are available in the `Manage Mandatory` window:
+In the `Settings` tab, in the `Mandatory Expenses` block, the following operations are available:
 
 - `Add` — add a mandatory expense.
 - `Delete` — delete the selected one.
 - `Delete All` — delete everything.
 - `Add to Report` — add the selected expense to the report with the specified date.
+- File format selector for import/export.
 - `Import` — import of mandatory expenses.
 - `Export` — export of mandatory expenses.
 
@@ -156,7 +154,7 @@ Import/export of mandatory expenses:
 
 ### Importing financial records
 
-Import is performed via `Import` in the main window.
+Import is performed via `Import` in the `Operations` tab.
 
 Formats:
 
@@ -327,19 +325,28 @@ Methods:
 
 `gui/tkinter_gui.py`
 
-- `FinancialAccountingApp` — basic GUI application class.
+- `FinancialApp` — basic GUI application class.
 
 Methods:
 
-- `add_income()`.
-- `add_expense()`.
-- `generate_report()`.
-- `delete_record()`.
-- `delete_all_records()`.
-- `import_from_csv()`.
-- `import_from_xlsx()`.
-- `set_initial_balance()`.
-- `manage_mandatory_expenses()`.
+- `infographics_tab(parent)`.
+- `operations_tab(parent)`:
+  - `save_record()`.
+  - `delete_selected()`.
+  - `delete_all()`.
+  - `import_records()`.
+- `reports_tab(parent)`.
+  - `generate()`.
+  - `export_any()`.
+- `settings_tab(parent)`.
+  - `save_balance()`.
+  - `refresh_mandatory()`.
+  - `add_mandatory_inline()`.
+  - `add_to_report_inline()`.
+  - `delete_mandatory()`.
+  - `delete_all_mandatory()`.
+  - `import_mand()`.
+  - `export_mand()`.
 
 `gui/exporters.py`
 

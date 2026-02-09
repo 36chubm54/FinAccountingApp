@@ -19,13 +19,16 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
     """Export Report to an XLSX file."""
     wb = Workbook()
     ws = wb.active
-    ws.title = "Report"
+    if ws is not None:
+        ws.title = "Report"
 
-    ws.append(["Date", "Type", "Category", "Amount (KZT)"])
+    if ws is not None:
+        ws.append(["Date", "Type", "Category", "Amount (KZT)"])
 
     # initial balance
     if getattr(report, "initial_balance", 0) != 0:
-        ws.append(["", "Initial Balance", "", f"{report.initial_balance:.2f}"])
+        if ws is not None:
+            ws.append(["", "Initial Balance", "", f"{report.initial_balance:.2f}"])
 
     for record in sorted(report.records(), key=lambda r: r.date):
         if isinstance(record, IncomeRecord):
@@ -34,23 +37,28 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
             record_type = "Mandatory Expense"
         else:
             record_type = "Expense"
-        ws.append([record.date, record_type, record.category, f"{record.amount:.2f}"])
+        if ws is not None:
+            ws.append([record.date, record_type, record.category, f"{record.amount:.2f}"])
 
     total = report.total()
     records_total = sum(r.signed_amount() for r in report.records())
-    ws.append(["SUBTOTAL", "", "", f"{records_total:.2f}"])
-    ws.append(["FINAL BALANCE", "", "", f"{total:.2f}"])
+    if ws is not None:
+        ws.append(["SUBTOTAL", "", "", f"{records_total:.2f}"])
+        ws.append(["FINAL BALANCE", "", "", f"{total:.2f}"])
 
     summary_year, monthly_rows = report.monthly_income_expense_rows()
     summary_ws = wb.create_sheet("Yearly Report")
-    summary_ws.append([f"Month ({summary_year})", "Income (KZT)", "Expense (KZT)"])
-    total_income = 0.0
-    total_expense = 0.0
-    for month_label, income, expense in monthly_rows:
-        total_income += income
-        total_expense += expense
-        summary_ws.append([month_label, f"{income:.2f}", f"{expense:.2f}"])
-    summary_ws.append(["TOTAL", f"{total_income:.2f}", f"{total_expense:.2f}"])
+    if summary_ws is not None:
+        summary_ws.append([f"Month ({summary_year})", "Income (KZT)", "Expense (KZT)"])
+        total_income = 0.0
+        total_expense = 0.0
+        for month_label, income, expense in monthly_rows:
+            total_income += income
+            total_expense += expense
+            if summary_ws is not None:
+                summary_ws.append([month_label, f"{income:.2f}", f"{expense:.2f}"])
+        if summary_ws is not None:
+            summary_ws.append(["TOTAL", f"{total_income:.2f}", f"{total_expense:.2f}"])
 
     # Create a second, intermediate sheet with grouped tables by category
     try:
@@ -62,8 +70,9 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
     bycat_ws = wb.create_sheet(title="By Category", index=1)
     # For each category, write a small table: header, rows, subtotal
     for category, subreport in sorted(groups.items(), key=lambda x: x[0] or ""):
-        bycat_ws.append([f"Category: {category}"])
-        bycat_ws.append(["Date", "Type", "Amount (KZT)"])
+        if bycat_ws is not None:
+            bycat_ws.append([f"Category: {category}"])
+            bycat_ws.append(["Date", "Type", "Amount (KZT)"])
         records_total = 0.0
         for r in sorted(subreport.records(), key=lambda rr: rr.date):
             if isinstance(r, IncomeRecord):
@@ -78,9 +87,11 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
                 if getattr(r, "amount", None) is not None
                 else 0.0
             )
-            bycat_ws.append([getattr(r, "date", ""), r_type, f"{abs(amt):.2f}"])
-        bycat_ws.append(["SUBTOTAL", "", f"{abs(records_total):.2f}"])
-        bycat_ws.append([""])
+            if bycat_ws is not None:
+                bycat_ws.append([getattr(r, "date", ""), r_type, f"{abs(amt):.2f}"])
+        if bycat_ws is not None:
+            bycat_ws.append(["SUBTOTAL", "", f"{abs(records_total):.2f}"])
+            bycat_ws.append([""])
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
         filepath
     ) else None
@@ -153,7 +164,7 @@ def report_from_xlsx(filepath: str) -> Report:
                 amount=abs(amount),
                 category=category,
                 description="",
-                period="monthly",
+                period="monthly",  # type: ignore
             )
         else:
             continue
@@ -179,8 +190,10 @@ def export_mandatory_expenses_to_xlsx(
 ) -> None:
     wb = Workbook()
     ws = wb.active
-    ws.title = "Mandatory"
-    ws.append(["Amount (KZT)", "Category", "Description", "Period"])
+    if ws is not None:
+        ws.title = "Mandatory"
+    if ws is not None:
+        ws.append(["Amount (KZT)", "Category", "Description", "Period"])
 
     for e in expenses:
         amount = (
@@ -191,7 +204,8 @@ def export_mandatory_expenses_to_xlsx(
         category = getattr(e, "category", "") or ""
         description = getattr(e, "description", "") or ""
         period = getattr(e, "period", "") or ""
-        ws.append([amount, category, description, period])
+        if ws is not None:
+            ws.append([amount, category, description, period])
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
         filepath
@@ -214,6 +228,8 @@ def import_mandatory_expenses_from_xlsx(filepath: str) -> List[MandatoryExpenseR
 
     wb = load_workbook(filepath, data_only=True)
     ws = wb.active
+    if ws is None:
+        return []
     rows = list(ws.iter_rows(values_only=True))
     if not rows or len(rows) < 2:
         return []
@@ -241,7 +257,7 @@ def import_mandatory_expenses_from_xlsx(filepath: str) -> List[MandatoryExpenseR
             amount=amount,
             category=category,
             description=description,
-            period=period,
+            period=period,  # type: ignore
         )
         expenses.append(expense)
 

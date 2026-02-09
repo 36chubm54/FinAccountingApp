@@ -39,6 +39,8 @@ def _register_cyrillic_font() -> str:
         candidates.append(os.path.join(fonts_dir, "Arial.ttf"))
         candidates.append(os.path.join(fonts_dir, "Times.ttf"))
         candidates.append(os.path.join(fonts_dir, "seguisym.ttf"))
+    else:
+        fonts_dir = None
 
     # Local candidates
     candidates.append("DejaVuSans.ttf")
@@ -180,7 +182,7 @@ def report_to_pdf(report: Report, filepath: str) -> None:
         ]
     )
     table.setStyle(style)
-    elems = [table]
+    elems: List[Table] = [table]
     # After the detailed listing, add grouped tables by category
     try:
         groups = report.grouped_by_category()
@@ -201,7 +203,7 @@ def report_to_pdf(report: Report, filepath: str) -> None:
             ]
         )
         title_table.setStyle(title_style)
-        elems.append(Spacer(1, 8))
+        elems.append(Spacer(1, 8))  # type: ignore
         elems.append(title_table)
 
         # Category data table: Date, Type, Amount
@@ -275,10 +277,10 @@ def report_to_pdf(report: Report, filepath: str) -> None:
     summary_table.setStyle(summary_style)
     WIDTH = 1
     HEIGHT = 14
-    elems.append(Spacer(WIDTH, HEIGHT))
+    elems.append(Spacer(WIDTH, HEIGHT))  # type: ignore
     elems.append(summary_table)
 
-    doc.build(elems)
+    doc.build(elems)  # type: ignore
 
 
 def export_mandatory_expenses_to_pdf(
@@ -301,7 +303,7 @@ def export_mandatory_expenses_to_pdf(
                 _safe_str(getattr(e, "period", "")),
             ]
         )
-    text = buf.getvalue()
+    # text = buf.getvalue()  # Неиспользуемая переменная
     buf.close()
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
@@ -357,5 +359,5 @@ def export_mandatory_expenses_to_pdf(
         ]
     )
     table.setStyle(style)
-    elems = [table]
-    doc.build(elems)
+    elems: List[Table] = [table]
+    doc.build(elems)  # type: ignore

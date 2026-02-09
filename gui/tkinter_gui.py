@@ -1,11 +1,11 @@
 import sys
+from typing import Union, Dict, Optional
 import tkinter as tk
+from tkinter import ttk
 import logging
 from pathlib import Path
 from tkinter import (
     messagebox,
-    simpledialog,
-    Toplevel,
     Listbox,
     Scrollbar,
     VERTICAL,
@@ -30,6 +30,7 @@ from app.use_cases import (
 )
 from domain.records import IncomeRecord, MandatoryExpenseRecord
 from app.services import CurrencyService
+from domain.reports import Report
 from utils.charting import (
     aggregate_expenses_by_category,
     aggregate_daily_cashflow,
@@ -38,7 +39,7 @@ from utils.charting import (
     extract_years,
 )
 
-from gui.helpers import open_in_file_manager, safe_destroy, safe_focus
+from gui.helpers import open_in_file_manager
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,17 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+IMPORT_FORMATS = {
+    "CSV": {
+        "ext": ".csv",
+        "desc": "CSV",
+    },
+    "XLSX": {
+        "ext": ".xlsx",
+        "desc": "Excel",
+    },
+}
+
 
 class FinancialApp(tk.Tk):
     def __init__(self):
@@ -56,162 +68,180 @@ class FinancialApp(tk.Tk):
         self.geometry("1000x800")
         self.minsize(900, 600)
 
-        # Track open windows so repeated button presses focus them instead of creating new ones
-        self.add_record_window = None
-        self.add_mandatory_window = None
-        self.report_window = None
-        self.delete_window = None
-        self.manage_window = None
-
         self.repository = JsonFileRecordRepository(
             str(Path(__file__).resolve().parent.parent / "records.json")
         )
         self.currency = CurrencyService()
 
-        main_frame = tk.Frame(self)
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        # Build main Notebook with four tabs
+        notebook = ttk.Notebook(self)
+        notebook.pack(fill=tk.BOTH, expand=True)
 
-        # Left: Buttons
-        buttons_frame = tk.Frame(main_frame)
-        buttons_frame.grid(row=0, column=0, sticky="ns", padx=20, pady=20)
+        self.tab_infographics = ttk.Frame(notebook)
+        self.tab_operations = ttk.Frame(notebook)
+        self.tab_reports = ttk.Frame(notebook)
+        self.tab_settings = ttk.Frame(notebook)
 
-        # Right: Charts
-        charts_frame = tk.Frame(main_frame)
-        charts_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=20)
+        notebook.add(self.tab_infographics, text="Infographics")
+        notebook.add(self.tab_operations, text="Operations")
+        notebook.add(self.tab_reports, text="Reports")
+        notebook.add(self.tab_settings, text="Settings")
 
-        main_frame.grid_columnconfigure(1, weight=1)
-        main_frame.grid_rowconfigure(0, weight=1)
+        # Build UI inside tabs
+        self.infographics_tab(self.tab_infographics)
+        self.operations_tab(self.tab_operations)
+        self.reports_tab(self.tab_reports)
+        self.settings_tab(self.tab_settings)
 
-        # Buttons
-        button_width = 15  # Set uniform width for all buttons
-        padding = 10
+        # Initial data refresh
+        self._refresh_charts()
 
-        self.add_income_btn = tk.Button(
-            buttons_frame,
-            text="Add Income",
-            command=self.add_income,
-            width=button_width,
+    def infographics_tab(self, parent: Union[tk.Frame, ttk.Frame]) -> None:
+        pie_frame = tk.LabelFrame(parent, text="Expenses by category")
+        pie_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+
+        pie_controls = tk.Frame(pie_frame)
+        pie_controls.pack(fill=tk.X, padx=10, pady=(8, 0))
+        tk.Label(pie_controls, text="Month:").pack(side=tk.LEFT)
+
+        self.pie_month_var = tk.StringVar()
+        self.pie_month_menu = tk.OptionMenu(pie_controls, self.pie_month_var, "")
+        self.pie_month_menu.pack(side=tk.LEFT, padx=6)
+        self.pie_month_var.trace_add("write", self._on_chart_filter_change)
+
+        daily_frame = tk.LabelFrame(parent, text="Income/expense by day of month")
+        daily_frame.grid(row=1, column=1, sticky="nsew", padx=10, pady=10)
+
+        monthly_frame = tk.LabelFrame(parent, text="Income/expense by months of year")
+        monthly_frame.grid(
+            row=2, column=0, columnspan=2, sticky="nsew", padx=10, pady=10
         )
-        self.add_income_btn.pack(pady=padding)
 
-        self.add_expense_btn = tk.Button(
-            buttons_frame,
-            text="Add Expense",
-            command=self.add_expense,
-            width=button_width,
+        parent.grid_columnconfigure(0, weight=1)
+        parent.grid_columnconfigure(1, weight=1)
+        parent.grid_rowconfigure(1, weight=1)
+        parent.grid_rowconfigure(2, weight=1)
+
+        self.expense_pie_canvas = tk.Canvas(
+            pie_frame, height=240, bg="white", highlightthickness=0
         )
-        self.add_expense_btn.pack(pady=padding)
+        self.expense_pie_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 6))
 
-        self.report_btn = tk.Button(
-            buttons_frame,
-            text="Generate Report",
-            command=self.generate_report,
-            width=button_width,
+        legend_container = tk.Frame(pie_frame)
+        legend_container.pack(fill=tk.BOTH, expand=False, padx=10, pady=(0, 10))
+        self.expense_legend_canvas = tk.Canvas(
+            legend_container, height=110, highlightthickness=0
         )
-        self.report_btn.pack(pady=padding)
-
-        self.delete_btn = tk.Button(
-            buttons_frame,
-            text="Delete Record",
-            command=self.delete_record,
-            width=button_width,
+        self.expense_legend_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        legend_scroll = tk.Scrollbar(
+            legend_container,
+            orient="vertical",
+            command=self.expense_legend_canvas.yview,
         )
-        self.delete_btn.pack(pady=padding)
+        legend_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.expense_legend_canvas.configure(yscrollcommand=legend_scroll.set)
 
-        self.delete_all_btn = tk.Button(
-            buttons_frame,
-            text="Delete All Records",
-            command=self.delete_all_records,
-            width=button_width,
+        self.expense_legend_frame = tk.Frame(self.expense_legend_canvas)
+        self.expense_legend_canvas.create_window(
+            (0, 0), window=self.expense_legend_frame, anchor="nw"
         )
-        self.delete_all_btn.pack(pady=padding)
 
-        self.set_initial_balance_btn = tk.Button(
-            buttons_frame,
-            text="Set Initial Balance",
-            command=self.set_initial_balance,
-            width=button_width,
+        def _update_legend_scroll(_event=None):
+            self.expense_legend_canvas.configure(
+                scrollregion=self.expense_legend_canvas.bbox("all")
+            )
+
+        self.expense_legend_frame.bind("<Configure>", _update_legend_scroll)
+        self.expense_legend_canvas.bind("<MouseWheel>", self._on_legend_mousewheel)
+        self.expense_legend_frame.bind("<MouseWheel>", self._on_legend_mousewheel)
+
+        self.bind_all("<MouseWheel>", self._on_legend_mousewheel)
+
+        daily_controls = tk.Frame(daily_frame)
+        daily_controls.pack(fill=tk.X, padx=10, pady=(10, 0))
+        tk.Label(daily_controls, text="Month:").pack(side=tk.LEFT)
+
+        self.chart_month_var = tk.StringVar()
+        self.chart_month_menu = tk.OptionMenu(daily_controls, self.chart_month_var, "")
+        self.chart_month_menu.pack(side=tk.LEFT, padx=6)
+        self.chart_month_var.trace_add("write", self._on_chart_filter_change)
+
+        self.daily_bar_canvas = tk.Canvas(
+            daily_frame, height=220, bg="white", highlightthickness=0
         )
-        self.set_initial_balance_btn.pack(pady=padding)
+        self.daily_bar_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        self.manage_mandatory_btn = tk.Button(
-            buttons_frame,
-            text="Manage Mandatory",
-            command=self.manage_mandatory_expenses,
-            width=button_width,
+        monthly_controls = tk.Frame(monthly_frame)
+        monthly_controls.pack(fill=tk.X, padx=10, pady=(10, 0))
+        tk.Label(monthly_controls, text="Year:").pack(side=tk.LEFT)
+
+        self.chart_year_var = tk.StringVar()
+        self.chart_year_menu = tk.OptionMenu(monthly_controls, self.chart_year_var, "")
+        self.chart_year_menu.pack(side=tk.LEFT, padx=6)
+        self.chart_year_var.trace_add("write", self._on_chart_filter_change)
+
+        self.monthly_bar_canvas = tk.Canvas(
+            monthly_frame, height=220, bg="white", highlightthickness=0
         )
-        self.manage_mandatory_btn.pack(pady=padding)
+        self.monthly_bar_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Import format selector and single Import button
-        self.import_format_var = tk.StringVar(value="CSV")
-        self.import_format_menu = tk.OptionMenu(
-            buttons_frame, self.import_format_var, "CSV", "XLSX"
+        self._chart_refresh_suspended = False
+        self._chart_redraw_job = None
+
+        def _schedule_redraw(_event=None):
+            if self._chart_redraw_job is not None:
+                try:
+                    self.after_cancel(self._chart_redraw_job)
+                except Exception:
+                    pass
+            self._chart_redraw_job = self.after(120, self._refresh_charts)
+
+        self.expense_pie_canvas.bind("<Configure>", _schedule_redraw)
+        self.daily_bar_canvas.bind("<Configure>", _schedule_redraw)
+        self.monthly_bar_canvas.bind("<Configure>", _schedule_redraw)
+
+    def operations_tab(self, parent: Union[tk.Frame, ttk.Frame]) -> None:
+        parent.grid_columnconfigure(1, weight=1)
+
+        # Left: Add record form
+        form_frame = tk.LabelFrame(parent, text="Add operation")
+        form_frame.grid(row=0, column=0, sticky="nsw", padx=10, pady=10)
+
+        tk.Label(form_frame, text="Type:").grid(
+            row=0, column=0, sticky="w", padx=6, pady=4
         )
-        self.import_format_menu.config(width=button_width - 3)
-        self.import_format_menu.pack(pady=padding)
-
-        self.import_btn = tk.Button(
-            buttons_frame,
-            text="Import",
-            command=self._import_handler,
-            width=button_width,
+        type_var = tk.StringVar(value="Income")
+        tk.OptionMenu(form_frame, type_var, "Income", "Expense").grid(
+            row=0, column=1, padx=6, pady=4
         )
-        self.import_btn.pack(pady=padding)
 
-        self._build_charts(charts_frame)
-        self.refresh_charts()
-
-    def add_income(self):
-        self._add_record("Income", CreateIncome)
-
-    def add_expense(self):
-        self._add_record("Expense", CreateExpense)
-
-    def _add_record(self, record_type, use_case_class):
-        # If add window already exists, bring it to front and focus it
-        if self.add_record_window and self.add_record_window.winfo_exists():
-            safe_focus(self.add_record_window)
-            return
-
-        # Create add record window
-        add_record_window = Toplevel(self)
-        self.add_record_window = add_record_window
-        add_record_window.title(f"Add {record_type}")
-        add_record_window.geometry("400x300")
-
-        def _on_add_record_close():
-            safe_destroy(add_record_window)
-            self.add_record_window = None
-
-        add_record_window.protocol("WM_DELETE_WINDOW", _on_add_record_close)
-
-        tk.Label(self.add_record_window, text="Date (YYYY-MM-DD):").grid(
-            row=0, column=0, sticky="w", padx=10, pady=5
+        tk.Label(form_frame, text="Date (YYYY-MM-DD):").grid(
+            row=1, column=0, sticky="w", padx=6, pady=4
         )
-        date_entry = tk.Entry(self.add_record_window)
-        date_entry.grid(row=0, column=1, padx=10, pady=5)
+        date_entry = tk.Entry(form_frame)
+        date_entry.grid(row=1, column=1, padx=6, pady=4)
 
-        tk.Label(self.add_record_window, text="Amount:").grid(
-            row=1, column=0, sticky="w", padx=10, pady=5
+        tk.Label(form_frame, text="Amount:").grid(
+            row=2, column=0, sticky="w", padx=6, pady=4
         )
-        amount_entry = tk.Entry(self.add_record_window)
-        amount_entry.grid(row=1, column=1, padx=10, pady=5)
+        amount_entry = tk.Entry(form_frame)
+        amount_entry.grid(row=2, column=1, padx=6, pady=4)
 
-        tk.Label(self.add_record_window, text="Currency (default KZT):").grid(
-            row=2, column=0, sticky="w", padx=10, pady=5
+        tk.Label(form_frame, text="Currency:").grid(
+            row=3, column=0, sticky="w", padx=6, pady=4
         )
-        currency_entry = tk.Entry(self.add_record_window)
+        currency_entry = tk.Entry(form_frame)
         currency_entry.insert(0, "KZT")
-        currency_entry.grid(row=2, column=1, padx=10, pady=5)
+        currency_entry.grid(row=3, column=1, padx=6, pady=4)
 
-        tk.Label(self.add_record_window, text="Category (default General):").grid(
-            row=3, column=0, sticky="w", padx=10, pady=5
+        tk.Label(form_frame, text="Category:").grid(
+            row=4, column=0, sticky="w", padx=6, pady=4
         )
-        category_entry = tk.Entry(self.add_record_window)
+        category_entry = tk.Entry(form_frame)
         category_entry.insert(0, "General")
-        category_entry.grid(row=3, column=1, padx=10, pady=5)
+        category_entry.grid(row=4, column=1, padx=6, pady=4)
 
-        def save_and_close():
+        def save_record():
             date_str = date_entry.get().strip()
             if not date_str:
                 messagebox.showerror("Error", "Date is required.")
@@ -241,73 +271,170 @@ class FinancialApp(tk.Tk):
             category = (category_entry.get() or "General").strip()
 
             try:
-                use_case = use_case_class(self.repository, self.currency)
+                use_class = (
+                    CreateIncome if type_var.get() == "Income" else CreateExpense
+                )
+                use_case = use_class(self.repository, self.currency)
                 use_case.execute(
                     date=date_str, amount=amount, currency=currency, category=category
                 )
-                messagebox.showinfo(
-                    "Success",
-                    f"Added {record_type.lower()}: {amount} {currency} on {date_str} (category: {category})",
-                )
-                self.refresh_charts()
-                add_record_window.destroy()
+                if type_var.get() == "Income":
+                    messagebox.showinfo("Success", "Income record added.")
+                else:  # Expense
+                    messagebox.showinfo("Success", "Expense record added.")
+                date_entry.delete(0, tk.END)
+                amount_entry.delete(0, tk.END)
+                category_entry.delete(0, tk.END)
+                self._refresh_list()
+                self._refresh_charts()
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to add record: {str(e)}")
 
-        save_btn = tk.Button(
-            self.add_record_window, text="Save", command=save_and_close
+        save_btn = tk.Button(form_frame, text="Save", command=save_record)
+        save_btn.grid(row=5, column=0, columnspan=2, pady=8)
+
+        # Right: Records list
+        list_frame = tk.LabelFrame(parent, text="List of operations")
+        list_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        list_frame.grid_rowconfigure(0, weight=1)
+        list_frame.grid_columnconfigure(0, weight=1)
+
+        self.records_listbox = Listbox(list_frame)
+        self.records_listbox.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
+
+        scrollbar = Scrollbar(
+            list_frame, orient=VERTICAL, command=self.records_listbox.yview
         )
-        save_btn.grid(row=4, column=0, padx=10, pady=15)
+        scrollbar.grid(row=0, column=1, sticky="ns", pady=6)
+        self.records_listbox.config(yscrollcommand=scrollbar.set)
 
-        cancel_btn = tk.Button(
-            self.add_record_window,
-            text="Cancel",
-            command=lambda: safe_destroy(self.add_record_window),
+        def delete_selected():
+            selection = self.records_listbox.curselection()
+            if not selection:
+                messagebox.showerror("Error", "Please select a record to delete.")
+                return
+            index = selection[0]
+            delete_use_case = DeleteRecord(self.repository)
+            if delete_use_case.execute(index):
+                messagebox.showinfo("Success", f"Deleted record at index {index}.")
+                self._refresh_list()
+                self._refresh_charts()
+            else:
+                messagebox.showerror("Error", "Failed to delete record.")
+
+        def delete_all():
+            confirm = messagebox.askyesno(
+                "Confirm Delete All",
+                "Are you sure you want to delete ALL records? This action cannot be undone.",
+            )
+            if confirm:
+                DeleteAllRecords(self.repository).execute()
+                messagebox.showinfo("Success", "All records have been deleted.")
+                self._refresh_list()
+                self._refresh_charts()
+
+        def import_records():
+            fmt = import_format_var.get()
+            cfg = IMPORT_FORMATS.get(fmt)
+            if not cfg:
+                messagebox.showerror("Error", f"Unsupported import format: {fmt}")
+                return
+
+            filepath = filedialog.askopenfilename(
+                defaultextension=cfg["ext"],
+                filetypes=[(f"{fmt} files", f"*{cfg['ext']}"), ("All files", "*.*")],
+                title=f"Select {cfg['desc']} file to import",
+            )
+            if not filepath:
+                return
+
+            if not messagebox.askyesno(
+                "Confirm Import",
+                f"Are you sure you want to import from file '{filepath}'? This will replace all existing records.",
+            ):
+                return
+
+            try:
+                imported_count = self._import_record_by_format(fmt, filepath)
+                messagebox.showinfo(
+                    "Success",
+                    f"Successfully imported {imported_count} records from {cfg['desc']} file.\nAll existing records have been replaced.",
+                )
+                self._refresh_list()
+                self._refresh_charts()
+
+            except FileNotFoundError:
+                logger.exception(f"{cfg['desc']} import file not found: %s", filepath)
+                messagebox.showerror("Error", f"File not found: {filepath}")
+            except Exception as e:
+                logger.exception(f"Failed to import {cfg['desc']} from %s", filepath)
+                messagebox.showerror(
+                    "Error", f"Failed to import {cfg['desc']}: {str(e)}"
+                )
+
+        btn_frame = tk.Frame(list_frame)
+        btn_frame.grid(row=1, column=0, columnspan=2, pady=6)
+
+        tk.Button(btn_frame, text="Delete Selected", command=delete_selected).pack(
+            side=tk.LEFT, padx=6
         )
-        cancel_btn.grid(row=4, column=1, padx=10, pady=15)
+        tk.Button(btn_frame, text="Delete All", command=delete_all).pack(
+            side=tk.LEFT, padx=6
+        )
 
-    def generate_report(self):
-        # If report window already exists, bring it to front and focus it
-        if self.report_window and self.report_window.winfo_exists():
-            safe_focus(self.report_window)
-            return
+        # Import controls (reuse existing import handler)
+        import_format_var = tk.StringVar(value="CSV")
+        tk.OptionMenu(btn_frame, import_format_var, "CSV", "XLSX").pack(
+            side=tk.LEFT, padx=6
+        )
+        tk.Button(btn_frame, text="Import", command=import_records).pack(
+            side=tk.LEFT, padx=6
+        )
 
-        report_window = Toplevel(self)
-        self.report_window = report_window
-        report_window.title("Generate Report")
-        report_window.geometry("800x400")
+        # Initial refresh
+        self._refresh_list()
 
-        def _on_report_close():
-            safe_destroy(report_window)
-            self.report_window = None
+    def reports_tab(self, parent: Union[tk.Frame, ttk.Frame]) -> None:
+        parent.grid_rowconfigure(1, weight=1)
+        parent.grid_columnconfigure(0, weight=1)
 
-        report_window.protocol("WM_DELETE_WINDOW", _on_report_close)
+        controls = tk.Frame(parent)
+        controls.grid(row=0, column=0, sticky="nw", padx=10, pady=10)
 
-        current_report = None
-
-        # Filters
-        tk.Label(report_window, text="Period (e.g., 2025-03):").grid(
+        tk.Label(controls, text="Period (e.g., 2025-03):").grid(
             row=0, column=0, sticky="w"
         )
-        period_entry = tk.Entry(report_window)
-        period_entry.grid(row=0, column=1)
+        period_entry = tk.Entry(controls)
+        period_entry.grid(row=0, column=1, padx=6, pady=4)
 
-        tk.Label(report_window, text="Category:").grid(row=1, column=0, sticky="w")
-        category_entry = tk.Entry(report_window)
-        category_entry.grid(row=1, column=1)
+        tk.Label(controls, text="Category:").grid(row=1, column=0, sticky="w")
+        category_entry = tk.Entry(controls)
+        category_entry.grid(row=1, column=1, padx=6, pady=4)
 
         group_var = tk.BooleanVar()
-        tk.Checkbutton(
-            report_window, text="Group by category", variable=group_var
-        ).grid(row=2, column=0, columnspan=2)
-
-        table_var = tk.BooleanVar()
-        tk.Checkbutton(report_window, text="Display as table", variable=table_var).grid(
-            row=3, column=0, columnspan=2
+        tk.Checkbutton(controls, text="Group by category", variable=group_var).grid(
+            row=2, column=0, columnspan=2, sticky="w"
         )
 
+        table_var = tk.BooleanVar()
+        tk.Checkbutton(controls, text="Display as table", variable=table_var).grid(
+            row=3, column=0, columnspan=2, sticky="w"
+        )
+
+        result_frame = tk.Frame(parent)
+        result_frame.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=10, pady=6)
+        result_frame.grid_rowconfigure(0, weight=1)
+        result_frame.grid_columnconfigure(0, weight=1)
+
+        result_text = tk.Text(result_frame, wrap="word")
+        result_text.grid(row=0, column=0, sticky="nsew")
+        scrollbar = Scrollbar(result_frame, orient=VERTICAL, command=result_text.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        result_text.config(yscrollcommand=scrollbar.set)
+
+        current_report: Dict[str, Optional[Report]] = {"report": None}
+
         def generate():
-            nonlocal current_report
             report = GenerateReport(self.repository).execute()
             period = period_entry.get().strip()
             if period:
@@ -316,7 +443,7 @@ class FinancialApp(tk.Tk):
             if cat:
                 report = report.filter_by_category(cat)
 
-            current_report = report  # Store the report
+            current_report["report"] = report
 
             result_text.delete(1.0, tk.END)
             summary_year = None
@@ -366,213 +493,435 @@ class FinancialApp(tk.Tk):
             )
             result_text.insert(tk.END, summary_table + "\n")
 
-        generate_btn = tk.Button(report_window, text="Generate", command=generate)
-        generate_btn.grid(row=4, column=0, pady=10)
+        generate_btn = tk.Button(controls, text="Generate", command=generate)
+        generate_btn.grid(row=4, column=0, pady=8)
 
-        # Export format selector + single Export button
         export_format_var = tk.StringVar(value="CSV")
-        export_menu = tk.OptionMenu(
-            report_window, export_format_var, "CSV", "XLSX", "PDF"
+        tk.OptionMenu(controls, export_format_var, "CSV", "XLSX", "PDF").grid(
+            row=4, column=1, padx=6
         )
-        export_menu.grid(row=4, column=1, pady=10)
-
-        def export_csv():
-            nonlocal current_report
-            if current_report is None:
-                messagebox.showerror("Error", "Please generate a report first.")
-                return
-            filepath = filedialog.asksaveasfilename(
-                defaultextension=".csv",
-                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-                title="Save Report as CSV",
-            )
-            if filepath:
-                try:
-                    from gui.exporters import export_report
-
-                    export_report(current_report, filepath, "csv")
-                    messagebox.showinfo("Success", f"Report exported to {filepath}")
-                    open_in_file_manager(os.path.dirname(filepath))
-                except Exception as e:
-                    logger.exception("Failed to export report to %s", filepath)
-                    messagebox.showerror("Error", f"Failed to export: {str(e)}")
-
-        def export_excel():
-            nonlocal current_report
-            if current_report is None:
-                messagebox.showerror("Error", "Please generate a report first.")
-                return
-            filepath = filedialog.asksaveasfilename(
-                defaultextension=".xlsx",
-                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
-                title="Save Report as Excel",
-            )
-            if filepath:
-                try:
-                    from gui.exporters import export_report
-
-                    export_report(current_report, filepath, "xlsx")
-                    messagebox.showinfo("Success", f"Report exported to {filepath}")
-                    open_in_file_manager(os.path.dirname(filepath))
-                except Exception as e:
-                    logger.exception("Failed to export report to xlsx %s", filepath)
-                    messagebox.showerror("Error", f"Failed to export Excel: {str(e)}")
-
-        def export_pdf():
-            nonlocal current_report
-            if current_report is None:
-                messagebox.showerror("Error", "Please generate a report first.")
-                return
-            filepath = filedialog.asksaveasfilename(
-                defaultextension=".pdf",
-                filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
-                title="Save Report as PDF",
-            )
-            if filepath:
-                try:
-                    from gui.exporters import export_report
-
-                    export_report(current_report, filepath, "pdf")
-                    messagebox.showinfo("Success", f"Report exported to {filepath}")
-                    open_in_file_manager(os.path.dirname(filepath))
-                except Exception as e:
-                    logger.exception("Failed to export report to pdf %s", filepath)
-                    messagebox.showerror("Error", f"Failed to export PDF: {str(e)}")
 
         def export_any():
+            report = current_report.get("report")
+            if report is None:
+                messagebox.showerror("Error", "Please generate a report first.")
+                return
             fmt = export_format_var.get()
-            if fmt == "CSV":
-                export_csv()
-            elif fmt == "XLSX":
-                export_excel()
-            else:  # PDF
-                export_pdf()
-
-        export_btn = tk.Button(report_window, text="Export", command=export_any)
-        export_btn.grid(row=4, column=2, pady=10)
-
-        result_text = tk.Text(report_window, wrap="word")
-        scrollbar = Scrollbar(report_window, orient=VERTICAL, command=result_text.yview)
-        result_text.config(yscrollcommand=scrollbar.set)
-        result_text.grid(row=5, column=0, columnspan=2, sticky="nsew")
-        scrollbar.grid(row=5, column=2, sticky="ns")
-
-        report_window.grid_rowconfigure(5, weight=1)
-        report_window.grid_columnconfigure(1, weight=1)
-
-    def _build_charts(self, parent: tk.Frame) -> None:
-        title = tk.Label(parent, text="Инфографика", font=("Segoe UI", 14, "bold"))
-        title.grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 10))
-
-        pie_frame = tk.LabelFrame(parent, text="Расходы по категориям")
-        pie_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
-
-        pie_controls = tk.Frame(pie_frame)
-        pie_controls.pack(fill=tk.X, padx=10, pady=(10, 0))
-        tk.Label(pie_controls, text="Месяц:").pack(side=tk.LEFT)
-
-        self.pie_month_var = tk.StringVar()
-        self.pie_month_menu = tk.OptionMenu(pie_controls, self.pie_month_var, "")
-        self.pie_month_menu.pack(side=tk.LEFT, padx=6)
-        self.pie_month_var.trace_add("write", self._on_chart_filter_change)
-
-        daily_frame = tk.LabelFrame(parent, text="Доходы/расходы по дням месяца")
-        daily_frame.grid(row=1, column=1, sticky="nsew", padx=10, pady=10)
-
-        monthly_frame = tk.LabelFrame(parent, text="Доходы/расходы по месяцам года")
-        monthly_frame.grid(
-            row=2, column=0, columnspan=2, sticky="nsew", padx=10, pady=10
-        )
-
-        parent.grid_columnconfigure(0, weight=1)
-        parent.grid_columnconfigure(1, weight=1)
-        parent.grid_rowconfigure(1, weight=1)
-        parent.grid_rowconfigure(2, weight=1)
-
-        self.expense_pie_canvas = tk.Canvas(
-            pie_frame, height=240, bg="white", highlightthickness=0
-        )
-        self.expense_pie_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 6))
-
-        legend_container = tk.Frame(pie_frame)
-        legend_container.pack(fill=tk.BOTH, expand=False, padx=10, pady=(0, 10))
-        self.expense_legend_canvas = tk.Canvas(
-            legend_container, height=110, highlightthickness=0
-        )
-        self.expense_legend_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        legend_scroll = tk.Scrollbar(
-            legend_container,
-            orient="vertical",
-            command=self.expense_legend_canvas.yview,
-        )
-        legend_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.expense_legend_canvas.configure(yscrollcommand=legend_scroll.set)
-
-        self.expense_legend_frame = tk.Frame(self.expense_legend_canvas)
-        self.expense_legend_canvas.create_window(
-            (0, 0), window=self.expense_legend_frame, anchor="nw"
-        )
-
-        def _update_legend_scroll(_event=None):
-            self.expense_legend_canvas.configure(
-                scrollregion=self.expense_legend_canvas.bbox("all")
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=f".{fmt.lower()}", title="Save Report"
             )
+            if not filepath:
+                return
+            try:
+                from gui.exporters import export_report
 
-        self.expense_legend_frame.bind("<Configure>", _update_legend_scroll)
-        self.expense_legend_canvas.bind("<MouseWheel>", self._on_legend_mousewheel)
-        self.expense_legend_frame.bind("<MouseWheel>", self._on_legend_mousewheel)
+                export_report(report, filepath, fmt.lower())
+                messagebox.showinfo("Success", f"Report exported to {filepath}")
+                open_in_file_manager(os.path.dirname(filepath))
+            except Exception as e:
+                logger.exception("Failed to export report")
+                messagebox.showerror("Error", f"Failed to export: {str(e)}")
 
-        self.bind_all("<MouseWheel>", self._on_legend_mousewheel)
-
-        daily_controls = tk.Frame(daily_frame)
-        daily_controls.pack(fill=tk.X, padx=10, pady=(10, 0))
-        tk.Label(daily_controls, text="Месяц:").pack(side=tk.LEFT)
-
-        self.chart_month_var = tk.StringVar()
-        self.chart_month_menu = tk.OptionMenu(daily_controls, self.chart_month_var, "")
-        self.chart_month_menu.pack(side=tk.LEFT, padx=6)
-        self.chart_month_var.trace_add("write", self._on_chart_filter_change)
-
-        self.daily_bar_canvas = tk.Canvas(
-            daily_frame, height=220, bg="white", highlightthickness=0
+        tk.Button(controls, text="Export", command=export_any).grid(
+            row=4, column=2, padx=6
         )
-        self.daily_bar_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        monthly_controls = tk.Frame(monthly_frame)
-        monthly_controls.pack(fill=tk.X, padx=10, pady=(10, 0))
-        tk.Label(monthly_controls, text="Год:").pack(side=tk.LEFT)
+    def settings_tab(self, parent: Union[tk.Frame, ttk.Frame]) -> None:
+        parent.grid_columnconfigure(1, weight=1)
 
-        self.chart_year_var = tk.StringVar()
-        self.chart_year_menu = tk.OptionMenu(monthly_controls, self.chart_year_var, "")
-        self.chart_year_menu.pack(side=tk.LEFT, padx=6)
-        self.chart_year_var.trace_add("write", self._on_chart_filter_change)
-
-        self.monthly_bar_canvas = tk.Canvas(
-            monthly_frame, height=220, bg="white", highlightthickness=0
+        # Initial balance panel
+        balance_frame = tk.LabelFrame(parent, text="Initial balance")
+        balance_frame.grid(row=0, column=0, sticky="nw", padx=10, pady=10)
+        current_balance = self.repository.load_initial_balance()
+        tk.Label(balance_frame, text=f"Current: {current_balance:.2f} KZT").grid(
+            row=0, column=0, sticky="w", padx=6, pady=4
         )
-        self.monthly_bar_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        balance_entry = tk.Entry(balance_frame)
+        balance_entry.insert(0, str(current_balance))
+        balance_entry.grid(row=1, column=0, padx=6, pady=4)
 
-        self._chart_refresh_suspended = False
-        self._chart_redraw_job = None
+        def save_balance():
+            try:
+                balance = float(balance_entry.get())
+            except ValueError:
+                messagebox.showerror("Error", "Invalid balance amount.")
+                return
+            self.repository.save_initial_balance(balance)
+            messagebox.showinfo("Success", f"Initial balance set to {balance:.2f} KZT.")
+            self._refresh_charts()
 
-        def _schedule_redraw(_event=None):
-            if self._chart_redraw_job is not None:
+        tk.Button(balance_frame, text="Save", command=save_balance).grid(
+            row=2, column=0, pady=6
+        )
+
+        # Mandatory expenses management
+        mand_frame = tk.LabelFrame(parent, text="Mandatory expenses")
+        mand_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        mand_frame.grid_rowconfigure(0, weight=1)
+        mand_frame.grid_columnconfigure(0, weight=1)
+
+        mand_listbox = Listbox(mand_frame)
+        mand_listbox.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
+        mand_scroll = Scrollbar(mand_frame, orient=VERTICAL, command=mand_listbox.yview)
+        mand_scroll.grid(row=0, column=1, sticky="ns", pady=6)
+        mand_listbox.config(yscrollcommand=mand_scroll.set)
+
+        def refresh_mandatory():
+            mand_listbox.delete(0, tk.END)
+            expenses = GetMandatoryExpenses(self.repository).execute()
+            for i, expense in enumerate(expenses):
+                mand_listbox.insert(
+                    tk.END,
+                    f"[{i}] {expense.amount:.2f} KZT - {expense.category} - {expense.description} ({expense.period})",
+                )
+
+        current_panel: Dict[str, Optional[tk.Frame]] = {"add": None, "report": None}
+
+        def add_mandatory_inline():
+            # Закрыть предыдущую панель если она открыта
+            if current_panel["add"] is not None:
                 try:
-                    self.after_cancel(self._chart_redraw_job)
+                    current_panel["add"].destroy()
                 except Exception:
                     pass
-            self._chart_redraw_job = self.after(120, self.refresh_charts)
+            if current_panel["report"] is not None:
+                try:
+                    current_panel["report"].destroy()
+                except Exception:
+                    pass
 
-        self.expense_pie_canvas.bind("<Configure>", _schedule_redraw)
-        self.daily_bar_canvas.bind("<Configure>", _schedule_redraw)
-        self.monthly_bar_canvas.bind("<Configure>", _schedule_redraw)
+            add_panel = tk.Frame(mand_frame)
+            add_panel.grid(row=2, column=0, columnspan=2, pady=6, sticky="ew")
+            current_panel["add"] = add_panel
 
-    def _on_chart_filter_change(self, *_args) -> None:
-        if self._chart_refresh_suspended:
-            return
-        self.refresh_charts()
+            tk.Label(add_panel, text="Amount:").grid(row=0, column=0, sticky="w")
+            amt = tk.Entry(add_panel)
+            amt.grid(row=0, column=1)
 
-    def refresh_charts(self) -> None:
+            tk.Label(add_panel, text="Currency (default KZT):").grid(
+                row=1, column=0, sticky="w"
+            )
+            currency_entry = tk.Entry(add_panel)
+            currency_entry.insert(0, "KZT")
+            currency_entry.grid(row=1, column=1)
+
+            tk.Label(add_panel, text="Category (default Mandatory):").grid(
+                row=2, column=0, sticky="w"
+            )
+            category_entry = tk.Entry(add_panel)
+            category_entry.insert(0, "Mandatory")
+            category_entry.grid(row=2, column=1)
+
+            tk.Label(add_panel, text="Description:").grid(row=3, column=0, sticky="w")
+            desc = tk.Entry(add_panel)
+            desc.grid(row=3, column=1)
+
+            tk.Label(add_panel, text="Period:").grid(row=4, column=0, sticky="w")
+            period_var = tk.StringVar(value="monthly")
+            tk.OptionMenu(
+                add_panel, period_var, "daily", "weekly", "monthly", "yearly"
+            ).grid(row=4, column=1)
+
+            def save():
+                try:
+                    amount = float(amt.get())
+                    description = desc.get()
+                    period = period_var.get()
+                    if not description:
+                        messagebox.showerror("Error", "Description is required.")
+                        return
+                    CreateMandatoryExpense(self.repository, self.currency).execute(
+                        amount=amount,
+                        currency="KZT",
+                        category="Mandatory",
+                        description=description,
+                        period=period,
+                    )
+                    messagebox.showinfo("Success", "Mandatory expense added.")
+                    add_panel.destroy()
+                    current_panel["add"] = None
+                    self._refresh_charts()
+                    refresh_mandatory()
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to add expense: {str(e)}")
+
+            def cancel():
+                try:
+                    add_panel.destroy()
+                    current_panel["add"] = None
+                except Exception:
+                    pass
+
+            tk.Button(add_panel, text="Save", command=save).grid(
+                row=5, column=0, padx=6
+            )
+            tk.Button(add_panel, text="Cancel", command=cancel).grid(
+                row=5, column=1, padx=6
+            )
+
+        def add_to_report_inline():
+            # Close the previous panel if it is open
+            if current_panel["add"] is not None:
+                try:
+                    current_panel["add"].destroy()
+                except Exception:
+                    pass
+            if current_panel["report"] is not None:
+                try:
+                    current_panel["report"].destroy()
+                except Exception:
+                    pass
+
+            add_to_report_panel = tk.Frame(mand_frame)
+            add_to_report_panel.grid(row=2, column=0, columnspan=2, pady=6, sticky="ew")
+            current_panel["report"] = add_to_report_panel
+
+            tk.Label(add_to_report_panel, text="Date (YYYY-MM-DD):").grid(
+                row=0, column=0, sticky="w"
+            )
+            date_entry = tk.Entry(add_to_report_panel)
+            date_entry.grid(row=0, column=1)
+
+            selection = mand_listbox.curselection()
+            index = selection[0] if selection else -1
+
+            def save():
+                try:
+                    from domain.validation import parse_ymd, ensure_not_future
+
+                    date = date_entry.get()
+                    entered_date = parse_ymd(date)
+                    ensure_not_future(entered_date)
+
+                    add_to_report_use_case = AddMandatoryExpenseToReport(
+                        self.repository, self.currency
+                    )
+                    if add_to_report_use_case.execute(index, date):
+                        messagebox.showinfo(
+                            "Success", f"Mandatory expense added to report for {date}."
+                        )
+                        add_to_report_panel.destroy()
+                        current_panel["report"] = None
+                        self._refresh_list()
+                        refresh_mandatory()
+                        self._refresh_charts()
+
+                    else:
+                        messagebox.showerror(
+                            "Error",
+                            "Please select a mandatory expense to add to report. \nThen click 'Add to Report' and try again.",
+                        )
+                except ValueError as e:
+                    messagebox.showerror(
+                        "Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD."
+                    )
+
+            def cancel():
+                try:
+                    add_to_report_panel.destroy()
+                    current_panel["report"] = None
+                except Exception:
+                    pass
+
+            tk.Button(add_to_report_panel, text="Save", command=save).grid(
+                row=1, column=0, padx=6
+            )
+            tk.Button(add_to_report_panel, text="Cancel", command=cancel).grid(
+                row=1, column=1, padx=6
+            )
+
+        def delete_mandatory():
+            sel = mand_listbox.curselection()
+            if not sel:
+                messagebox.showerror("Error", "Please select an expense to delete.")
+                return
+            idx = sel[0]
+            if DeleteMandatoryExpense(self.repository).execute(idx):
+                messagebox.showinfo("Success", "Mandatory expense deleted.")
+                refresh_mandatory()
+            else:
+                messagebox.showerror("Error", "Failed to delete expense.")
+
+        def delete_all_mandatory():
+            confirm = messagebox.askyesno("Confirm", "Delete all mandatory expenses?")
+            if confirm:
+                DeleteAllMandatoryExpenses(self.repository).execute()
+                messagebox.showinfo("Success", "All mandatory expenses deleted.")
+                refresh_mandatory()
+            else:
+                messagebox.showerror(
+                    "Error", "Failed to delete all mandatory expenses."
+                )
+
+        btns = tk.Frame(mand_frame)
+        btns.grid(row=1, column=0, columnspan=2, pady=6)
+
+        def import_mand():
+            fmt = format_var.get()
+            cfg = IMPORT_FORMATS.get(fmt)
+            if not cfg:
+                messagebox.showerror("Error", f"Unsupported format: {fmt}")
+                return
+
+            filepath = filedialog.askopenfilename(
+                defaultextension=cfg["ext"],
+                filetypes=[
+                    (f"{cfg['desc']} files", f"*{cfg['ext']}"),
+                    ("All files", "*.*"),
+                ],
+                title=f"Select {cfg['desc']} file to import mandatory expenses",
+            )
+            if not filepath:
+                return
+
+            if not messagebox.askyesno(
+                "Confirm Import",
+                f"This will replace all existing mandatory expenses with data from:\n"
+                f"{filepath}\n\nContinue?",
+            ):
+                return
+
+            try:
+                imported_count = self._import_mandatory_by_format(fmt, filepath)
+
+                messagebox.showinfo(
+                    "Success",
+                    f"Successfully imported {imported_count} mandatory expenses from "
+                    f"{cfg['desc']} file.\nAll existing mandatory expenses have been replaced.",
+                )
+                refresh_mandatory()
+                self._refresh_charts()
+
+            except FileNotFoundError:
+                messagebox.showerror("Error", f"File not found: {filepath}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to import {fmt}: {str(e)}")
+
+        def export_mand():
+            fmt = format_var.get()
+            expenses = GetMandatoryExpenses(self.repository).execute()
+            if not expenses:
+                messagebox.showinfo("No Expenses", "No mandatory expenses to export.")
+                return
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=f".{fmt.lower()}", title="Save Mandatory Expenses"
+            )
+            if not filepath:
+                return
+            try:
+                from gui.exporters import export_mandatory_expenses
+
+                export_mandatory_expenses(expenses, filepath, fmt.lower())
+                messagebox.showinfo(
+                    "Success", f"Mandatory expenses exported to {filepath}"
+                )
+                open_in_file_manager(os.path.dirname(filepath))
+            except Exception as e:
+                logger.exception("Failed to export mandatory expenses")
+                messagebox.showerror("Error", f"Failed to export: {str(e)}")
+
+        tk.Button(btns, text="Add", command=add_mandatory_inline).pack(
+            side=tk.LEFT, padx=6
+        )
+        tk.Button(btns, text="Delete", command=delete_mandatory).pack(
+            side=tk.LEFT, padx=6
+        )
+        tk.Button(btns, text="Delete All", command=delete_all_mandatory).pack(
+            side=tk.LEFT, padx=6
+        )
+        tk.Button(btns, text="Add to Report", command=add_to_report_inline).pack(
+            side=tk.LEFT, padx=6
+        )
+        format_var = tk.StringVar(value="CSV")
+        tk.OptionMenu(btns, format_var, "CSV", "XLSX", "PDF").pack(side=tk.LEFT, padx=6)
+
+        tk.Button(btns, text="Import", command=import_mand).pack(side=tk.LEFT, padx=6)
+        tk.Button(btns, text="Export", command=export_mand).pack(side=tk.LEFT, padx=6)
+
+        # Initial refresh
+        refresh_mandatory()
+
+    def _import_record_by_format(self, fmt: str, filepath: str) -> int:
+        self.repository.delete_all()
+
+        if fmt == "CSV":
+            importer = ImportFromCSV(self.repository)
+            return importer.execute(filepath)
+
+        # XLSX — ленивый импорт
+        from gui.importers import import_report_from_xlsx
+
+        report = import_report_from_xlsx(filepath)
+        self.repository.save_initial_balance(report.initial_balance)
+
+        count = 0
+        for record in report.records():
+            self.repository.save(record)
+            count += 1
+
+        return count
+
+    def _import_mandatory_by_format(self, fmt: str, filepath: str) -> int:
+        # Ленивые импорты — сохраняем
+        if fmt == "CSV":
+            from gui.importers import import_mandatory_expenses_from_csv
+
+            expenses = import_mandatory_expenses_from_csv(filepath)
+
+        elif fmt == "XLSX":
+            from gui.importers import import_mandatory_expenses_from_xlsx
+
+            expenses = import_mandatory_expenses_from_xlsx(filepath)
+
+        else:
+            raise ValueError(f"Unsupported format: {fmt}")
+
+        # Удаляем все существующие обязательные расходы
+        DeleteAllMandatoryExpenses(self.repository).execute()
+
+        create_use_case = CreateMandatoryExpense(self.repository, self.currency)
+
+        for expense in expenses:
+            create_use_case.execute(
+                amount=expense.amount,
+                currency="KZT",  # leave the assumption explicit
+                category=expense.category,
+                description=expense.description,
+                period=expense.period,
+            )
+
+        return len(expenses)
+
+    def _refresh_list(self):
+        self.records_listbox.delete(0, tk.END)
+        all_records = self.repository.load_all()
+        for i, record in enumerate(all_records):
+            if isinstance(record, IncomeRecord):
+                record_type = "Income"
+            elif isinstance(record, MandatoryExpenseRecord):
+                record_type = "Mandatory Expense"
+            else:
+                record_type = "Expense"
+            self.records_listbox.insert(
+                tk.END,
+                f"[{i}] {record.date} - {record_type} - {record.category} - {record.amount:.2f} KZT",
+            )
+
+        self.records_listbox.delete(0, tk.END)
+        all_records = self.repository.load_all()
+        for i, record in enumerate(all_records):
+            if isinstance(record, IncomeRecord):
+                record_type = "Income"
+            elif isinstance(record, MandatoryExpenseRecord):
+                record_type = "Mandatory Expense"
+            else:
+                record_type = "Expense"
+            self.records_listbox.insert(
+                tk.END,
+                f"[{i}] {record.date} - {record_type} - {record.category} - {record.amount:.2f} KZT",
+            )
+
+    def _refresh_charts(self) -> None:
         records = self.repository.load_all()
 
         self._chart_refresh_suspended = True
@@ -584,6 +933,11 @@ class FinancialApp(tk.Tk):
         self._draw_expense_pie(records)
         self._draw_daily_bars(records)
         self._draw_monthly_bars(records)
+
+    def _on_chart_filter_change(self, *_args) -> None:
+        if self._chart_refresh_suspended:
+            return
+        self._refresh_charts()
 
     def _update_month_options(self, records) -> None:
         months = extract_months(records)
@@ -661,7 +1015,7 @@ class FinancialApp(tk.Tk):
                 10,
                 10,
                 anchor="nw",
-                text="Нет расходов для отображения",
+                text="No data to display",
                 fill="#6b7280",
                 font=("Segoe UI", 11),
             )
@@ -704,7 +1058,7 @@ class FinancialApp(tk.Tk):
 
         major = data[: max_slices - 1]
         other_total = sum(value for _, value in data[max_slices - 1 :])
-        major.append(("Прочее", other_total))
+        major.append(("Other", other_total))
         return major
 
     def _filter_records_by_month(self, records, month_value: str):
@@ -798,18 +1152,18 @@ class FinancialApp(tk.Tk):
         year = int(year_value)
         income, expense = aggregate_monthly_cashflow(records, year)
         labels = [
-            "Янв",
-            "Фев",
-            "Мар",
-            "Апр",
-            "Май",
-            "Июн",
-            "Июл",
-            "Авг",
-            "Сен",
-            "Окт",
-            "Ноя",
-            "Дек",
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
         ]
         self._draw_bar_chart(self.monthly_bar_canvas, labels, income, expense, 12)
 
@@ -846,7 +1200,7 @@ class FinancialApp(tk.Tk):
                 10,
                 10,
                 anchor="nw",
-                text="Нет данных для отображения",
+                text="No data to display",
                 fill="#6b7280",
                 font=("Segoe UI", 11),
             )
@@ -900,7 +1254,7 @@ class FinancialApp(tk.Tk):
         canvas.create_text(
             padding["left"],
             padding["top"] - 6,
-            text="Доходы",
+            text="Incomes",
             fill="#10b981",
             anchor="sw",
             font=("Segoe UI", 9),
@@ -908,638 +1262,11 @@ class FinancialApp(tk.Tk):
         canvas.create_text(
             padding["left"] + 60,
             padding["top"] - 6,
-            text="Расходы",
+            text="Expenses",
             fill="#ef4444",
             anchor="sw",
             font=("Segoe UI", 9),
         )
-
-    def delete_record(self):
-        all_records = self.repository.load_all()
-        if not all_records:
-            messagebox.showinfo("No Records", "No records to delete.")
-            return
-
-        # If delete window already exists, bring it to front and focus it
-        if self.delete_window and self.delete_window.winfo_exists():
-            safe_focus(self.delete_window)
-            return
-
-        delete_window = Toplevel(self)
-        self.delete_window = delete_window
-        delete_window.title("Delete Record")
-        delete_window.geometry("500x400")
-
-        def _on_delete_close():
-            safe_destroy(delete_window)
-            self.delete_window = None
-
-        delete_window.protocol("WM_DELETE_WINDOW", _on_delete_close)
-
-        listbox = Listbox(delete_window)
-        for i, record in enumerate(all_records):
-            if isinstance(record, IncomeRecord):
-                record_type = "Income"
-            elif isinstance(record, MandatoryExpenseRecord):
-                record_type = "Mandatory Expense"
-            else:
-                record_type = "Expense"
-            listbox.insert(
-                tk.END,
-                f"[{i}] {record.date} - {record_type} - {record.category} - {record.amount:.2f} KZT",
-            )
-        listbox.pack(fill="both", expand=True, padx=10, pady=10)
-
-        def delete():
-            selection = listbox.curselection()
-            if not selection:
-                messagebox.showerror("Error", "Please select a record to delete.")
-                return
-            index = selection[0]
-            delete_use_case = DeleteRecord(self.repository)
-            if delete_use_case.execute(index):
-                messagebox.showinfo("Success", f"Deleted record at index {index}.")
-                self.refresh_charts()
-                # Close and clear tracked window reference, then reopen to refresh list
-                try:
-                    delete_window.destroy()
-                except Exception:
-                    pass
-                self.delete_window = None
-                self.delete_record()
-            else:
-                messagebox.showerror("Error", "Failed to delete record.")
-
-        delete_btn = tk.Button(delete_window, text="Delete Selected", command=delete)
-        delete_btn.pack(pady=10)
-
-    def delete_all_records(self):
-        # Confirmation dialog
-        confirm = messagebox.askyesno(
-            "Confirm Delete All",
-            "Are you sure you want to delete ALL records? This action cannot be undone.",
-        )
-        if confirm:
-            delete_all_use_case = DeleteAllRecords(self.repository)
-            delete_all_use_case.execute()
-            messagebox.showinfo("Success", "All records have been deleted.")
-            self.refresh_charts()
-
-    def import_from_csv(self):
-        # File selection dialog
-        filepath = filedialog.askopenfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-            title="Select CSV file to import",
-        )
-        if not filepath:
-            return
-
-        try:
-            # Confirmation dialog
-            confirm = messagebox.askyesno(
-                "Confirm Import",
-                f"This will replace all existing records with data from:\n{filepath}\n\nContinue?",
-            )
-            if not confirm:
-                return
-
-            # Import records
-            import_use_case = ImportFromCSV(self.repository)
-            imported_count = import_use_case.execute(filepath)
-
-            messagebox.showinfo(
-                "Success",
-                f"Successfully imported {imported_count} records from CSV file.\nAll existing records have been replaced.",
-            )
-            self.refresh_charts()
-
-        except FileNotFoundError:
-            messagebox.showerror("Error", f"File not found: {filepath}")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to import CSV: {str(e)}")
-
-    def import_from_excel(self):
-        filepath = filedialog.askopenfilename(
-            defaultextension=".xlsx",
-            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
-            title="Select XLSX file to import",
-        )
-        if not filepath:
-            return
-
-        try:
-            confirm = messagebox.askyesno(
-                "Confirm Import",
-                f"This will replace all existing records with data from:\n{filepath}\n\nContinue?",
-            )
-            if not confirm:
-                return
-
-            from gui.importers import import_report_from_xlsx
-
-            report = import_report_from_xlsx(filepath)
-
-            # Replace repository data
-            self.repository.delete_all()
-            self.repository.save_initial_balance(report.initial_balance)
-            imported_count = 0
-            for record in report.records():
-                self.repository.save(record)
-                imported_count += 1
-
-            messagebox.showinfo(
-                "Success",
-                f"Successfully imported {imported_count} records from Excel file.\nAll existing records have been replaced.",
-            )
-            self.refresh_charts()
-
-        except FileNotFoundError:
-            logger.exception("Excel import file not found: %s", filepath)
-            messagebox.showerror("Error", f"File not found: {filepath}")
-        except Exception as e:
-            logger.exception("Failed to import Excel from %s", filepath)
-            messagebox.showerror("Error", f"Failed to import Excel: {str(e)}")
-
-    def _import_handler(self):
-        fmt = self.import_format_var.get()
-        if fmt == "CSV":
-            self.import_from_csv()
-        else:  # XLSX
-            self.import_from_excel()
-
-    def set_initial_balance(self):
-        current_balance = self.repository.load_initial_balance()
-        balance_str = simpledialog.askstring(
-            "Initial Balance",
-            f"Enter initial balance (current: {current_balance:.2f} KZT):",
-            parent=self,
-            initialvalue=str(current_balance),
-        )
-        if balance_str is None:
-            return
-        try:
-            balance = float(balance_str)
-        except ValueError:
-            messagebox.showerror("Error", "Invalid balance amount.")
-            return
-
-        self.repository.save_initial_balance(balance)
-        messagebox.showinfo("Success", f"Initial balance set to {balance:.2f} KZT.")
-
-    def manage_mandatory_expenses(self):
-        # If manage window already exists, bring it to front and focus it
-        if self.manage_window and self.manage_window.winfo_exists():
-            safe_focus(self.manage_window)
-            return
-
-        manage_window = Toplevel(self)
-        self.manage_window = manage_window
-        manage_window.title("Manage Mandatory Expenses")
-        manage_window.geometry("650x400")
-
-        def _on_manage_close():
-            safe_destroy(manage_window)
-            self.manage_window = None
-
-        manage_window.protocol("WM_DELETE_WINDOW", _on_manage_close)
-
-        # Listbox for mandatory expenses
-        listbox = Listbox(manage_window, width=80, height=15)
-        scrollbar = Scrollbar(manage_window, orient=VERTICAL, command=listbox.yview)
-        listbox.config(yscrollcommand=scrollbar.set)
-        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
-
-        # Buttons frame
-        buttons_frame = tk.Frame(manage_window)
-        buttons_frame.pack(pady=10)
-
-        def refresh_list():
-            listbox.delete(0, tk.END)
-            get_expenses = GetMandatoryExpenses(self.repository)
-            expenses = get_expenses.execute()
-            for i, expense in enumerate(expenses):
-                listbox.insert(
-                    tk.END,
-                    f"[{i}] {expense.amount:.2f} KZT - {expense.category} - {expense.description} ({expense.period})",
-                )
-
-        def add_expense():
-            # If manage window already exists, bring it to front and focus it
-            if self.add_mandatory_window and self.add_mandatory_window.winfo_exists():
-                safe_focus(self.add_mandatory_window)
-                return
-
-            # Create add expense window
-            add_mandatory_window = Toplevel(self)
-            self.add_mandatory_window = add_mandatory_window
-            add_mandatory_window.title("Add Mandatory Expense")
-            add_mandatory_window.geometry("400x300")
-
-            def _on_add_close():
-                try:
-                    add_mandatory_window.destroy()
-                except Exception:
-                    pass
-                self.add_mandatory_window = None
-
-            add_mandatory_window.protocol("WM_DELETE_WINDOW", _on_add_close)
-
-            tk.Label(add_mandatory_window, text="Amount:").grid(
-                row=0, column=0, sticky="w", padx=10, pady=5
-            )
-            amount_entry = tk.Entry(add_mandatory_window)
-            amount_entry.grid(row=0, column=1, padx=10, pady=5)
-
-            tk.Label(add_mandatory_window, text="Currency (default KZT):").grid(
-                row=1, column=0, sticky="w", padx=10, pady=5
-            )
-            currency_entry = tk.Entry(add_mandatory_window)
-            currency_entry.insert(0, "KZT")
-            currency_entry.grid(row=1, column=1, padx=10, pady=5)
-
-            tk.Label(add_mandatory_window, text="Category (default Mandatory):").grid(
-                row=2, column=0, sticky="w", padx=10, pady=5
-            )
-            category_entry = tk.Entry(add_mandatory_window)
-            category_entry.insert(0, "Mandatory")
-            category_entry.grid(row=2, column=1, padx=10, pady=5)
-
-            tk.Label(add_mandatory_window, text="Description:").grid(
-                row=3, column=0, sticky="w", padx=10, pady=5
-            )
-            description_entry = tk.Entry(add_mandatory_window)
-            description_entry.grid(row=3, column=1, padx=10, pady=5)
-
-            tk.Label(add_mandatory_window, text="Period:").grid(
-                row=4, column=0, sticky="w", padx=10, pady=5
-            )
-            period_var = tk.StringVar(value="monthly")
-            period_menu = tk.OptionMenu(
-                add_mandatory_window, period_var, "daily", "weekly", "monthly", "yearly"
-            )
-            period_menu.grid(row=4, column=1, padx=10, pady=5)
-
-            def save_expense():
-                try:
-                    amount = float(amount_entry.get())
-                    currency = currency_entry.get() or "KZT"
-                    category = category_entry.get() or "Mandatory"
-                    description = description_entry.get()
-                    period = period_var.get()
-
-                    if not description:
-                        messagebox.showerror("Error", "Description is required.")
-                        return
-
-                    create_expense = CreateMandatoryExpense(
-                        self.repository, self.currency
-                    )
-                    create_expense.execute(
-                        amount=amount,
-                        currency=currency,
-                        category=category,
-                        description=description,
-                        period=period,
-                    )
-                    messagebox.showinfo("Success", "Mandatory expense added.")
-                    self.refresh_charts()
-                    add_mandatory_window.destroy()
-                    refresh_list()
-                except ValueError as e:
-                    messagebox.showerror("Error", str(e))
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to add expense: {str(e)}")
-
-            save_btn = tk.Button(
-                add_mandatory_window, text="Save", command=save_expense
-            )
-            save_btn.grid(row=5, column=0, columnspan=2, pady=20)
-
-        def delete_expense():
-            selection = listbox.curselection()
-            if not selection:
-                messagebox.showerror("Error", "Please select an expense to delete.")
-                return
-
-            index = selection[0]
-            confirm = messagebox.askyesno(
-                "Confirm Delete", "Delete this mandatory expense?"
-            )
-            if confirm:
-                delete_use_case = DeleteMandatoryExpense(self.repository)
-                if delete_use_case.execute(index):
-                    messagebox.showinfo("Success", "Mandatory expense deleted.")
-                    self.refresh_charts()
-                    refresh_list()
-                else:
-                    messagebox.showerror("Error", "Failed to delete expense.")
-
-        def delete_all_expenses():
-            confirm = messagebox.askyesno(
-                "Confirm Delete All", "Delete ALL mandatory expenses?"
-            )
-            if confirm:
-                delete_all_use_case = DeleteAllMandatoryExpenses(self.repository)
-                delete_all_use_case.execute()
-                messagebox.showinfo("Success", "All mandatory expenses deleted.")
-                self.refresh_charts()
-                refresh_list()
-
-        def add_to_report():
-            selection = listbox.curselection()
-            if not selection:
-                messagebox.showerror(
-                    "Error", "Please select an expense to add to report."
-                )
-                return
-
-            index = selection[0]
-            date = simpledialog.askstring(
-                "Date", "Enter date (YYYY-MM-DD):", parent=manage_window
-            )
-            if not date:
-                return
-
-            try:
-                from domain.validation import parse_ymd
-
-                parse_ymd(date)
-
-                add_to_report_use_case = AddMandatoryExpenseToReport(
-                    self.repository, self.currency
-                )
-                if add_to_report_use_case.execute(index, date):
-                    messagebox.showinfo(
-                        "Success", f"Mandatory expense added to report for {date}."
-                    )
-                    self.refresh_charts()
-                else:
-                    messagebox.showerror("Error", "Failed to add expense to report.")
-            except ValueError as e:
-                messagebox.showerror(
-                    "Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD."
-                )
-
-        # Format selector for mandatory expenses export/import
-        mandatory_format_var = tk.StringVar(value="CSV")
-        mandatory_format_menu = tk.OptionMenu(
-            buttons_frame, mandatory_format_var, "CSV", "XLSX", "PDF"
-        )
-        mandatory_format_menu.config(width=11)
-        mandatory_format_menu.pack(pady=10)
-
-        def export_expenses_csv():
-            get_expenses = GetMandatoryExpenses(self.repository)
-            expenses = get_expenses.execute()
-            if not expenses:
-                messagebox.showinfo("No Expenses", "No mandatory expenses to export.")
-                return
-
-            filepath = filedialog.asksaveasfilename(
-                defaultextension=".csv",
-                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-                title="Export Mandatory Expenses to CSV",
-            )
-            if filepath:
-                try:
-                    from gui.exporters import export_mandatory_expenses
-
-                    export_mandatory_expenses(expenses, filepath, "csv")
-                    messagebox.showinfo(
-                        "Success", f"Mandatory expenses exported to {filepath}"
-                    )
-                    open_in_file_manager(os.path.dirname(filepath))
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to export: {str(e)}")
-
-        def export_expenses_excel():
-            get_expenses = GetMandatoryExpenses(self.repository)
-            expenses = get_expenses.execute()
-            if not expenses:
-                messagebox.showinfo("No Expenses", "No mandatory expenses to export.")
-                return
-
-            filepath = filedialog.asksaveasfilename(
-                defaultextension=".xlsx",
-                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
-                title="Export Mandatory Expenses to XLSX",
-            )
-            if filepath:
-                try:
-                    from gui.exporters import export_mandatory_expenses
-
-                    export_mandatory_expenses(expenses, filepath, "xlsx")
-                    messagebox.showinfo(
-                        "Success", f"Mandatory expenses exported to {filepath}"
-                    )
-                    open_in_file_manager(os.path.dirname(filepath))
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to export XLSX: {str(e)}")
-
-        def export_expenses_pdf():
-            get_expenses = GetMandatoryExpenses(self.repository)
-            expenses = get_expenses.execute()
-            if not expenses:
-                messagebox.showinfo("No Expenses", "No mandatory expenses to export.")
-                return
-            filepath = filedialog.asksaveasfilename(
-                defaultextension=".pdf",
-                filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
-                title="Export Mandatory Expenses to PDF",
-            )
-            if filepath:
-                try:
-                    from gui.exporters import export_mandatory_expenses
-
-                    export_mandatory_expenses(expenses, filepath, "pdf")
-                    messagebox.showinfo(
-                        "Success", f"Mandatory expenses exported to {filepath}"
-                    )
-                    open_in_file_manager(os.path.dirname(filepath))
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to export PDF: {str(e)}")
-
-        def export_any():
-            fmt = mandatory_format_var.get()
-            if fmt == "CSV":
-                export_expenses_csv()
-            elif fmt == "XLSX":
-                export_expenses_excel()
-            else:  # PDF
-                export_expenses_pdf()
-
-        def import_expenses_csv():
-            # File selection dialog
-            filepath = filedialog.askopenfilename(
-                defaultextension=".csv",
-                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-                title="Select CSV file to import mandatory expenses",
-            )
-            if not filepath:
-                return
-
-            try:
-                # Confirmation dialog
-                confirm = messagebox.askyesno(
-                    "Confirm Import",
-                    f"This will replace all existing mandatory expenses with data from:\n{filepath}\n\nContinue?",
-                )
-                if not confirm:
-                    return
-
-                # Import mandatory expenses
-                from gui.importers import import_mandatory_expenses_from_csv
-
-                expenses = import_mandatory_expenses_from_csv(filepath)
-
-                # Delete all existing mandatory expenses first
-                delete_all_use_case = DeleteAllMandatoryExpenses(self.repository)
-                delete_all_use_case.execute()
-
-                # Save imported expenses
-                for expense in expenses:
-                    create_expense = CreateMandatoryExpense(
-                        self.repository, self.currency
-                    )
-                    create_expense.execute(
-                        amount=expense.amount,
-                        currency="KZT",  # Assume KZT for imported expenses
-                        category=expense.category,
-                        description=expense.description,
-                        period=expense.period,
-                    )
-
-                messagebox.showinfo(
-                    "Success",
-                    f"Successfully imported {len(expenses)} mandatory expenses from CSV file.\nAll existing mandatory expenses have been replaced.",
-                )
-                refresh_list()
-                self.refresh_charts()
-
-            except FileNotFoundError:
-                messagebox.showerror("Error", f"File not found: {filepath}")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to import CSV: {str(e)}")
-
-        def import_expenses_xlsx():
-            filepath = filedialog.askopenfilename(
-                defaultextension=".xlsx",
-                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
-                title="Select XLSX file to import mandatory expenses",
-            )
-            if not filepath:
-                return
-
-            try:
-                confirm = messagebox.askyesno(
-                    "Confirm Import",
-                    f"This will replace all existing mandatory expenses with data from:\n{filepath}\n\nContinue?",
-                )
-                if not confirm:
-                    return
-
-                from gui.importers import import_mandatory_expenses_from_xlsx
-
-                expenses = import_mandatory_expenses_from_xlsx(filepath)
-
-                # Delete all existing mandatory expenses first
-                delete_all_use_case = DeleteAllMandatoryExpenses(self.repository)
-                delete_all_use_case.execute()
-
-                # Save imported expenses
-                for expense in expenses:
-                    create_expense = CreateMandatoryExpense(
-                        self.repository, self.currency
-                    )
-                    create_expense.execute(
-                        amount=expense.amount,
-                        currency="KZT",
-                        category=expense.category,
-                        description=expense.description,
-                        period=expense.period,
-                    )
-
-                messagebox.showinfo(
-                    "Success",
-                    f"Successfully imported {len(expenses)} mandatory expenses from XLSX file.\nAll existing mandatory expenses have been replaced.",
-                )
-                refresh_list()
-                self.refresh_charts()
-
-            except FileNotFoundError:
-                messagebox.showerror("Error", f"File not found: {filepath}")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to import XLSX: {str(e)}")
-
-        def import_any():
-            fmt = mandatory_format_var.get()
-            if fmt == "CSV":
-                import_expenses_csv()
-            elif fmt == "XLSX":
-                import_expenses_xlsx()
-            else:  # PDF
-                messagebox.showinfo(
-                    "Not Supported",
-                    "Importing mandatory expenses from PDF is not supported.",
-                )
-
-        # Buttons
-        button_width = 14  # Set uniform width for all buttons
-
-        add_btn = tk.Button(
-            buttons_frame, text="Add", command=add_expense, width=button_width
-        )
-        add_btn.pack(pady=10)
-
-        delete_btn = tk.Button(
-            buttons_frame, text="Delete", command=delete_expense, width=button_width
-        )
-        delete_btn.pack(pady=10)
-
-        delete_all_btn = tk.Button(
-            buttons_frame,
-            text="Delete All",
-            command=delete_all_expenses,
-            width=button_width,
-        )
-        delete_all_btn.pack(pady=10)
-
-        add_to_report_btn = tk.Button(
-            buttons_frame,
-            text="Add to Report",
-            command=add_to_report,
-            width=button_width,
-        )
-        add_to_report_btn.pack(pady=10)
-
-        import_btn = tk.Button(
-            buttons_frame,
-            text="Import",
-            command=import_any,
-            width=button_width,
-        )
-        import_btn.pack(pady=10)
-
-        export_btn = tk.Button(
-            buttons_frame,
-            text="Export",
-            command=export_any,
-            width=button_width,
-        )
-        export_btn.pack(pady=10)
-
-        close_btn = tk.Button(
-            buttons_frame,
-            text="Close",
-            command=manage_window.destroy,
-            width=button_width,
-        )
-        close_btn.pack(pady=10)
-
-        # Initial refresh
-        refresh_list()
 
 
 def main() -> None:
