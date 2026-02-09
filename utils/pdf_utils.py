@@ -183,6 +183,21 @@ def report_to_pdf(report: Report, filepath: str) -> None:
     )
     table.setStyle(style)
     elems: List[Table] = [table]
+    # Add a header before the statement table
+    title_table = Table([["Transaction statement"]], colWidths=[available_width])
+    title_style = TableStyle(
+        [
+            ("FONT", (0, 0), (-1, -1), font_name),
+            ("FONTSIZE", (0, 0), (-1, -1), 12),
+            ("BACKGROUND", (0, 0), (-1, -1), colors.lightgrey),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ]
+    )
+    title_table.setStyle(title_style)
+
+    elems: List[Table] = [title_table, table]
     # After the detailed listing, add grouped tables by category
     try:
         groups = report.grouped_by_category()
@@ -190,7 +205,23 @@ def report_to_pdf(report: Report, filepath: str) -> None:
         groups = {}
 
     summary_year, monthly_rows = report.monthly_income_expense_rows()
+
     # Insert category tables after the main table
+    elems.append(Spacer(1, 8))  # type: ignore
+    # Add a header before the group report tables
+    group_title = Table([["Group report on category"]], colWidths=[available_width])
+    group_title_style = TableStyle(
+        [
+            ("FONT", (0, 0), (-1, -1), font_name),
+            ("FONTSIZE", (0, 0), (-1, -1), 12),
+            ("BACKGROUND", (0, 0), (-1, -1), colors.lightgrey),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ]
+    )
+    group_title.setStyle(group_title_style)
+    elems.append(group_title)
     for category, subreport in sorted(groups.items(), key=lambda x: x[0] or ""):
         # Title row for category
         title_table = Table([[f"Category: {category}"]], colWidths=[available_width])
@@ -278,6 +309,22 @@ def report_to_pdf(report: Report, filepath: str) -> None:
     WIDTH = 1
     HEIGHT = 14
     elems.append(Spacer(WIDTH, HEIGHT))  # type: ignore
+    # Add a title before the report of monthly income/expenses
+    monthly_title = Table(
+        [["Monthly income and expense report"]], colWidths=[available_width]
+    )
+    monthly_title_style = TableStyle(
+        [
+            ("FONT", (0, 0), (-1, -1), font_name),
+            ("FONTSIZE", (0, 0), (-1, -1), 12),
+            ("BACKGROUND", (0, 0), (-1, -1), colors.lightgrey),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ]
+    )
+    monthly_title.setStyle(monthly_title_style)
+    elems.append(monthly_title)
     elems.append(summary_table)
 
     doc.build(elems)  # type: ignore

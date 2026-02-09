@@ -578,7 +578,7 @@ class FinancialApp(tk.Tk):
         current_panel: Dict[str, Optional[tk.Frame]] = {"add": None, "report": None}
 
         def add_mandatory_inline():
-            # Закрыть предыдущую панель если она открыта
+            # Close the previous panel if it is open
             if current_panel["add"] is not None:
                 try:
                     current_panel["add"].destroy()
@@ -848,7 +848,7 @@ class FinancialApp(tk.Tk):
             importer = ImportFromCSV(self.repository)
             return importer.execute(filepath)
 
-        # XLSX — ленивый импорт
+        # XLSX — lazy import
         from gui.importers import import_report_from_xlsx
 
         report = import_report_from_xlsx(filepath)
@@ -862,7 +862,6 @@ class FinancialApp(tk.Tk):
         return count
 
     def _import_mandatory_by_format(self, fmt: str, filepath: str) -> int:
-        # Ленивые импорты — сохраняем
         if fmt == "CSV":
             from gui.importers import import_mandatory_expenses_from_csv
 
@@ -876,7 +875,7 @@ class FinancialApp(tk.Tk):
         else:
             raise ValueError(f"Unsupported format: {fmt}")
 
-        # Удаляем все существующие обязательные расходы
+        # Delete all existing mandatory expenses
         DeleteAllMandatoryExpenses(self.repository).execute()
 
         create_use_case = CreateMandatoryExpense(self.repository, self.currency)

@@ -80,19 +80,19 @@ def test_import_report_from_csv_xlsx_roundtrip(tmp_path: Path):
     report = make_sample_report()
     xlsx_path = tmp_path / "roundtrip.xlsx"
     csv_path = tmp_path / "roundtrip.csv"
-    
-    # use utils to write a proper xlsx, then import via importers
+
+    # Use utils to write a proper xlsx, then import via importers
     from utils.excel_utils import report_to_xlsx
 
     report_to_xlsx(report, str(xlsx_path))
     imported = importers.import_report_from_xlsx(str(xlsx_path))
     assert imported is not None
     assert len(imported.records()) == len(report.records())
-    
-    # use utils to write a proper csv, then import via importers
+
+    # Use utils to write a proper csv, then import via importers
     from utils.csv_utils import report_to_csv
+
     report_to_csv(report, str(csv_path))
     imported_csv = importers.import_report_from_csv(str(csv_path))
     assert imported_csv is not None
     assert len(imported_csv.records()) == len(report.records())
-    

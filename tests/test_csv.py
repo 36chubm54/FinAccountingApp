@@ -26,6 +26,7 @@ def test_to_csv():
     finally:
         os.unlink(tmp_path)
 
+
 def test_to_csv_with_initial_balance():
     records = [
         IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
@@ -47,6 +48,7 @@ def test_to_csv_with_initial_balance():
         assert rows[5] == ["FINAL BALANCE", "", "", "120.00"]
     finally:
         os.unlink(tmp_path)
+
 
 def test_from_csv():
     # Create a temporary CSV file
@@ -86,6 +88,7 @@ TOTAL,,,-2000.00"""
     finally:
         os.unlink(tmp_path)
 
+
 def test_from_csv_with_negative_amounts():
     # Test CSV with negative amounts (expenses)
     csv_content = """Date,Type,Category,Amount (KZT)
@@ -108,6 +111,7 @@ TOTAL,,,-50.00"""
     finally:
         os.unlink(tmp_path)
 
+
 def test_from_csv_with_initial_balance():
     # Test CSV import with initial balance
     csv_content = """Date,Type,Category,Amount (KZT)
@@ -129,6 +133,7 @@ TOTAL,,,-2000.00"""
 
     finally:
         os.unlink(tmp_path)
+
 
 def test_from_csv_file_not_found():
     with pytest.raises(FileNotFoundError):
