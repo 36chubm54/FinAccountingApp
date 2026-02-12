@@ -84,6 +84,36 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
             summary_ws.append([month_label, f"{income:.2f}", f"{expense:.2f}"])
         summary_ws.append(["TOTAL", f"{total_income:.2f}", f"{total_expense:.2f}"])
 
+    # Create a second, intermediate sheet with grouped tables by category
+    try:
+        groups = report.grouped_by_category()
+    except Exception:
+        groups = {}
+
+    # Insert By Category sheet as the second sheet (index=1)
+    bycat_ws = wb.create_sheet(title="By Category", index=1)
+    # For each category, write a small table: header, rows, subtotal
+    for category, subreport in sorted(groups.items(), key=lambda x: x[0] or ""):
+        bycat_ws.append([f"Category: {category}"])
+        bycat_ws.append(["Date", "Type", "Amount (KZT)"])
+        records_total = 0.0
+        for r in sorted(subreport.records(), key=lambda rr: rr.date):
+            if isinstance(r, IncomeRecord):
+                r_type = "Income"
+            elif isinstance(r, MandatoryExpenseRecord):
+                r_type = "Mandatory Expense"
+            else:
+                r_type = "Expense"
+            amt = getattr(r, "amount", 0.0)
+            records_total += (
+                getattr(r, "amount", 0.0)
+                if getattr(r, "amount", None) is not None
+                else 0.0
+            )
+            bycat_ws.append([getattr(r, "date", ""), r_type, f"{abs(amt):.2f}"])
+        bycat_ws.append(["SUBTOTAL", "", f"{abs(records_total):.2f}"])
+        bycat_ws.append([""])
+
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     wb.save(filepath)
     try:

@@ -120,7 +120,7 @@ Export report:
 ### Delete all entries
 
 1. Open the `Operations` tab.
-2. In the `List of operation` block, select an entry from the list.
+2. In the `List of operations` block, select an entry from the list.
 3. Click `Delete All Records` and confirm the deletion. The entries will be permanently deleted and the list of entries will be updated.
 
 ### Setting the initial balance
