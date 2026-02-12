@@ -25,8 +25,8 @@ from utils.csv_utils import (
 
 def test_report_xlsx_roundtrip():
     records = [
-        IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
-        ExpenseRecord(date="2025-01-02", amount=30.0, category="Food"),
+        IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+        ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food"),
     ]
     report = Report(records, initial_balance=50.0)
 
@@ -52,10 +52,10 @@ def test_report_xlsx_roundtrip():
 def test_mandatory_xlsx_roundtrip():
     expenses = [
         MandatoryExpenseRecord(
-            date="", amount=10.0, category="Sub", description="d1", period="monthly"
+            date="", _amount_init=10.0, category="Sub", description="d1", period="monthly"
         ),
         MandatoryExpenseRecord(
-            date="", amount=20.5, category="Svc", description="d2", period="yearly"
+            date="", _amount_init=20.5, category="Svc", description="d2", period="yearly"
         ),
     ]
 
@@ -74,7 +74,7 @@ def test_mandatory_xlsx_roundtrip():
 def test_mandatory_csv_roundtrip():
     expenses = [
         MandatoryExpenseRecord(
-            date="", amount=5.0, category="A", description="x", period="daily"
+            date="", _amount_init=5.0, category="A", description="x", period="daily"
         ),
     ]
     with tempfile.NamedTemporaryFile(

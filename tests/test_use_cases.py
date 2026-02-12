@@ -28,7 +28,12 @@ class TestCreateIncome:
         # Assert
         mock_currency.convert.assert_called_once_with(100.0, "USD")
         expected_record = IncomeRecord(
-            date="2025-01-01", amount=47000.0, category="Salary"
+            date="2025-01-01",
+            amount_original=100.0,
+            currency="USD",
+            rate_at_operation=470.0,
+            amount_kzt=47000.0,
+            category="Salary",
         )
         mock_repo.save.assert_called_once_with(expected_record)
 
@@ -45,7 +50,12 @@ class TestCreateIncome:
 
         # Assert
         expected_record = IncomeRecord(
-            date="2025-01-01", amount=47000.0, category="General"
+            date="2025-01-01",
+            amount_original=100.0,
+            currency="USD",
+            rate_at_operation=470.0,
+            amount_kzt=47000.0,
+            category="General",
         )
         mock_repo.save.assert_called_once_with(expected_record)
 
@@ -67,7 +77,12 @@ class TestCreateExpense:
         # Assert
         mock_currency.convert.assert_called_once_with(50.0, "USD")
         expected_record = ExpenseRecord(
-            date="2025-01-02", amount=23500.0, category="Food"
+            date="2025-01-02",
+            amount_original=50.0,
+            currency="USD",
+            rate_at_operation=470.0,
+            amount_kzt=23500.0,
+            category="Food",
         )
         mock_repo.save.assert_called_once_with(expected_record)
 
@@ -84,7 +99,12 @@ class TestCreateExpense:
 
         # Assert
         expected_record = ExpenseRecord(
-            date="2025-01-02", amount=23500.0, category="General"
+            date="2025-01-02",
+            amount_original=50.0,
+            currency="USD",
+            rate_at_operation=470.0,
+            amount_kzt=23500.0,
+            category="General",
         )
         mock_repo.save.assert_called_once_with(expected_record)
 
@@ -94,8 +114,8 @@ class TestGenerateReport:
         # Arrange
         mock_repo = Mock(spec=RecordRepository)
         records = [
-            IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
-            ExpenseRecord(date="2025-01-02", amount=50.0, category="Food"),
+            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+            ExpenseRecord(date="2025-01-02", _amount_init=50.0, category="Food"),
         ]
         mock_repo.load_all.return_value = records
 
@@ -156,12 +176,9 @@ class TestImportFromCSV:
         # Arrange
         mock_repo = Mock(spec=RecordRepository)
 
-        # Mock Report.from_csv to return a report with test records
-        with patch("app.use_cases.Report") as mock_report_class:
-            mock_report = Mock()
+        with patch("utils.csv_utils.import_records_from_csv") as mock_import:
             test_records = [Mock(spec=Record), Mock(spec=Record), Mock(spec=Record)]
-            mock_report.records.return_value = test_records
-            mock_report_class.from_csv.return_value = mock_report
+            mock_import.return_value = (test_records, 0.0)
 
             use_case = ImportFromCSV(repository=mock_repo)
 
@@ -169,18 +186,15 @@ class TestImportFromCSV:
             result = use_case.execute("test.csv")
 
             # Assert
-            mock_report_class.from_csv.assert_called_once_with("test.csv")
+            mock_import.assert_called_once_with("test.csv")
             mock_repo.delete_all.assert_called_once()
             assert mock_repo.save.call_count == 3
             assert result == 3
 
     def test_execute_saves_initial_balance(self):
         mock_repo = Mock(spec=RecordRepository)
-        with patch("app.use_cases.Report") as mock_report_class:
-            mock_report = Mock()
-            mock_report.records.return_value = []
-            mock_report.initial_balance = 123.45
-            mock_report_class.from_csv.return_value = mock_report
+        with patch("utils.csv_utils.import_records_from_csv") as mock_import:
+            mock_import.return_value = ([], 123.45)
 
             use_case = ImportFromCSV(repository=mock_repo)
             use_case.execute("test.csv")

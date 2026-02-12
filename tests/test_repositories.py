@@ -28,7 +28,7 @@ class TestJsonFileRecordRepository:
             os.unlink(self.temp_file.name)
 
     def test_save_and_load_single_income(self):
-        record = IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")
+        record = IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
         self.repo.save(record)
         records = self.repo.load_all()
         assert len(records) == 1
@@ -38,7 +38,7 @@ class TestJsonFileRecordRepository:
         assert isinstance(records[0], IncomeRecord)
 
     def test_save_and_load_single_expense(self):
-        record = ExpenseRecord(date="2025-01-02", amount=50.0, category="Food")
+        record = ExpenseRecord(date="2025-01-02", _amount_init=50.0, category="Food")
         self.repo.save(record)
         records = self.repo.load_all()
         assert len(records) == 1
@@ -48,9 +48,9 @@ class TestJsonFileRecordRepository:
         assert isinstance(records[0], ExpenseRecord)
 
     def test_save_multiple_records(self):
-        income1 = IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")
-        expense1 = ExpenseRecord(date="2025-01-02", amount=30.0, category="Food")
-        income2 = IncomeRecord(date="2025-01-03", amount=50.0, category="Bonus")
+        income1 = IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
+        expense1 = ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food")
+        income2 = IncomeRecord(date="2025-01-03", _amount_init=50.0, category="Bonus")
 
         self.repo.save(income1)
         self.repo.save(expense1)
@@ -71,7 +71,7 @@ class TestJsonFileRecordRepository:
 
     def test_json_file_format(self):
         # Test that the JSON file has the correct format
-        record = IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")
+        record = IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
         self.repo.save(record)
 
         # Read the raw JSON to verify format
@@ -85,7 +85,10 @@ class TestJsonFileRecordRepository:
         assert len(data["records"]) == 1
         assert data["records"][0]["type"] == "income"
         assert data["records"][0]["date"] == "2025-01-01"
-        assert data["records"][0]["amount"] == 100.0
+        assert data["records"][0]["amount_original"] == 100.0
+        assert data["records"][0]["amount_kzt"] == 100.0
+        assert data["records"][0]["currency"] == "KZT"
+        assert data["records"][0]["rate_at_operation"] == 1.0
         assert data["records"][0]["category"] == "Salary"
 
     def test_load_records_with_backward_compatibility(self):
@@ -138,9 +141,9 @@ class TestJsonFileRecordRepository:
 
     def test_delete_by_index_success(self):
         # Setup: add some records
-        income1 = IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")
-        expense1 = ExpenseRecord(date="2025-01-02", amount=30.0, category="Food")
-        income2 = IncomeRecord(date="2025-01-03", amount=50.0, category="Bonus")
+        income1 = IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
+        expense1 = ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food")
+        income2 = IncomeRecord(date="2025-01-03", _amount_init=50.0, category="Bonus")
 
         self.repo.save(income1)
         self.repo.save(expense1)
@@ -161,7 +164,7 @@ class TestJsonFileRecordRepository:
         assert records[1].category == "Bonus"  # Third record still there
 
     def test_delete_by_index_out_of_range(self):
-        income1 = IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")
+        income1 = IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
         self.repo.save(income1)
 
         # Try to delete non-existent index
@@ -173,7 +176,7 @@ class TestJsonFileRecordRepository:
         assert len(records) == 1
 
     def test_delete_by_index_negative(self):
-        income1 = IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")
+        income1 = IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
         self.repo.save(income1)
 
         # Try to delete with negative index
@@ -191,9 +194,9 @@ class TestJsonFileRecordRepository:
 
     def test_delete_all(self):
         # Setup: add some records
-        income1 = IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")
-        expense1 = ExpenseRecord(date="2025-01-02", amount=30.0, category="Food")
-        income2 = IncomeRecord(date="2025-01-03", amount=50.0, category="Bonus")
+        income1 = IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
+        expense1 = ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food")
+        income2 = IncomeRecord(date="2025-01-03", _amount_init=50.0, category="Bonus")
 
         self.repo.save(income1)
         self.repo.save(expense1)
@@ -243,7 +246,7 @@ class TestJsonFileRecordRepository:
     def test_initial_balance_with_records(self):
         # Test initial balance persists with records
         self.repo.save_initial_balance(200.0)
-        record = IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")
+        record = IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
         self.repo.save(record)
 
         balance = self.repo.load_initial_balance()

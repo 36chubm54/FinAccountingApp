@@ -115,14 +115,15 @@ def _register_cyrillic_font() -> str:
 
 
 def report_to_pdf(report: Report, filepath: str) -> None:
-    """Export report as a text-based PDF (contains CSV-like lines)."""
+    """Export report as PDF (fixed amounts by operation-time FX rates)."""
     # Build table data
     data = []
-    header = ["Date", "Type", "Category", "Amount (KZT)"]
+    header = ["Date", "Type", "Category", "Amount (KZT, fixed)"]
     data.append(header)
 
     if getattr(report, "initial_balance", 0) != 0:
         data.append(["", "Initial Balance", "", f"{report.initial_balance:.2f}"])
+    data.append(["", "", "", "Fixed amounts by operation-time FX rates"])
 
     for record in sorted(report.records(), key=lambda r: r.date):
         if isinstance(record, IncomeRecord):
@@ -136,12 +137,12 @@ def report_to_pdf(report: Report, filepath: str) -> None:
                 _safe_str(record.date),
                 record_type,
                 _safe_str(record.category),
-                f"{record.amount:.2f}",
+                f"{record.amount_kzt:.2f}",
             ]
         )
 
-    total = report.total()
-    records_total = sum(r.signed_amount() for r in report.records())
+    total = report.total_fixed()
+    records_total = sum(r.signed_amount_kzt() for r in report.records())
     data.append(["SUBTOTAL", "", "", f"{records_total:.2f}"])
     data.append(["FINAL BALANCE", "", "", f"{total:.2f}"])
 
@@ -247,10 +248,10 @@ def report_to_pdf(report: Report, filepath: str) -> None:
                 r_type = "Mandatory Expense"
             else:
                 r_type = "Expense"
-            amt = getattr(r, "amount", 0.0)
+            amt = getattr(r, "amount_kzt", 0.0)
             cat_total += (
-                getattr(r, "amount", 0.0)
-                if getattr(r, "amount", None) is not None
+                getattr(r, "amount_kzt", 0.0)
+                if getattr(r, "amount_kzt", None) is not None
                 else 0.0
             )
             cat_data.append([_safe_str(r.date), r_type, f"{abs(amt):.2f}"])

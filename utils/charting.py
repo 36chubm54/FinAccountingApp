@@ -21,7 +21,7 @@ def aggregate_expenses_by_category(records: Iterable[Record]) -> Dict[str, float
             continue
         if isinstance(record, (ExpenseRecord, MandatoryExpenseRecord)):
             totals[record.category] = totals.get(record.category, 0.0) + abs(
-                record.amount
+                record.amount_kzt
             )
     return totals
 
@@ -41,9 +41,9 @@ def aggregate_daily_cashflow(
             continue
         idx = dt.day - 1
         if isinstance(record, IncomeRecord):
-            income[idx] += record.amount
+            income[idx] += record.amount_kzt
         elif isinstance(record, (ExpenseRecord, MandatoryExpenseRecord)):
-            expense[idx] += abs(record.amount)
+            expense[idx] += abs(record.amount_kzt)
 
     return income, expense
 
@@ -62,9 +62,9 @@ def aggregate_monthly_cashflow(
             continue
         idx = dt.month - 1
         if isinstance(record, IncomeRecord):
-            income[idx] += record.amount
+            income[idx] += record.amount_kzt
         elif isinstance(record, (ExpenseRecord, MandatoryExpenseRecord)):
-            expense[idx] += abs(record.amount)
+            expense[idx] += abs(record.amount_kzt)
 
     return income, expense
 

@@ -163,10 +163,15 @@ python main.py
 
 Формат данных:
 
-- Колонки: `Date,Type,Category,Amount (KZT)`.
-- `Type`: `Income`, `Expense`, `Mandatory Expense`.
-- Допустима строка `Initial Balance` с пустой датой.
-- Строки `SUBTOTAL` и `FINAL BALANCE` игнорируются при импорте.
+- **CSV/XLSX данных (import/export):**  
+  `date,type,category,amount_original,currency,rate_at_operation,amount_kzt,description,period`
+- Поддерживается legacy-импорт (старые файлы с полем `amount` или с колонкой `Amount (KZT)`).
+- Все существующие записи заменяются данными из файла.
+
+Важно:
+
+- `CSV/XLSX отчёта` и `CSV/XLSX данных` — это разные форматы.
+- `CSV/XLSX отчёта` используется только для чтения пользователем и **не должен** использоваться как источник данных для импорта.
 
 ### Хранение данных
 
@@ -181,19 +186,28 @@ python main.py
     {
       "type": "income",
       "date": "2025-01-15",
-      "amount": 350000.0,
+      "amount_original": 700.0,
+      "currency": "USD",
+      "rate_at_operation": 500.0,
+      "amount_kzt": 350000.0,
       "category": "Зарплата"
     },
     {
       "type": "expense",
       "date": "2025-01-16",
-      "amount": 25000.0,
+      "amount_original": 25000.0,
+      "currency": "KZT",
+      "rate_at_operation": 1.0,
+      "amount_kzt": 25000.0,
       "category": "Продукты"
     },
     {
       "type": "mandatory_expense",
       "date": "2025-01-20",
-      "amount": 150000.0,
+      "amount_original": 300.0,
+      "currency": "USD",
+      "rate_at_operation": 500.0,
+      "amount_kzt": 150000.0,
       "category": "Mandatory",
       "description": "Monthly rent",
       "period": "monthly"
@@ -202,7 +216,10 @@ python main.py
   "mandatory_expenses": [
     {
       "date": "",
-      "amount": 150000.0,
+      "amount_original": 300.0,
+      "currency": "USD",
+      "rate_at_operation": 500.0,
+      "amount_kzt": 150000.0,
       "category": "Mandatory",
       "description": "Monthly rent",
       "period": "monthly"
@@ -265,14 +282,17 @@ python main.py
 `domain/reports.py`
 
 - `Report(records, initial_balance=0.0)` — отчёт.
-- `total()` — итоговый баланс с учётом начального остатка.
+- `total_fixed()` — итог по курсу операции (бухгалтерский режим).
+- `total_current(currency_service)` — итог по текущему курсу.
+- `fx_difference(currency_service)` — курсовая разница.
+- `total()` — алиас `total_fixed()` для обратной совместимости.
 - `filter_by_period(prefix)` — фильтрация по префиксу даты.
 - `filter_by_category(category)` — фильтрация по категории.
 - `grouped_by_category()` — группировка по категориям.
 - `monthly_income_expense_rows(year=None, up_to_month=None)` — агрегаты по месяцам.
 - `monthly_income_expense_table(year=None, up_to_month=None)` — таблица по месяцам.
 - `as_table(summary_mode="full"|"total_only")` — табличный вывод.
-- `to_csv(filepath)` и `from_csv(filepath)` — экспорт/импорт CSV.
+- `to_csv(filepath)` и `from_csv(filepath)` — экспорт отчёта и backward-compatible импорт.
 
 `domain/validation.py`
 
@@ -326,6 +346,11 @@ python main.py
 `gui/tkinter_gui.py`
 
 - `FinancialApp` — основной класс приложения с Tkinter.
+- Вкладка `Reports` поддерживает 2 режима итогов:
+  - `По курсу операции`
+  - `По текущему курсу`
+- Курсовая разница выводится отдельной строкой (`FX Difference`).
+- Месячные агрегаты и графики всегда считаются в фиксированном режиме (`amount_kzt`).
 
 Методы:
 
@@ -355,6 +380,7 @@ python main.py
 
 `gui/importers.py`
 
+- `import_report_from_csv(filepath)`
 - `import_report_from_xlsx(filepath)`
 - `import_mandatory_expenses_from_csv(filepath)`
 - `import_mandatory_expenses_from_xlsx(filepath)`

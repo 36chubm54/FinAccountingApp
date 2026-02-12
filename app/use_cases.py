@@ -4,6 +4,14 @@ from infrastructure.repositories import RecordRepository
 from .services import CurrencyService
 
 
+def _build_rate(amount: float, amount_kzt: float, currency: str) -> float:
+    if currency.upper() == "KZT":
+        return 1.0
+    if amount == 0:
+        return 1.0
+    return amount_kzt / amount
+
+
 class CreateIncome:
     def __init__(self, repository: RecordRepository, currency: CurrencyService):
         self._repository = repository
@@ -12,8 +20,15 @@ class CreateIncome:
     def execute(
         self, *, date: str, amount: float, currency: str, category: str = "General"
     ):
-        normalized = self._currency.convert(amount, currency)
-        record = IncomeRecord(date=date, amount=normalized, category=category)
+        amount_kzt = self._currency.convert(amount, currency)
+        record = IncomeRecord(
+            date=date,
+            amount_original=amount,
+            currency=currency.upper(),
+            rate_at_operation=_build_rate(amount, amount_kzt, currency),
+            amount_kzt=amount_kzt,
+            category=category,
+        )
         self._repository.save(record)
 
 
@@ -25,8 +40,15 @@ class CreateExpense:
     def execute(
         self, *, date: str, amount: float, currency: str, category: str = "General"
     ):
-        normalized = self._currency.convert(amount, currency)
-        record = ExpenseRecord(date=date, amount=normalized, category=category)
+        amount_kzt = self._currency.convert(amount, currency)
+        record = ExpenseRecord(
+            date=date,
+            amount_original=amount,
+            currency=currency.upper(),
+            rate_at_operation=_build_rate(amount, amount_kzt, currency),
+            amount_kzt=amount_kzt,
+            category=category,
+        )
         self._repository.save(record)
 
 
@@ -64,15 +86,17 @@ class ImportFromCSV:
 
     def execute(self, filepath: str) -> int:
         """Import records from CSV file, replace all existing records in repository. Returns number of imported records."""
-        report = Report.from_csv(filepath)
+        from utils.csv_utils import import_records_from_csv
+
+        records, initial_balance = import_records_from_csv(filepath)
 
         # Delete all existing records first
         self._repository.delete_all()
-        self._repository.save_initial_balance(report.initial_balance)
+        self._repository.save_initial_balance(initial_balance)
 
         # Import new records
         imported_count = 0
-        for record in report.records():
+        for record in records:
             self._repository.save(record)
             imported_count += 1
         return imported_count
@@ -96,10 +120,13 @@ class CreateMandatoryExpense:
 
         ensure_valid_period(period)
 
-        normalized = self._currency.convert(amount, currency)
+        amount_kzt = self._currency.convert(amount, currency)
         expense = MandatoryExpenseRecord(
             date="",  # Will be set when added to report
-            amount=normalized,
+            amount_original=amount,
+            currency=currency.upper(),
+            rate_at_operation=_build_rate(amount, amount_kzt, currency),
+            amount_kzt=amount_kzt,
             category=category,
             description=description,
             period=period,  # type: ignore
@@ -136,7 +163,6 @@ class DeleteAllMandatoryExpenses:
 class AddMandatoryExpenseToReport:
     def __init__(self, repository: RecordRepository, currency: CurrencyService):
         self._repository = repository
-        self._currency = currency
 
     def execute(self, index: int, date: str):
         mandatory_expenses = self._repository.load_mandatory_expenses()
@@ -145,7 +171,10 @@ class AddMandatoryExpenseToReport:
             # Create a new record with the specified date
             record = MandatoryExpenseRecord(
                 date=date,
-                amount=expense.amount,
+                amount_original=expense.amount_original,
+                currency=expense.currency,
+                rate_at_operation=expense.rate_at_operation,
+                amount_kzt=expense.amount_kzt,
                 category=expense.category,
                 description=expense.description,
                 period=expense.period,

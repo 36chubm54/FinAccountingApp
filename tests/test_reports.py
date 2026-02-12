@@ -4,12 +4,12 @@ from domain.records import IncomeRecord, ExpenseRecord
 
 class TestReport:
     def test_creation(self):
-        records = [IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")]
+        records = [IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")]
         report = Report(records)
         assert report.records() == records
 
     def test_creation_with_initial_balance(self):
-        records = [IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")]
+        records = [IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")]
         report = Report(records, initial_balance=50.0)
         assert report.records() == records
         assert report.total() == 150.0
@@ -19,29 +19,29 @@ class TestReport:
         assert report.total() == 0.0
 
     def test_total_single_income(self):
-        records = [IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")]
+        records = [IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")]
         report = Report(records)
         assert report.total() == 100.0
 
     def test_total_single_expense(self):
-        records = [ExpenseRecord(date="2025-01-01", amount=50.0, category="Food")]
+        records = [ExpenseRecord(date="2025-01-01", _amount_init=50.0, category="Food")]
         report = Report(records)
         assert report.total() == -50.0
 
     def test_total_multiple_records(self):
         records = [
-            IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
-            ExpenseRecord(date="2025-01-02", amount=30.0, category="Food"),
-            IncomeRecord(date="2025-01-03", amount=50.0, category="Bonus"),
+            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+            ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food"),
+            IncomeRecord(date="2025-01-03", _amount_init=50.0, category="Bonus"),
         ]
         report = Report(records)
         assert report.total() == 120.0  # 100 - 30 + 50
 
     def test_filter_by_period(self):
         records = [
-            IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
-            ExpenseRecord(date="2025-02-01", amount=30.0, category="Food"),
-            IncomeRecord(date="2025-01-15", amount=50.0, category="Bonus"),
+            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+            ExpenseRecord(date="2025-02-01", _amount_init=30.0, category="Food"),
+            IncomeRecord(date="2025-01-15", _amount_init=50.0, category="Bonus"),
         ]
         report = Report(records, initial_balance=20.0)
         jan_report = report.filter_by_period("2025-01")
@@ -50,9 +50,9 @@ class TestReport:
 
     def test_filter_by_category(self):
         records = [
-            IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
-            ExpenseRecord(date="2025-01-02", amount=30.0, category="Food"),
-            IncomeRecord(date="2025-01-03", amount=50.0, category="Salary"),
+            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+            ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food"),
+            IncomeRecord(date="2025-01-03", _amount_init=50.0, category="Salary"),
         ]
         report = Report(records)
         salary_report = report.filter_by_category("Salary")
@@ -61,10 +61,10 @@ class TestReport:
 
     def test_grouped_by_category(self):
         records = [
-            IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
-            ExpenseRecord(date="2025-01-02", amount=30.0, category="Food"),
-            IncomeRecord(date="2025-01-03", amount=50.0, category="Salary"),
-            ExpenseRecord(date="2025-01-04", amount=20.0, category="Food"),
+            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+            ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food"),
+            IncomeRecord(date="2025-01-03", _amount_init=50.0, category="Salary"),
+            ExpenseRecord(date="2025-01-04", _amount_init=20.0, category="Food"),
         ]
         report = Report(records)
         groups = report.grouped_by_category()
@@ -75,8 +75,8 @@ class TestReport:
 
     def test_grouped_by_category_does_not_include_initial_balance(self):
         records = [
-            IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
-            ExpenseRecord(date="2025-01-02", amount=30.0, category="Food"),
+            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+            ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food"),
         ]
         report = Report(records, initial_balance=500.0)
         groups = report.grouped_by_category()
@@ -85,9 +85,9 @@ class TestReport:
 
     def test_sorted_by_date(self):
         records = [
-            IncomeRecord(date="2025-01-03", amount=50.0, category="Bonus"),
-            IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
-            IncomeRecord(date="2025-01-02", amount=25.0, category="Salary"),
+            IncomeRecord(date="2025-01-03", _amount_init=50.0, category="Bonus"),
+            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+            IncomeRecord(date="2025-01-02", _amount_init=25.0, category="Salary"),
         ]
         report = Report(records)
         sorted_report = report.sorted_by_date()
@@ -95,18 +95,18 @@ class TestReport:
         assert sorted_dates == ["2025-01-01", "2025-01-02", "2025-01-03"]
 
     def test_records_returns_copy(self):
-        records = [IncomeRecord(date="2025-01-01", amount=100.0, category="Salary")]
+        records = [IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")]
         report = Report(records)
         returned_records = report.records()
         returned_records.append(
-            ExpenseRecord(date="2025-01-02", amount=50.0, category="Food")
+            ExpenseRecord(date="2025-01-02", _amount_init=50.0, category="Food")
         )
         assert len(report.records()) == 1  # Original unchanged
 
     def test_as_table(self):
         records = [
-            IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
-            ExpenseRecord(date="2025-01-02", amount=30.0, category="Food"),
+            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+            ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food"),
         ]
         report = Report(records)
         table_str = report.as_table()
@@ -121,8 +121,8 @@ class TestReport:
 
     def test_as_table_with_initial_balance(self):
         records = [
-            IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
-            ExpenseRecord(date="2025-01-02", amount=30.0, category="Food"),
+            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+            ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food"),
         ]
         report = Report(records, initial_balance=50.0)
         table_str = report.as_table()
@@ -135,9 +135,9 @@ class TestReport:
 
     def test_monthly_income_expense_rows_defaults_to_latest_year(self):
         records = [
-            IncomeRecord(date="2024-12-31", amount=40.0, category="Old"),
-            IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
-            ExpenseRecord(date="2025-02-01", amount=30.0, category="Food"),
+            IncomeRecord(date="2024-12-31", _amount_init=40.0, category="Old"),
+            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+            ExpenseRecord(date="2025-02-01", _amount_init=30.0, category="Food"),
         ]
         report = Report(records)
         year, rows = report.monthly_income_expense_rows()
@@ -152,9 +152,9 @@ class TestReport:
 
     def test_monthly_income_expense_rows_with_month_limit(self):
         records = [
-            IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
-            ExpenseRecord(date="2025-02-01", amount=30.0, category="Food"),
-            IncomeRecord(date="2025-03-01", amount=50.0, category="Bonus"),
+            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+            ExpenseRecord(date="2025-02-01", _amount_init=30.0, category="Food"),
+            IncomeRecord(date="2025-03-01", _amount_init=50.0, category="Bonus"),
         ]
         report = Report(records)
         year, rows = report.monthly_income_expense_rows(year=2025, up_to_month=2)

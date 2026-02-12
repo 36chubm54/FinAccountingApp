@@ -105,24 +105,63 @@ class JsonFileRecordRepository(RecordRepository):
             except Exception:
                 pass
 
+    @staticmethod
+    def _as_float(value, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _record_to_dict(self, record: Record, record_type: str) -> dict:
+        payload = {
+            "type": record_type,
+            "date": record.date,
+            "amount_original": record.amount_original,
+            "currency": record.currency,
+            "rate_at_operation": record.rate_at_operation,
+            "amount_kzt": record.amount_kzt,
+            "category": record.category,
+        }
+        if isinstance(record, MandatoryExpenseRecord):
+            payload["description"] = record.description
+            payload["period"] = record.period
+        return payload
+
+    def _parse_record_common(self, item: dict) -> dict:
+        # Lazy migration for legacy records without amount_kzt.
+        if "amount_kzt" in item:
+            amount_kzt = self._as_float(item.get("amount_kzt", 0.0), 0.0)
+            amount_original = self._as_float(
+                item.get("amount_original", amount_kzt), amount_kzt
+            )
+            currency = str(item.get("currency", "KZT") or "KZT").upper()
+            rate_at_operation = self._as_float(
+                item.get("rate_at_operation", 1.0), 1.0
+            )
+        else:
+            legacy_amount = self._as_float(item.get("amount", 0.0), 0.0)
+            amount_original = legacy_amount
+            amount_kzt = legacy_amount
+            currency = "KZT"
+            rate_at_operation = 1.0
+
+        return {
+            "date": str(item.get("date", "") or ""),
+            "amount_original": amount_original,
+            "currency": currency,
+            "rate_at_operation": rate_at_operation,
+            "amount_kzt": amount_kzt,
+            "category": str(item.get("category", "General") or "General"),
+        }
+
     def save(self, record: Record) -> None:
         data = self._load_data()
         if isinstance(record, MandatoryExpenseRecord):
-            record_data = {
-                "type": "mandatory_expense",
-                "date": record.date,
-                "amount": record.amount,
-                "category": record.category,
-                "description": record.description,
-                "period": record.period,
-            }
+            record_data = self._record_to_dict(record, "mandatory_expense")
         else:
-            record_data = {
-                "type": "income" if isinstance(record, IncomeRecord) else "expense",
-                "date": record.date,
-                "amount": record.amount,
-                "category": record.category,
-            }
+            record_data = self._record_to_dict(
+                record, "income" if isinstance(record, IncomeRecord) else "expense"
+            )
         data["records"].append(record_data)
         self._save_data(data)
 
@@ -135,23 +174,19 @@ class JsonFileRecordRepository(RecordRepository):
                 continue
             try:
                 typ = item.get("type", "income")
-                date = item.get("date", "")
-                amount = item.get("amount", 0.0)
-                category = item.get("category", "General")
+                common = self._parse_record_common(item)
 
                 if typ == "income":
-                    record = IncomeRecord(date=date, amount=amount, category=category)
+                    record = IncomeRecord(**common)
                 elif typ == "expense":
-                    record = ExpenseRecord(date=date, amount=amount, category=category)
+                    record = ExpenseRecord(**common)
                 elif typ == "mandatory_expense":
-                    description = item.get("description", "")
-                    period = item.get("period", "monthly")
+                    description = str(item.get("description", "") or "")
+                    period = str(item.get("period", "monthly") or "monthly")
                     record = MandatoryExpenseRecord(
-                        date=date,
-                        amount=amount,
-                        category=category,
+                        **common,
                         description=description,
-                        period=period,
+                        period=period,  # type: ignore[arg-type]
                     )
                 else:
                     logger.warning(
@@ -195,13 +230,8 @@ class JsonFileRecordRepository(RecordRepository):
         data = self._load_data()
         if "mandatory_expenses" not in data:
             data["mandatory_expenses"] = []
-        expense_data = {
-            "date": expense.date,
-            "amount": expense.amount,
-            "category": expense.category,
-            "description": expense.description,
-            "period": expense.period,
-        }
+        expense_data = self._record_to_dict(expense, "mandatory_expense")
+        expense_data.pop("type", None)
         data["mandatory_expenses"].append(expense_data)
         self._save_data(data)
 
@@ -209,13 +239,17 @@ class JsonFileRecordRepository(RecordRepository):
         """Load all mandatory expenses."""
         data = self._load_data()
         expenses = []
-        for item in data.get("mandatory_expenses", []):
+        for index, item in enumerate(data.get("mandatory_expenses", [])):
+            if not isinstance(item, dict):
+                logger.warning(
+                    "Skipping non-dict mandatory expense at index %s", index
+                )
+                continue
+            common = self._parse_record_common(item)
             expense = MandatoryExpenseRecord(
-                date=item["date"],
-                amount=item["amount"],
-                category=item["category"],
-                description=item["description"],
-                period=item["period"],
+                **common,
+                description=str(item.get("description", "") or ""),
+                period=str(item.get("period", "monthly") or "monthly"),  # type: ignore[arg-type]
             )
             expenses.append(expense)
         return expenses

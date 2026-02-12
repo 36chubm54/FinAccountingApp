@@ -1,7 +1,9 @@
-from typing import Iterable, Dict, Optional, Tuple, List
 from datetime import date
+from typing import Dict, Iterable, List, Optional, Tuple
+
 from prettytable import PrettyTable
-from .records import Record, IncomeRecord, MandatoryExpenseRecord
+
+from .records import IncomeRecord, MandatoryExpenseRecord, Record
 
 
 class Report:
@@ -9,32 +11,44 @@ class Report:
         self._records = list(records)
         self._initial_balance = initial_balance
 
+    def total_fixed(self) -> float:
+        """Accounting total by operation-time rates."""
+        return self._initial_balance + sum(r.signed_amount_kzt() for r in self._records)
+
     def total(self) -> float:
-        """Calculate total signed amount of all records including initial balance."""
-        return self._initial_balance + sum(r.signed_amount() for r in self._records)
+        """Backward-compatible alias."""
+        return self.total_fixed()
+
+    def total_current(self, currency_service) -> float:
+        total = self._initial_balance
+        for record in self._records:
+            converted = float(
+                currency_service.convert(record.amount_original, record.currency)
+            )
+            sign = 1.0 if record.signed_amount_kzt() >= 0 else -1.0
+            total += sign * abs(converted)
+        return total
+
+    def fx_difference(self, currency_service) -> float:
+        return self.total_current(currency_service) - self.total_fixed()
 
     def filter_by_period(self, prefix: str) -> "Report":
-        """Return a new Report with records filtered by date prefix."""
         filtered = [r for r in self._records if r.date.startswith(prefix)]
         return Report(filtered, self._initial_balance)
 
     def filter_by_category(self, category: str) -> "Report":
-        """Return a new Report with records filtered by category."""
         filtered = [r for r in self._records if r.category == category]
         return Report(filtered, self._initial_balance)
 
     def grouped_by_category(self) -> Dict[str, "Report"]:
-        groups = {}
+        groups: Dict[str, List[Record]] = {}
         for record in self._records:
             if record.category not in groups:
                 groups[record.category] = []
             groups[record.category].append(record)
-        return {
-            cat: Report(recs, 0.0) for cat, recs in groups.items()
-        }
+        return {cat: Report(recs, 0.0) for cat, recs in groups.items()}
 
     def sorted_by_date(self) -> "Report":
-        """Return a new Report sorted by date."""
         return Report(
             sorted(self._records, key=lambda r: r.date), self._initial_balance
         )
@@ -79,8 +93,6 @@ class Report:
                 year, _ = max(year_months)
             else:
                 year, _ = today.year, today.month
-        else:
-            _ = None
 
         if up_to_month is None:
             months_in_year = [m for y, m in year_months if y == year]
@@ -99,7 +111,9 @@ class Report:
             rec_year, rec_month = parsed
             if rec_year != year or not (1 <= rec_month <= up_to_month):
                 continue
-            income_total, expense_total = aggregates.get((rec_year, rec_month), (0.0, 0.0))
+            income_total, expense_total = aggregates.get(
+                (rec_year, rec_month), (0.0, 0.0)
+            )
             if isinstance(record, IncomeRecord):
                 income_total += record.amount
             else:
@@ -133,16 +147,9 @@ class Report:
         return str(table)
 
     def as_table(self, summary_mode: str = "full") -> str:
-        """Return a string representation of records in table format.
-
-        summary_mode:
-            - "full": show SUBTOTAL + FINAL BALANCE
-            - "total_only": show a single TOTAL row
-        """
         table = PrettyTable()
         table.field_names = ["Date", "Type", "Category", "Amount (KZT)"]
 
-        # Add initial balance row
         if self._initial_balance != 0:
             balance_str = (
                 f"{self._initial_balance:.2f}"
@@ -160,22 +167,21 @@ class Report:
                 record_type = "Mandatory Expense"
             else:
                 record_type = "Expense"
+            amount_value = record.amount
             amount_str = (
-                f"{record.amount:.2f}"
-                if record.amount >= 0
-                else f"({abs(record.amount):.2f})"
+                f"{amount_value:.2f}"
+                if amount_value >= 0
+                else f"({abs(amount_value):.2f})"
             )
             table.add_row([record.date, record_type, record.category, amount_str])
 
-        # Add summary rows
-        records_total = sum(r.signed_amount() for r in self._records)
+        records_total = sum(r.signed_amount_kzt() for r in self._records)
         records_total_str = (
             f"{records_total:.2f}"
             if records_total >= 0
             else f"({abs(records_total):.2f})"
         )
-
-        final_balance = self.total()
+        final_balance = self.total_fixed()
         final_balance_str = (
             f"{final_balance:.2f}"
             if final_balance >= 0
@@ -191,14 +197,12 @@ class Report:
         return str(table)
 
     def to_csv(self, filepath: str) -> None:
-        """Export the report to a CSV file."""
         from utils.csv_utils import report_to_csv
 
         report_to_csv(self, filepath)
 
     @staticmethod
     def from_csv(filepath: str) -> "Report":
-        """Import records from a CSV file and return a new Report."""
         from utils.csv_utils import report_from_csv
 
         return report_from_csv(filepath)

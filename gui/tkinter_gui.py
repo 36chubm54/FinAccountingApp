@@ -21,7 +21,6 @@ from app.use_cases import (
     GenerateReport,
     DeleteRecord,
     DeleteAllRecords,
-    ImportFromCSV,
     CreateMandatoryExpense,
     GetMandatoryExpenses,
     DeleteMandatoryExpense,
@@ -381,6 +380,9 @@ class FinancialApp(tk.Tk):
         tk.Button(btn_frame, text="Delete All", command=delete_all).pack(
             side=tk.LEFT, padx=6
         )
+        tk.Button(btn_frame, text="Refresh", command=self._refresh_list).pack(
+            side=tk.LEFT, padx=6
+        )
 
         # Import controls (reuse existing import handler)
         import_format_var = tk.StringVar(value="CSV")
@@ -433,6 +435,23 @@ class FinancialApp(tk.Tk):
         result_text.config(yscrollcommand=scrollbar.set)
 
         current_report: Dict[str, Optional[Report]] = {"report": None}
+        report_mode_var = tk.StringVar(value="fixed")
+
+        tk.Label(controls, text="Totals mode:").grid(
+            row=0, column=2, sticky="w", padx=(12, 0)
+        )
+        ttk.Radiobutton(
+            controls,
+            text="On fixed rate",
+            variable=report_mode_var,
+            value="fixed",
+        ).grid(row=1, column=2, sticky="w", padx=(12, 0))
+        ttk.Radiobutton(
+            controls,
+            text="On current rate",
+            variable=report_mode_var,
+            value="current",
+        ).grid(row=2, column=2, sticky="w", padx=(12, 0))
 
         def generate():
             report = GenerateReport(self.repository).execute()
@@ -471,19 +490,43 @@ class FinancialApp(tk.Tk):
                 else:
                     groups = report.grouped_by_category()
                     for cat, cat_report in groups.items():
-                        total = cat_report.total()
+                        if report_mode_var.get() == "current":
+                            total = cat_report.total_current(self.currency)
+                        else:
+                            total = cat_report.total_fixed()
                         result_text.insert(tk.END, f"{cat}: {total:.2f} KZT\n")
             elif table_var.get():
                 result_text.insert(tk.END, report.as_table())
             else:
                 initial_balance = self.repository.load_initial_balance()
-                records_total = sum(r.signed_amount() for r in report.records())
-                final_balance = report.total()
+                records_total_fixed = sum(
+                    r.signed_amount_kzt() for r in report.records()
+                )
+                final_balance_fixed = report.total_fixed()
+                final_balance_current = report.total_current(self.currency)
+                fx_diff = report.fx_difference(self.currency)
                 result_text.insert(
                     tk.END, f"Initial Balance: {initial_balance:.2f} KZT\n"
                 )
-                result_text.insert(tk.END, f"Records Total: {records_total:.2f} KZT\n")
-                result_text.insert(tk.END, f"Final Balance: {final_balance:.2f} KZT\n")
+                if report_mode_var.get() == "current":
+                    result_text.insert(
+                        tk.END,
+                        f"Records Total (fixed): {records_total_fixed:.2f} KZT\n",
+                    )
+                    result_text.insert(
+                        tk.END,
+                        f"Final Balance (current rate): {final_balance_current:.2f} KZT\n",
+                    )
+                else:
+                    result_text.insert(
+                        tk.END,
+                        f"Records Total (fixed): {records_total_fixed:.2f} KZT\n",
+                    )
+                    result_text.insert(
+                        tk.END,
+                        f"Final Balance (operation rate): {final_balance_fixed:.2f} KZT\n",
+                    )
+                result_text.insert(tk.END, f"FX Difference: {fx_diff:.2f} KZT\n")
 
             summary_table = report.monthly_income_expense_table(
                 year=summary_year, up_to_month=summary_up_to_month
@@ -572,7 +615,11 @@ class FinancialApp(tk.Tk):
             for i, expense in enumerate(expenses):
                 mand_listbox.insert(
                     tk.END,
-                    f"[{i}] {expense.amount:.2f} KZT - {expense.category} - {expense.description} ({expense.period})",
+                    (
+                        f"[{i}] {expense.amount_original:.2f} {expense.currency} "
+                        f"(={expense.amount_kzt:.2f} KZT) - {expense.category} - "
+                        f"{expense.description} ({expense.period})"
+                    ),
                 )
 
         current_panel: Dict[str, Optional[tk.Frame]] = {"add": None, "report": None}
@@ -632,8 +679,8 @@ class FinancialApp(tk.Tk):
                         return
                     CreateMandatoryExpense(self.repository, self.currency).execute(
                         amount=amount,
-                        currency="KZT",
-                        category="Mandatory",
+                        currency=(currency_entry.get() or "KZT").strip(),
+                        category=(category_entry.get() or "Mandatory").strip(),
                         description=description,
                         period=period,
                     )
@@ -702,8 +749,8 @@ class FinancialApp(tk.Tk):
                         )
                         add_to_report_panel.destroy()
                         current_panel["report"] = None
-                        self._refresh_list()
                         refresh_mandatory()
+                        self._refresh_list()
                         self._refresh_charts()
 
                     else:
@@ -832,6 +879,9 @@ class FinancialApp(tk.Tk):
         tk.Button(btns, text="Add to Report", command=add_to_report_inline).pack(
             side=tk.LEFT, padx=6
         )
+        tk.Button(btns, text="Refresh", command=refresh_mandatory).pack(
+            side=tk.LEFT, padx=6
+        )
         format_var = tk.StringVar(value="CSV")
         tk.OptionMenu(btns, format_var, "CSV", "XLSX", "PDF").pack(side=tk.LEFT, padx=6)
 
@@ -845,21 +895,20 @@ class FinancialApp(tk.Tk):
         self.repository.delete_all()
 
         if fmt == "CSV":
-            importer = ImportFromCSV(self.repository)
-            return importer.execute(filepath)
+            from gui.importers import import_records_from_csv
 
-        # XLSX — lazy import
-        from gui.importers import import_report_from_xlsx
+            records, initial_balance = import_records_from_csv(filepath)
+        elif fmt == "XLSX":
+            from gui.importers import import_records_from_xlsx
 
-        report = import_report_from_xlsx(filepath)
-        self.repository.save_initial_balance(report.initial_balance)
+            records, initial_balance = import_records_from_xlsx(filepath)
+        else:
+            raise ValueError(f"Unsupported format: {fmt}")
 
-        count = 0
-        for record in report.records():
+        self.repository.save_initial_balance(initial_balance)
+        for record in records:
             self.repository.save(record)
-            count += 1
-
-        return count
+        return len(records)
 
     def _import_mandatory_by_format(self, fmt: str, filepath: str) -> int:
         if fmt == "CSV":
@@ -882,8 +931,8 @@ class FinancialApp(tk.Tk):
 
         for expense in expenses:
             create_use_case.execute(
-                amount=expense.amount,
-                currency="KZT",  # leave the assumption explicit
+                amount=expense.amount_original,
+                currency=expense.currency,
                 category=expense.category,
                 description=expense.description,
                 period=expense.period,
@@ -903,21 +952,11 @@ class FinancialApp(tk.Tk):
                 record_type = "Expense"
             self.records_listbox.insert(
                 tk.END,
-                f"[{i}] {record.date} - {record_type} - {record.category} - {record.amount:.2f} KZT",
-            )
-
-        self.records_listbox.delete(0, tk.END)
-        all_records = self.repository.load_all()
-        for i, record in enumerate(all_records):
-            if isinstance(record, IncomeRecord):
-                record_type = "Income"
-            elif isinstance(record, MandatoryExpenseRecord):
-                record_type = "Mandatory Expense"
-            else:
-                record_type = "Expense"
-            self.records_listbox.insert(
-                tk.END,
-                f"[{i}] {record.date} - {record_type} - {record.category} - {record.amount:.2f} KZT",
+                (
+                    f"[{i}] {record.date} - {record_type} - {record.category} - "
+                    f"{record.amount_original:.2f} {record.currency} "
+                    f"(={record.amount_kzt:.2f} KZT)"
+                ),
             )
 
     def _refresh_charts(self) -> None:

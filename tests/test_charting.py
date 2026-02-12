@@ -10,12 +10,12 @@ from utils.charting import (
 
 def test_aggregate_expenses_by_category_counts_expenses_only():
     records = [
-        IncomeRecord(date="2026-01-10", amount=1000.0, category="Salary"),
-        ExpenseRecord(date="2026-01-11", amount=200.0, category="Food"),
-        ExpenseRecord(date="2026-01-12", amount=150.0, category="Food"),
+        IncomeRecord(date="2026-01-10", _amount_init=1000.0, category="Salary"),
+        ExpenseRecord(date="2026-01-11", _amount_init=200.0, category="Food"),
+        ExpenseRecord(date="2026-01-12", _amount_init=150.0, category="Food"),
         MandatoryExpenseRecord(
             date="2026-01-15",
-            amount=300.0,
+            _amount_init=300.0,
             category="Rent",
             description="January rent",
             period="monthly",
@@ -31,10 +31,10 @@ def test_aggregate_expenses_by_category_counts_expenses_only():
 
 def test_aggregate_daily_cashflow_returns_expected_lengths():
     records = [
-        IncomeRecord(date="2026-02-01", amount=100.0, category="Salary"),
-        ExpenseRecord(date="2026-02-01", amount=20.0, category="Food"),
-        ExpenseRecord(date="2026-02-14", amount=30.0, category="Gift"),
-        IncomeRecord(date="2026-03-01", amount=999.0, category="Other"),
+        IncomeRecord(date="2026-02-01", _amount_init=100.0, category="Salary"),
+        ExpenseRecord(date="2026-02-01", _amount_init=20.0, category="Food"),
+        ExpenseRecord(date="2026-02-14", _amount_init=30.0, category="Gift"),
+        IncomeRecord(date="2026-03-01", _amount_init=999.0, category="Other"),
     ]
 
     income, expense = aggregate_daily_cashflow(records, 2026, 2)
@@ -50,10 +50,10 @@ def test_aggregate_daily_cashflow_returns_expected_lengths():
 
 def test_aggregate_monthly_cashflow_groups_by_month():
     records = [
-        IncomeRecord(date="2026-01-10", amount=500.0, category="Salary"),
-        ExpenseRecord(date="2026-01-11", amount=100.0, category="Food"),
-        IncomeRecord(date="2026-02-05", amount=250.0, category="Bonus"),
-        ExpenseRecord(date="2025-12-31", amount=999.0, category="Other"),
+        IncomeRecord(date="2026-01-10", _amount_init=500.0, category="Salary"),
+        ExpenseRecord(date="2026-01-11", _amount_init=100.0, category="Food"),
+        IncomeRecord(date="2026-02-05", _amount_init=250.0, category="Bonus"),
+        ExpenseRecord(date="2025-12-31", _amount_init=999.0, category="Other"),
     ]
 
     income, expense = aggregate_monthly_cashflow(records, 2026)
@@ -68,9 +68,9 @@ def test_aggregate_monthly_cashflow_groups_by_month():
 
 def test_extract_months_and_years():
     records = [
-        IncomeRecord(date="2024-12-31", amount=10.0, category="A"),
-        ExpenseRecord(date="2025-01-01", amount=20.0, category="B"),
-        IncomeRecord(date="2025-02-01", amount=30.0, category="C"),
+        IncomeRecord(date="2024-12-31", _amount_init=10.0, category="A"),
+        ExpenseRecord(date="2025-01-01", _amount_init=20.0, category="B"),
+        IncomeRecord(date="2025-02-01", _amount_init=30.0, category="C"),
     ]
 
     months = extract_months(records)

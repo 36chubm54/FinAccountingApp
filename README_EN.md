@@ -163,10 +163,15 @@ Formats:
 
 Data format:
 
-- Columns: `Date,Type,Category,Amount (KZT)`.
-- `Type`: `Income`, `Expense`, `Mandatory Expense`.
-- The string `Initial Balance` with an empty date is acceptable.
-- The `SUBTOTAL` and `FINAL BALANCE` lines are ignored during import.
+- **CSV/XLSX data (import/export):**  
+  `date,type,category,amount_original,currency,rate_at_operation,amount_kzt,description,period`
+- Legacy import is supported (old files with the `amount` field or the `Amount (KZT)` column).
+- All existing entries are replaced with data from the file.
+
+Important:
+
+- `CSV/XLSX report` and `CSV/XLSX data` are different formats.
+- Report `CSV/XLSX` is read-only by the user and **should not** be used as a data source for import.
 
 ### Data storage
 
@@ -181,19 +186,28 @@ Format:
     {
       "type": "income",
       "date": "2025-01-15",
-      "amount": 350000.0,
+      "amount_original": 700.0,
+      "currency": "USD",
+      "rate_at_operation": 500.0,
+      "amount_kzt": 350000.0,
       "category": "Salary"
     },
     {
       "type": "expense",
       "date": "2025-01-16",
-      "amount": 25000.0,
+      "amount_original": 25000.0,
+      "currency": "KZT",
+      "rate_at_operation": 1.0,
+      "amount_kzt": 25000.0,
       "category": "Products"
     },
     {
       "type": "mandatory_expense",
       "date": "2025-01-20",
-      "amount": 150000.0,
+      "amount_original": 300.0,
+      "currency": "USD",
+      "rate_at_operation": 500.0,
+      "amount_kzt": 150000.0,
       "category": "Mandatory",
       "description": "Monthly rent",
       "period": "monthly"
@@ -202,7 +216,10 @@ Format:
   "mandatory_expenses": [
     {
       "date": "",
-      "amount": 150000.0,
+      "amount_original": 300.0,
+      "currency": "USD",
+      "rate_at_operation": 500.0,
+      "amount_kzt": 150000.0,
       "category": "Mandatory",
       "description": "Monthly rent",
       "period": "monthly"
@@ -237,7 +254,7 @@ The project follows a layered architecture:
 - `infrastructure/` — data storage (JSON repository).
 - `utils/` — import/export and preparation of data for graphs.
 - `gui/` — GUI layer (Tkinter).
-- `web/` is a standalone web application.
+- `web/` — standalone web application.
 
 Data flow for GUI:
 
@@ -253,26 +270,29 @@ Below are the key classes and functions synchronized with the actual code.
 
 `domain/records.py`
 
-- `Record` – base record (abstract class).
-- `IncomeRecord` – income.
-- `ExpenseRecord` – expense.
-- `MandatoryExpenseRecord` – mandatory expense with `description` and `period`.
+- `Record` — base record (abstract class).
+- `IncomeRecord` — income.
+- `ExpenseRecord` — expense.
+- `MandatoryExpenseRecord` — mandatory expense with `description` and `period`.
 
 `domain/currency.py`
 
-- `CurrencyService` – conversion of currencies to base (`KZT`).
+- `CurrencyService` — conversion of currencies to base (`KZT`).
 
 `domain/reports.py`
 
 - `Report(records, initial_balance=0.0)` — report.
-- `total()` — final balance taking into account the initial balance.
-- `filter_by_period(prefix)` – filtering by date prefix.
+- `total_fixed()` — total at the transaction rate (accounting mode).
+- `total_current(currency_service)` — total at the current exchange rate.
+- `fx_difference(currency_service)` — exchange rate difference.
+- `total()` — alias `total_fixed()` for backwards compatibility.
+- `filter_by_period(prefix)` — filtering by date prefix.
 - `filter_by_category(category)` — filtering by category.
 - `grouped_by_category()` — grouping by categories.
-- `monthly_income_expense_rows(year=None, up_to_month=None)` – monthly aggregates.
+- `monthly_income_expense_rows(year=None, up_to_month=None)` — monthly aggregates.
 - `monthly_income_expense_table(year=None, up_to_month=None)` — table by month.
 - `as_table(summary_mode="full"|"total_only")` — tabular output.
-- `to_csv(filepath)` and `from_csv(filepath)` — CSV export/import.
+- `to_csv(filepath)` and `from_csv(filepath)` — report export and backward-compatible import.
 
 `domain/validation.py`
 
@@ -294,7 +314,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `GenerateReport.execute()` → `Report` taking into account the initial balance.
 - `DeleteRecord.execute(index)`.
 - `DeleteAllRecords.execute()`.
-- `ImportFromCSV.execute(filepath)` — import and complete replacement of records.
+- `ImportFromCSV.execute(filepath)` - import and complete replacement of records.
 - `CreateMandatoryExpense.execute(amount, currency, category, description, period)`.
 - `GetMandatoryExpenses.execute()`.
 - `DeleteMandatoryExpense.execute(index)`.
@@ -306,7 +326,7 @@ Below are the key classes and functions synchronized with the actual code.
 `infrastructure/repositories.py`
 
 - `RecordRepository` — repository interface.
-- `JsonFileRecordRepository(file_path="records.json")` - JSON storage.
+- `JsonFileRecordRepository(file_path="records.json")` — JSON storage.
 
 Methods:
 
@@ -325,7 +345,12 @@ Methods:
 
 `gui/tkinter_gui.py`
 
-- `FinancialApp` — basic GUI application class.
+- `FinancialApp` is the main application class with Tkinter.
+- The `Reports` tab supports 2 summary modes:
+  - `According to the course of the operation`
+  - `At the current rate`
+- The exchange rate difference is displayed as a separate line (`FX Difference`).
+- Monthly aggregates and charts are always calculated in fixed mode (`amount_kzt`).
 
 Methods:
 
@@ -355,6 +380,7 @@ Methods:
 
 `gui/importers.py`
 
+- `import_report_from_csv(filepath)`
 - `import_report_from_xlsx(filepath)`
 - `import_mandatory_expenses_from_csv(filepath)`
 - `import_mandatory_expenses_from_xlsx(filepath)`
@@ -362,7 +388,7 @@ Methods:
 `gui/helpers.py`
 
 - `open_in_file_manager(path)`
-- `safe_destroy(window)` — safe destruction of the window.
+- `safe_destroy(window)` — safe destruction of a window.
 - `safe_focus(window)` — safe window focusing.
 
 ### Utils

@@ -12,8 +12,8 @@ from utils.pdf_utils import (
 
 def test_report_pdf_roundtrip():
     records = [
-        IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
-        ExpenseRecord(date="2025-01-02", amount=30.0, category="Food"),
+        IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+        ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food"),
     ]
     report = Report(records, initial_balance=25.0)
 
@@ -29,10 +29,10 @@ def test_report_pdf_roundtrip():
 def test_mandatory_pdf_roundtrip():
     expenses = [
         MandatoryExpenseRecord(
-            date="", amount=12.5, category="Sub", description="d1", period="monthly"
+            date="", _amount_init=12.5, category="Sub", description="d1", period="monthly"
         ),
         MandatoryExpenseRecord(
-            date="", amount=7.75, category="Svc", description="d2", period="yearly"
+            date="", _amount_init=7.75, category="Svc", description="d2", period="yearly"
         ),
     ]
 

@@ -8,8 +8,8 @@ import pytest
 
 def test_to_csv():
     records = [
-        IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
-        ExpenseRecord(date="2025-01-02", amount=30.0, category="Food"),
+        IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+        ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food"),
     ]
     report = Report(records)
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv") as tmp:
@@ -20,17 +20,18 @@ def test_to_csv():
             reader = csv.reader(f)
             rows = list(reader)
         assert rows[0] == ["Date", "Type", "Category", "Amount (KZT)"]
-        assert rows[1] == ["2025-01-01", "Income", "Salary", "100.00"]
-        assert rows[2] == ["2025-01-02", "Expense", "Food", "30.00"]
-        assert rows[3] == ["SUBTOTAL", "", "", "70.00"]
+        assert rows[1] == ["", "", "", "Fixed amounts by operation-time FX rates"]
+        assert rows[2] == ["2025-01-01", "Income", "Salary", "100.00"]
+        assert rows[3] == ["2025-01-02", "Expense", "Food", "30.00"]
+        assert rows[4] == ["SUBTOTAL", "", "", "70.00"]
     finally:
         os.unlink(tmp_path)
 
 
 def test_to_csv_with_initial_balance():
     records = [
-        IncomeRecord(date="2025-01-01", amount=100.0, category="Salary"),
-        ExpenseRecord(date="2025-01-02", amount=30.0, category="Food"),
+        IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+        ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food"),
     ]
     report = Report(records, initial_balance=50.0)
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv") as tmp:
@@ -41,11 +42,12 @@ def test_to_csv_with_initial_balance():
             reader = csv.reader(f)
             rows = list(reader)
         assert rows[0] == ["Date", "Type", "Category", "Amount (KZT)"]
-        assert rows[1] == ["", "Initial Balance", "", "50.00"]
-        assert rows[2] == ["2025-01-01", "Income", "Salary", "100.00"]
-        assert rows[3] == ["2025-01-02", "Expense", "Food", "30.00"]
-        assert rows[4] == ["SUBTOTAL", "", "", "70.00"]
-        assert rows[5] == ["FINAL BALANCE", "", "", "120.00"]
+        assert rows[1] == ["", "", "", "Fixed amounts by operation-time FX rates"]
+        assert rows[2] == ["", "Initial Balance", "", "50.00"]
+        assert rows[3] == ["2025-01-01", "Income", "Salary", "100.00"]
+        assert rows[4] == ["2025-01-02", "Expense", "Food", "30.00"]
+        assert rows[5] == ["SUBTOTAL", "", "", "70.00"]
+        assert rows[6] == ["FINAL BALANCE", "", "", "120.00"]
     finally:
         os.unlink(tmp_path)
 
