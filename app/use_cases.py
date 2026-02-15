@@ -1,4 +1,5 @@
 from domain.records import IncomeRecord, ExpenseRecord, MandatoryExpenseRecord
+from domain.import_policy import ImportPolicy
 from domain.reports import Report
 from infrastructure.repositories import RecordRepository
 from .services import CurrencyService
@@ -88,7 +89,9 @@ class ImportFromCSV:
         """Import records from CSV file, replace all existing records in repository. Returns number of imported records."""
         from utils.csv_utils import import_records_from_csv
 
-        records, initial_balance = import_records_from_csv(filepath)
+        records, initial_balance, _ = import_records_from_csv(
+            filepath, policy=ImportPolicy.FULL_BACKUP
+        )
 
         # Delete all existing records first
         self._repository.delete_all()

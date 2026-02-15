@@ -30,3 +30,8 @@ class TestCurrencyServiceAdapter:
         )  # Empty rates, no currencies supported except base
         with pytest.raises(ValueError, match="Unsupported currency: USD"):
             service.convert(100.0, "USD")
+
+    def test_get_rate(self):
+        service = CurrencyService(rates={"USD": 510.0})
+        assert service.get_rate("USD") == 510.0
+        assert service.get_rate("KZT") == 1.0

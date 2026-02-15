@@ -15,11 +15,6 @@ Graphical and web application for personal financial accounting with multicurren
 
 ---
 
-## 🛠️ Recent Improvements
-
-- Completely redesigned GUI (fewer unnecessary elements, improved navigation and user experience).
-- Minor typing errors have been fixed, checks have been added for None attributes, for the correctness of the font, as well as for the correctness of data entry.
-
 ## 🚀 Quick start
 
 ### System requirements
@@ -67,10 +62,10 @@ After running `python main.py`, a window will open with control tabs and an info
 
 Tabs and actions:
 
-- `Infographics` - displays infographics (pie charts, histograms) with the ability to filter by month/year.
-- `Operations` - adding/deleting records, setting the initial balance.
+- `Infographics` — displays infographics (pie charts, histograms) with the ability to filter by month/year.
+- `Operations` — adding/deleting records, setting the initial balance.
 - `Reports` — report generation, export.
-- `Settings` - management of mandatory expenses.
+- `Settings` — management of mandatory expenses.
 
 Infographics:
 
@@ -96,11 +91,11 @@ The amount is converted into the base currency `KZT` at the current rates of the
 
 1. Open the `Reports` tab.
 2. Enter filters (optional):
-    - `Period` - date prefix (for example, `2025` or `2025-01`).
+    - `Period` — date prefix (for example, `2025` or `2025-01`).
     - `Category` — filter by category.
 3. Enable options:
-    - `Group by category` - grouping by category.
-    - `Display as table` - table format.
+    - `Group by category` — grouping by category.
+    - `Display as table` — table format.
 4. Click `Generate`.
 
 At the bottom, an additional table “Monthly Income/Expense Summary” is displayed for the selected year and months.
@@ -150,7 +145,7 @@ Mandatory expense fields:
 Import/export of mandatory expenses:
 
 - Import: `CSV`, `XLSX`.
-- Export: `CSV`, `XLSX`, `PDF`.
+- Export: `CSV`, `XLSX`.
 
 ### Importing financial records
 
@@ -158,7 +153,7 @@ Import is performed via `Import` in the `Operations` tab.
 
 Formats:
 
-- `CSV`, `XLSX`.
+- `CSV`, `XLSX`, `JSON` (for Full Backup).
 - All existing entries are replaced with data from the file.
 
 Data format:
@@ -172,6 +167,56 @@ Important:
 
 - `CSV/XLSX report` and `CSV/XLSX data` are different formats.
 - Report `CSV/XLSX` is read-only by the user and **should not** be used as a data source for import.
+
+### ImportPolicy
+
+There are 3 modes available for importing records:
+
+- `Full Backup` (`ImportPolicy.FULL_BACKUP`)  
+  Used for full import with a fixed transaction rate. Expected string format:
+  `date,type,category,amount_original,currency,rate_at_operation,amount_kzt,description,period`.
+- `Import Records (Current Rate)` (`ImportPolicy.CURRENT_RATE`)  
+  For each imported line, the rate is taken at the time of import through `CurrencyService.get_rate(currency)`, and `rate_at_operation` and `amount_kzt` are recalculated and fixed again.
+- `Legacy Import` (`ImportPolicy.LEGACY`)  
+  The old `date,type,category,amount` format is automatically migrated to the new one:
+  `currency="KZT"`, `rate_at_operation=1.0`, `amount_kzt=amount`.
+
+All modes perform line-by-line validation and generate a report:
+`(imported, skipped, errors)`.
+
+### Backup
+
+Full backup is implemented in `JSON` format:
+
+- Fields: `initial_balance`, `records`, `mandatory_expenses`.
+- The `Settings` tab contains the following buttons:
+  - `Export Full Backup`
+  - `Import Full Backup`
+
+Backup restores:
+
+- initial balance;
+- all records with fields `amount_original/currency/rate_at_operation/amount_kzt`;
+- all mandatory expenses with `description/period`.
+
+### FX Revaluation
+
+`Report` supports:
+
+- `total_fixed()` — accounting total at the exchange rate on the transaction date;
+- `total_current(currency_service)` — total at the current rate;
+- `fx_difference(currency_service)` — revaluation (`current - fixed`);
+- `total()` — alias for `total_fixed()` (backward compatibility).
+
+### Migration
+
+Rules for migrating old formats:
+
+- legacy `amount` -> `amount_original`;
+- missing currency -> `KZT`;
+- missing course -> `1.0`;
+- missing `amount_kzt` -> calculated according to the import policy;
+- invalid lines are skipped and included in the error list.
 
 ### Data storage
 
@@ -268,16 +313,20 @@ Below are the key classes and functions synchronized with the actual code.
 
 ### Domain
 
+`domain/currency.py`
+
+- `CurrencyService` — conversion of currencies to base (`KZT`).
+
+`domain/import_policy.py`
+
+- `ImportPolicy` — import policy (enum).
+
 `domain/records.py`
 
 - `Record` — base record (abstract class).
 - `IncomeRecord` — income.
 - `ExpenseRecord` — expense.
 - `MandatoryExpenseRecord` — mandatory expense with `description` and `period`.
-
-`domain/currency.py`
-
-- `CurrencyService` — conversion of currencies to base (`KZT`).
 
 `domain/reports.py`
 
@@ -314,7 +363,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `GenerateReport.execute()` → `Report` taking into account the initial balance.
 - `DeleteRecord.execute(index)`.
 - `DeleteAllRecords.execute()`.
-- `ImportFromCSV.execute(filepath)` - import and complete replacement of records.
+- `ImportFromCSV.execute(filepath)` — import and complete replacement of records (CSV, `ImportPolicy.FULL_BACKUP`).
 - `CreateMandatoryExpense.execute(amount, currency, category, description, period)`.
 - `GetMandatoryExpenses.execute()`.
 - `DeleteMandatoryExpense.execute(index)`.
@@ -360,6 +409,8 @@ Methods:
   - `delete_selected()`.
   - `delete_all()`.
   - `import_records()`.
+  - `import_records_data()`.
+  - `export_records_data()`.
 - `reports_tab(parent)`.
   - `generate()`.
   - `export_any()`.
@@ -372,18 +423,23 @@ Methods:
   - `delete_all_mandatory()`.
   - `import_mand()`.
   - `export_mand()`.
+  - `import_backup()`.
+  - `export_backup()`.
 
 `gui/exporters.py`
 
 - `export_report(report, filepath, fmt)`.
 - `export_mandatory_expenses(expenses, filepath, fmt)`.
+- `export_records(records, filepath, fmt, initial_balance)`.
+- `export_full_backup(filepath, initial_balance, records, mandatory_expenses)`.
 
 `gui/importers.py`
 
-- `import_report_from_csv(filepath)`
-- `import_report_from_xlsx(filepath)`
-- `import_mandatory_expenses_from_csv(filepath)`
-- `import_mandatory_expenses_from_xlsx(filepath)`
+- `import_records_from_csv(filepath, policy, currency_service)` -> `(records, initial_balance, (imported, skipped, errors))`
+- `import_records_from_xlsx(filepath, policy, currency_service)` -> `(records, initial_balance, (imported, skipped, errors))`
+- `import_mandatory_expenses_from_csv(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`
+- `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`
+- `import_full_backup(filepath)` -> `(initial_balance, records, mandatory_expenses, (imported, skipped, errors))`
 
 `gui/helpers.py`
 
@@ -393,24 +449,32 @@ Methods:
 
 ### Utils
 
+`utils/backup.py`
+
+- `create_full_backup(filepath, initial_balance, records, mandatory_expenses)`.
+- `load_full_backup(filepath)`.
+
 `utils/csv_utils.py`
 
 - `report_to_csv(report, filepath)`.
 - `report_from_csv(filepath)`.
+- `export_records_to_csv(records, filepath, initial_balance)`.
+- `import_records_from_csv(filepath, policy, currency_service)`.
 - `export_mandatory_expenses_to_csv(expenses, filepath)`.
-- `import_mandatory_expenses_from_csv(filepath)`.
+- `import_mandatory_expenses_from_csv(filepath, policy, currency_service)`.
 
 `utils/excel_utils.py`
 
 - `report_to_xlsx(report, filepath)`.
 - `report_from_xlsx(filepath)`.
+- `export_records_to_xlsx(records, filepath, initial_balance)`.
+- `import_records_from_xlsx(filepath, policy, currency_service)`.
 - `export_mandatory_expenses_to_xlsx(expenses, filepath)`.
-- `import_mandatory_expenses_from_xlsx(filepath)`.
+- `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)`.
 
 `utils/pdf_utils.py`
 
 - `report_to_pdf(report, filepath)`.
-- `export_mandatory_expenses_to_pdf(expenses, filepath)`.
 
 `utils/charting.py`
 
@@ -438,38 +502,41 @@ project/
 ├── LICENSE                     # License
 │
 ├── app/                        # Application layer
-│ ├── __init__.py
-│ ├── services.py               # CurrencyService adapter
-│ └── use_cases.py              # Use cases
+│   ├── __init__.py
+│   ├── services.py               # CurrencyService adapter
+│   └── use_cases.py              # Use cases
 │
 ├── domain/                     # Domain layer
-│ ├── __init__.py
-│ ├── records.py                # Records
-│ ├── reports.py                # Reports
-│ ├── currency.py               # Domain CurrencyService
-│ └── validation.py             # Validation of dates and periods
+│   ├── __init__.py
+│   ├── records.py                # Records
+│   ├── reports.py                # Reports
+│   ├── currency.py               # Domain CurrencyService
+│   └── validation.py             # Validation of dates and periods
 │
 ├── infrastructure/             # Infrastructure layer
-│ └── repositories.py           # JSON repository
+│   └── repositories.py           # JSON repository
 │
 ├── utils/                      # Import/export and graphs
-│ ├── __init__.py
-│ ├── csv_utils.py
-│ ├── excel_utils.py
-│ ├── pdf_utils.py
-│ └── charting.py               # Graphs and Aggregations
+│   ├── __init__.py
+│   ├── backup_utils.py         # Backup of data
+│   ├── import_core.py          # Import validator
+│   ├── charting.py               # Graphs and Aggregations
+│   ├── csv_utils.py
+│   ├── excel_utils.py
+│   └── pdf_utils.py
 │
 ├── gui/                        # GUI layer (Tkinter)
-│ ├── __init__.py
-│ ├── tkinter_gui.py            # Main GUI application
-│ ├── exporters.py              # Export reports and mandatory expenses
-│ ├── importers.py              # Import mandatory expenses
-│ └── helpers.py                # Helpers for GUI
+│   ├── __init__.py
+│   ├── helpers.py                # Helpers for GUI
+│   ├── tkinter_gui.py            # Main GUI application
+│   ├── importers.py              # Import mandatory expenses, records and full backup
+│   └── exporters.py              # Export reports, mandatory expenses and backup
 │
 ├── web/                        # Web application
-│ ├── index.html
-│ ├── styles.css
-│ └── app.js
+│   ├── __init__.py
+│   ├── index.html
+│   ├── styles.css
+│   └── app.js
 │
 └── tests/                      # Tests
     ├── __init__.py
@@ -478,6 +545,7 @@ project/
     ├── test_currency.py
     ├── test_excel.py
     ├── test_gui_exporters_importers.py
+    ├── test_import_policy_and_backup.py
     ├── test_pdf.py
     ├── test_records.py
     ├── test_reports.py

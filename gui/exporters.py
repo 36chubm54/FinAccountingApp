@@ -44,14 +44,60 @@ def export_mandatory_expenses(expenses: Iterable, filepath: str, fmt: str) -> No
             from utils.excel_utils import export_mandatory_expenses_to_xlsx
 
             export_mandatory_expenses_to_xlsx(list(expenses), filepath)
-        elif fmt == "pdf":
-            from utils.pdf_utils import export_mandatory_expenses_to_pdf
-
-            export_mandatory_expenses_to_pdf(list(expenses), filepath)
         else:
             raise ValueError(f"Unsupported export format: {fmt}")
     except Exception:
         logger.exception(
             "Failed to export mandatory expenses to %s (%s)", filepath, fmt
         )
+        raise
+
+
+def export_records(
+    records: Iterable,
+    filepath: str,
+    fmt: str,
+    initial_balance: float = 0.0,
+) -> None:
+    fmt = (fmt or "csv").lower()
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
+        filepath
+    ) else None
+    try:
+        if fmt == "csv":
+            from utils.csv_utils import export_records_to_csv
+
+            export_records_to_csv(list(records), filepath, initial_balance)
+        elif fmt in ("xlsx", "xls"):
+            from utils.excel_utils import export_records_to_xlsx
+
+            export_records_to_xlsx(list(records), filepath, initial_balance)
+        else:
+            raise ValueError(f"Unsupported export format: {fmt}")
+    except Exception:
+        logger.exception("Failed to export records to %s (%s)", filepath, fmt)
+        raise
+
+
+def export_full_backup(
+    filepath: str,
+    *,
+    initial_balance: float,
+    records,
+    mandatory_expenses,
+) -> None:
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
+        filepath
+    ) else None
+    try:
+        from utils.backup_utils import export_full_backup_to_json
+
+        export_full_backup_to_json(
+            filepath,
+            initial_balance=initial_balance,
+            records=list(records),
+            mandatory_expenses=list(mandatory_expenses),
+        )
+    except Exception:
+        logger.exception("Failed to export full backup to %s", filepath)
         raise

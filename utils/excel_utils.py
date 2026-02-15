@@ -1,11 +1,21 @@
-from typing import List, Tuple
-import os
 import gc
+import logging
+import os
+from typing import List, Tuple
 
 from openpyxl import Workbook, load_workbook
 
-from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
+from domain.import_policy import ImportPolicy
+from domain.records import MandatoryExpenseRecord, Record
 from domain.reports import Report
+from utils.import_core import (
+    ImportSummary,
+    norm_key,
+    parse_import_row,
+    record_type_name,
+)
+
+logger = logging.getLogger(__name__)
 
 DATA_HEADERS = [
     "date",
@@ -24,22 +34,12 @@ def _safe_str(value):
     return "" if value is None else str(value)
 
 
-def _as_float(value, default: float = 0.0) -> float:
-    try:
-        raw = str(value).strip()
-        if raw.startswith("(") and raw.endswith(")"):
-            raw = "-" + raw[1:-1]
-        return float(raw)
-    except (TypeError, ValueError):
-        return default
+def _resolve_get_rate(currency_service):
+    if currency_service is None:
+        from app.services import CurrencyService
 
-
-def _record_type_name(record: Record) -> str:
-    if isinstance(record, IncomeRecord):
-        return "income"
-    if isinstance(record, MandatoryExpenseRecord):
-        return "mandatory_expense"
-    return "expense"
+        currency_service = CurrencyService()
+    return currency_service.get_rate
 
 
 def report_to_xlsx(report: Report, filepath: str) -> None:
@@ -55,9 +55,10 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
         ws.append(["", "Initial Balance", "", f"{report.initial_balance:.2f}"])
 
     for record in sorted(report.records(), key=lambda r: r.date):
-        if isinstance(record, IncomeRecord):
+        typ = record_type_name(record)
+        if typ == "income":
             record_type = "Income"
-        elif isinstance(record, MandatoryExpenseRecord):
+        elif typ == "mandatory_expense":
             record_type = "Mandatory Expense"
         else:
             record_type = "Expense"
@@ -84,23 +85,21 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
             summary_ws.append([month_label, f"{income:.2f}", f"{expense:.2f}"])
         summary_ws.append(["TOTAL", f"{total_income:.2f}", f"{total_expense:.2f}"])
 
-    # Create a second, intermediate sheet with grouped tables by category
     try:
         groups = report.grouped_by_category()
     except Exception:
         groups = {}
 
-    # Insert By Category sheet as the second sheet (index=1)
     bycat_ws = wb.create_sheet(title="By Category", index=1)
-    # For each category, write a small table: header, rows, subtotal
     for category, subreport in sorted(groups.items(), key=lambda x: x[0] or ""):
         bycat_ws.append([f"Category: {category}"])
         bycat_ws.append(["Date", "Type", "Amount (KZT)"])
         records_total = 0.0
         for r in sorted(subreport.records(), key=lambda rr: rr.date):
-            if isinstance(r, IncomeRecord):
+            typ = record_type_name(r)
+            if typ == "income":
                 r_type = "Income"
-            elif isinstance(r, MandatoryExpenseRecord):
+            elif typ == "mandatory_expense":
                 r_type = "Mandatory Expense"
             else:
                 r_type = "Expense"
@@ -114,13 +113,22 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
         bycat_ws.append(["SUBTOTAL", "", f"{abs(records_total):.2f}"])
         bycat_ws.append([""])
 
-    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
+        filepath
+    ) else None
     wb.save(filepath)
     try:
         wb.close()
     except Exception:
         pass
     gc.collect()
+
+
+def report_from_xlsx(filepath: str) -> Report:
+    records, initial_balance, _ = import_records_from_xlsx(
+        filepath, ImportPolicy.LEGACY
+    )
+    return Report(records, initial_balance)
 
 
 def export_records_to_xlsx(
@@ -131,12 +139,24 @@ def export_records_to_xlsx(
     if ws is not None:
         ws.title = "Data"
         ws.append(DATA_HEADERS)
-        ws.append(["", "initial_balance", "", initial_balance, "KZT", 1.0, initial_balance, "", ""])
+        ws.append(
+            [
+                "",
+                "initial_balance",
+                "",
+                initial_balance,
+                "KZT",
+                1.0,
+                initial_balance,
+                "",
+                "",
+            ]
+        )
 
     for record in records:
         payload = [
             record.date,
-            _record_type_name(record),
+            record_type_name(record),
             record.category,
             record.amount_original,
             record.currency,
@@ -151,7 +171,9 @@ def export_records_to_xlsx(
         if ws is not None:
             ws.append(payload)
 
-    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
+        filepath
+    ) else None
     wb.save(filepath)
     try:
         wb.close()
@@ -160,109 +182,85 @@ def export_records_to_xlsx(
     gc.collect()
 
 
-def _parse_record_row(raw: dict) -> Record | None:
-    date = _safe_str(raw.get("date", "")).strip()
-    typ = _safe_str(raw.get("type", "")).strip().lower().replace(" ", "_")
-    category = _safe_str(raw.get("category", "General")).strip() or "General"
-
-    if "amount_kzt" in raw and raw.get("amount_kzt") not in (None, ""):
-        amount_kzt = _as_float(raw.get("amount_kzt"), 0.0)
-        amount_original = _as_float(raw.get("amount_original"), amount_kzt)
-        currency = _safe_str(raw.get("currency", "KZT")).strip().upper() or "KZT"
-        rate = _as_float(raw.get("rate_at_operation"), 1.0)
-    else:
-        legacy_amount = _as_float(raw.get("amount", raw.get("amount_(kzt)", 0.0)), 0.0)
-        amount_original = legacy_amount
-        amount_kzt = legacy_amount
-        currency = "KZT"
-        rate = 1.0
-
-    common = {
-        "date": date,
-        "amount_original": amount_original,
-        "currency": currency,
-        "rate_at_operation": rate,
-        "amount_kzt": amount_kzt,
-        "category": category,
-    }
-
-    if typ == "income":
-        return IncomeRecord(**common)
-    if typ == "expense":
-        common["amount_original"] = abs(common["amount_original"])
-        common["amount_kzt"] = abs(common["amount_kzt"])
-        return ExpenseRecord(**common)
-    if typ in {"mandatory_expense", "mandatoryexpense", "mandatory"}:
-        common["amount_original"] = abs(common["amount_original"])
-        common["amount_kzt"] = abs(common["amount_kzt"])
-        period = _safe_str(raw.get("period", "monthly")).strip().lower() or "monthly"
-        if period not in {"daily", "weekly", "monthly", "yearly"}:
-            period = "monthly"
-        return MandatoryExpenseRecord(
-            **common,
-            description=_safe_str(raw.get("description", "")).strip(),
-            period=period,  # type: ignore[arg-type]
-        )
-    return None
-
-
-def import_records_from_xlsx(filepath: str) -> Tuple[List[Record], float]:
+def import_records_from_xlsx(
+    filepath: str,
+    policy: ImportPolicy = ImportPolicy.FULL_BACKUP,
+    currency_service=None,
+) -> Tuple[List[Record], float, ImportSummary]:
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"XLSX file not found: {filepath}")
 
     wb = load_workbook(filepath, data_only=True)
     try:
         if not wb.worksheets:
-            return [], 0.0
+            return [], 0.0, (0, 0, [])
 
         ws = wb.worksheets[0]
         rows = list(ws.iter_rows(values_only=True))
         if not rows:
-            return [], 0.0
+            return [], 0.0, (0, 0, [])
 
-        headers = [_safe_str(h).strip().lower().replace(" ", "_") for h in rows[0]]
+        headers = [norm_key(_safe_str(h)) for h in rows[0]]
         records: List[Record] = []
         initial_balance = 0.0
+        errors: List[str] = []
+        skipped = 0
+        imported = 0
 
-        is_report_xlsx = {"date", "type", "category", "amount_(kzt)"}.issubset(set(headers))
+        is_report_xlsx = {"date", "type", "category", "amount_(kzt)"}.issubset(
+            set(headers)
+        )
+        get_rate = None
+        if policy == ImportPolicy.CURRENT_RATE:
+            get_rate = _resolve_get_rate(currency_service)
 
-        for row in rows[1:]:
+        for idx, row in enumerate(rows[1:], start=2):
             if not row or all(cell is None for cell in row):
                 continue
 
             raw = {headers[i]: row[i] for i in range(min(len(headers), len(row)))}
-            row_type = _safe_str(raw.get("type", "")).strip().lower().replace(" ", "_")
 
             if is_report_xlsx:
-                date_cell = _safe_str(raw.get("date", "")).strip()
-                if date_cell.upper() in {"SUBTOTAL", "FINAL_BALANCE", "FINAL BALANCE"}:
+                date_value = _safe_str(raw.get("date", "")).strip()
+                if date_value.upper() in {"SUBTOTAL", "FINAL_BALANCE", "FINAL BALANCE"}:
                     continue
-                if date_cell == "" and row_type == "initial_balance":
-                    initial_balance = _as_float(raw.get("amount_(kzt)", 0.0), 0.0)
-                    continue
-                raw["amount"] = raw.get("amount_(kzt)", 0.0)
-            elif row_type == "initial_balance":
-                initial_balance = _as_float(
-                    raw.get("amount_original", raw.get("amount_kzt", 0.0)), 0.0
-                )
+                if (
+                    date_value == ""
+                    and norm_key(_safe_str(raw.get("type", "")).strip())
+                    == "initial_balance"
+                ):
+                    raw["type"] = "initial_balance"
+                    raw["amount_original"] = raw.get("amount_(kzt)")
+                else:
+                    raw["amount"] = raw.get("amount_(kzt)")
+
+            record, parsed_balance, error = parse_import_row(
+                raw,
+                row_label=f"row {idx}",
+                policy=policy,
+                get_rate=get_rate,
+                mandatory_only=False,
+            )
+            if error:
+                skipped += 1
+                errors.append(error)
+                logger.warning("XLSX import skipped %s", error)
                 continue
+            if parsed_balance is not None:
+                initial_balance = parsed_balance
+                continue
+            if record is None:
+                continue
+            imported += 1
+            records.append(record)
 
-            record = _parse_record_row(raw)
-            if record is not None:
-                records.append(record)
-
-        return records, initial_balance
+        return records, initial_balance, (imported, skipped, errors)
     finally:
         try:
             wb.close()
         except Exception:
             pass
         gc.collect()
-
-
-def report_from_xlsx(filepath: str) -> Report:
-    records, initial_balance = import_records_from_xlsx(filepath)
-    return Report(records, initial_balance)
 
 
 def export_mandatory_expenses_to_xlsx(
@@ -290,7 +288,9 @@ def export_mandatory_expenses_to_xlsx(
                 ]
             )
 
-    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
+        filepath
+    ) else None
     wb.save(filepath)
     try:
         wb.close()
@@ -299,9 +299,59 @@ def export_mandatory_expenses_to_xlsx(
     gc.collect()
 
 
-def import_mandatory_expenses_from_xlsx(filepath: str) -> List[MandatoryExpenseRecord]:
+def import_mandatory_expenses_from_xlsx(
+    filepath: str,
+    policy: ImportPolicy = ImportPolicy.FULL_BACKUP,
+    currency_service=None,
+) -> Tuple[List[MandatoryExpenseRecord], ImportSummary]:
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"XLSX file not found: {filepath}")
 
-    records, _ = import_records_from_xlsx(filepath)
-    return [r for r in records if isinstance(r, MandatoryExpenseRecord)]
+    wb = load_workbook(filepath, data_only=True)
+    try:
+        if not wb.worksheets:
+            return [], (0, 0, [])
+
+        ws = wb.worksheets[0]
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            return [], (0, 0, [])
+
+        headers = [norm_key(_safe_str(h)) for h in rows[0]]
+        expenses: List[MandatoryExpenseRecord] = []
+        errors: List[str] = []
+        skipped = 0
+        imported = 0
+
+        get_rate = None
+        if policy == ImportPolicy.CURRENT_RATE:
+            get_rate = _resolve_get_rate(currency_service)
+
+        for idx, row in enumerate(rows[1:], start=2):
+            if not row or all(cell is None for cell in row):
+                continue
+            raw = {headers[i]: row[i] for i in range(min(len(headers), len(row)))}
+
+            record, _, error = parse_import_row(
+                raw,
+                row_label=f"row {idx}",
+                policy=policy,
+                get_rate=get_rate,
+                mandatory_only=True,
+            )
+            if error:
+                skipped += 1
+                errors.append(error)
+                logger.warning("Mandatory XLSX import skipped %s", error)
+                continue
+            if isinstance(record, MandatoryExpenseRecord):
+                imported += 1
+                expenses.append(record)
+
+        return expenses, (imported, skipped, errors)
+    finally:
+        try:
+            wb.close()
+        except Exception:
+            pass
+        gc.collect()

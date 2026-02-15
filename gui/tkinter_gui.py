@@ -28,6 +28,7 @@ from app.use_cases import (
     AddMandatoryExpenseToReport,
 )
 from domain.records import IncomeRecord, MandatoryExpenseRecord
+from domain.import_policy import ImportPolicy
 from app.services import CurrencyService
 from domain.reports import Report
 from utils.charting import (
@@ -56,6 +57,10 @@ IMPORT_FORMATS = {
     "XLSX": {
         "ext": ".xlsx",
         "desc": "Excel",
+    },
+    "JSON": {
+        "ext": ".json",
+        "desc": "JSON",
     },
 }
 
@@ -332,7 +337,9 @@ class FinancialApp(tk.Tk):
                 self._refresh_list()
                 self._refresh_charts()
 
-        def import_records():
+        def import_records_data():
+            mode_label = import_mode_var.get()
+            policy = self._import_policy_from_ui(mode_label)
             fmt = import_format_var.get()
             cfg = IMPORT_FORMATS.get(fmt)
             if not cfg:
@@ -347,6 +354,12 @@ class FinancialApp(tk.Tk):
             if not filepath:
                 return
 
+            if policy == ImportPolicy.CURRENT_RATE:
+                messagebox.showwarning(
+                    "Current Rate Import",
+                    "For CURRENT_RATE mode, exchange rates will be fixed at import time.",
+                )
+
             if not messagebox.askyesno(
                 "Confirm Import",
                 f"Are you sure you want to import from file '{filepath}'? This will replace all existing records.",
@@ -354,10 +367,19 @@ class FinancialApp(tk.Tk):
                 return
 
             try:
-                imported_count = self._import_record_by_format(fmt, filepath)
+                imported_count, skipped_count, errors = self._import_record_by_format(
+                    fmt, filepath, policy
+                )
+                details = ""
+                if skipped_count:
+                    details = (
+                        f"\nSkipped: {skipped_count} rows."
+                        f"\nFirst errors:\n- " + "\n- ".join(errors[:5])
+                    )
                 messagebox.showinfo(
                     "Success",
-                    f"Successfully imported {imported_count} records from {cfg['desc']} file.\nAll existing records have been replaced.",
+                    f"Successfully imported {imported_count} records from {cfg['desc']} file.\nAll existing records have been replaced."
+                    + details,
                 )
                 self._refresh_list()
                 self._refresh_charts()
@@ -370,6 +392,37 @@ class FinancialApp(tk.Tk):
                 messagebox.showerror(
                     "Error", f"Failed to import {cfg['desc']}: {str(e)}"
                 )
+
+        def export_records_data():
+            fmt = import_format_var.get()
+            cfg = IMPORT_FORMATS.get(fmt)
+            if not cfg or fmt == "JSON":
+                messagebox.showerror("Error", "Unsupported export format for records.")
+                return
+            records = self.repository.load_all()
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=cfg["ext"],
+                filetypes=[
+                    (f"{cfg['desc']} files", f"*{cfg['ext']}"),
+                    ("All files", "*.*"),
+                ],
+                title=f"Save records as {cfg['desc']}",
+            )
+            if not filepath:
+                return
+            try:
+                from gui.exporters import export_records
+
+                export_records(
+                    records,
+                    filepath,
+                    fmt.lower(),
+                    initial_balance=self.repository.load_initial_balance(),
+                )
+                messagebox.showinfo("Success", f"Records exported to {filepath}")
+                open_in_file_manager(os.path.dirname(filepath))
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to export records: {str(e)}")
 
         btn_frame = tk.Frame(list_frame)
         btn_frame.grid(row=1, column=0, columnspan=2, pady=6)
@@ -385,11 +438,22 @@ class FinancialApp(tk.Tk):
         )
 
         # Import controls (reuse existing import handler)
+        import_mode_var = tk.StringVar(value="Import Records (Current Rate)")
+        tk.OptionMenu(
+            btn_frame,
+            import_mode_var,
+            "Full Backup",
+            "Import Records (Current Rate)",
+            "Legacy Import",
+        ).pack(side=tk.LEFT, padx=6)
         import_format_var = tk.StringVar(value="CSV")
         tk.OptionMenu(btn_frame, import_format_var, "CSV", "XLSX").pack(
             side=tk.LEFT, padx=6
         )
-        tk.Button(btn_frame, text="Import", command=import_records).pack(
+        tk.Button(btn_frame, text="Import", command=import_records_data).pack(
+            side=tk.LEFT, padx=6
+        )
+        tk.Button(btn_frame, text="Export Data", command=export_records_data).pack(
             side=tk.LEFT, padx=6
         )
 
@@ -829,12 +893,21 @@ class FinancialApp(tk.Tk):
                 return
 
             try:
-                imported_count = self._import_mandatory_by_format(fmt, filepath)
+                imported_count, skipped_count, errors = (
+                    self._import_mandatory_by_format(fmt, filepath)
+                )
+                details = ""
+                if skipped_count:
+                    details = (
+                        f"\nSkipped: {skipped_count} rows."
+                        f"\nFirst errors:\n- " + "\n- ".join(errors[:5])
+                    )
 
                 messagebox.showinfo(
                     "Success",
                     f"Successfully imported {imported_count} mandatory expenses from "
-                    f"{cfg['desc']} file.\nAll existing mandatory expenses have been replaced.",
+                    f"{cfg['desc']} file.\nAll existing mandatory expenses have been replaced."
+                    + details,
                 )
                 refresh_mandatory()
                 self._refresh_charts()
@@ -883,43 +956,144 @@ class FinancialApp(tk.Tk):
             side=tk.LEFT, padx=6
         )
         format_var = tk.StringVar(value="CSV")
-        tk.OptionMenu(btns, format_var, "CSV", "XLSX", "PDF").pack(side=tk.LEFT, padx=6)
+        tk.OptionMenu(btns, format_var, "CSV", "XLSX").pack(side=tk.LEFT, padx=6)
 
         tk.Button(btns, text="Import", command=import_mand).pack(side=tk.LEFT, padx=6)
         tk.Button(btns, text="Export", command=export_mand).pack(side=tk.LEFT, padx=6)
 
+        backup_frame = tk.LabelFrame(parent, text="Backup (JSON)")
+        backup_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
+
+        def import_backup():
+            filepath = filedialog.askopenfilename(
+                defaultextension=".json",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                title="Import Full Backup",
+            )
+            if not filepath:
+                return
+            if not messagebox.askyesno(
+                "Confirm Backup Import",
+                "This will replace all records, mandatory expenses and initial balance. Continue?",
+            ):
+                return
+            try:
+                imported, skipped, errors = self._import_record_by_format(
+                    "JSON", filepath, ImportPolicy.FULL_BACKUP
+                )
+                details = ""
+                if skipped:
+                    details = f"\nSkipped: {skipped}\n- " + "\n- ".join(errors[:5])
+                messagebox.showinfo(
+                    "Success",
+                    f"Backup imported. Imported entities: {imported}.{details}",
+                )
+                balance_entry.delete(0, tk.END)
+                balance_entry.insert(0, str(current_balance))
+                refresh_mandatory()
+                self._refresh_list()
+                self._refresh_charts()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to import backup: {str(e)}")
+
+        def export_backup():
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=".json",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                title="Export Full Backup",
+            )
+            if not filepath:
+                return
+            try:
+                from gui.exporters import export_full_backup
+
+                export_full_backup(
+                    filepath,
+                    initial_balance=self.repository.load_initial_balance(),
+                    records=self.repository.load_all(),
+                    mandatory_expenses=self.repository.load_mandatory_expenses(),
+                )
+                messagebox.showinfo("Success", f"Full backup exported to {filepath}")
+                open_in_file_manager(os.path.dirname(filepath))
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to export backup: {str(e)}")
+
+        tk.Button(backup_frame, text="Export Full Backup", command=export_backup).pack(
+            side=tk.LEFT, padx=6, pady=6
+        )
+        tk.Button(backup_frame, text="Import Full Backup", command=import_backup).pack(
+            side=tk.LEFT, padx=6, pady=6
+        )
+
         # Initial refresh
         refresh_mandatory()
 
-    def _import_record_by_format(self, fmt: str, filepath: str) -> int:
+    def _import_policy_from_ui(self, mode_label: str) -> ImportPolicy:
+        if mode_label == "Full Backup":
+            return ImportPolicy.FULL_BACKUP
+        if mode_label == "Legacy Import":
+            return ImportPolicy.LEGACY
+        return ImportPolicy.CURRENT_RATE
+
+    def _import_record_by_format(
+        self, fmt: str, filepath: str, policy: ImportPolicy
+    ) -> tuple[int, int, list[str]]:
         self.repository.delete_all()
 
         if fmt == "CSV":
             from gui.importers import import_records_from_csv
 
-            records, initial_balance = import_records_from_csv(filepath)
+            records, initial_balance, summary = import_records_from_csv(
+                filepath, policy=policy, currency_service=self.currency
+            )
         elif fmt == "XLSX":
             from gui.importers import import_records_from_xlsx
 
-            records, initial_balance = import_records_from_xlsx(filepath)
+            records, initial_balance, summary = import_records_from_xlsx(
+                filepath, policy=policy, currency_service=self.currency
+            )
+        elif fmt == "JSON":
+            from gui.importers import import_full_backup
+
+            # Full backup import replaces both records and mandatory expenses.
+            DeleteAllMandatoryExpenses(self.repository).execute()
+            (
+                initial_balance,
+                records,
+                mandatory_expenses,
+                summary,
+            ) = import_full_backup(filepath)
+            for expense in mandatory_expenses:
+                self.repository.save_mandatory_expense(expense)
         else:
             raise ValueError(f"Unsupported format: {fmt}")
 
         self.repository.save_initial_balance(initial_balance)
         for record in records:
             self.repository.save(record)
-        return len(records)
+        imported, skipped, errors = summary
+        return imported, skipped, errors
 
-    def _import_mandatory_by_format(self, fmt: str, filepath: str) -> int:
+    def _import_mandatory_by_format(
+        self, fmt: str, filepath: str
+    ) -> tuple[int, int, list[str]]:
         if fmt == "CSV":
             from gui.importers import import_mandatory_expenses_from_csv
 
-            expenses = import_mandatory_expenses_from_csv(filepath)
+            expenses, summary = import_mandatory_expenses_from_csv(
+                filepath,
+                policy=ImportPolicy.FULL_BACKUP,
+                currency_service=self.currency,
+            )
 
         elif fmt == "XLSX":
             from gui.importers import import_mandatory_expenses_from_xlsx
 
-            expenses = import_mandatory_expenses_from_xlsx(filepath)
+            expenses, summary = import_mandatory_expenses_from_xlsx(
+                filepath,
+                policy=ImportPolicy.FULL_BACKUP,
+                currency_service=self.currency,
+            )
 
         else:
             raise ValueError(f"Unsupported format: {fmt}")
@@ -938,7 +1112,8 @@ class FinancialApp(tk.Tk):
                 period=expense.period,
             )
 
-        return len(expenses)
+        imported, skipped, errors = summary
+        return imported, skipped, errors
 
     def _refresh_list(self):
         self.records_listbox.delete(0, tk.END)

@@ -15,11 +15,6 @@
 
 ---
 
-## 🛠️ Недавние улучшения
-
-- Полностью переработанный GUI (меньше лишних элементов, улучшена навигация и пользовательский опыт).
-- Исправлены минорные ошибки типизации, добавлены проверки на атрибуты None, на корректность шрифта, а также на корректность ввода данных.
-
 ## 🚀 Быстрый старт
 
 ### Системные требования
@@ -150,7 +145,7 @@ python main.py
 Импорт/экспорт обязательных расходов:
 
 - Импорт: `CSV`, `XLSX`.
-- Экспорт: `CSV`, `XLSX`, `PDF`.
+- Экспорт: `CSV`, `XLSX`.
 
 ### Импорт финансовых записей
 
@@ -158,7 +153,7 @@ python main.py
 
 Форматы:
 
-- `CSV`, `XLSX`.
+- `CSV`, `XLSX`, `JSON` (для Full Backup).
 - Все существующие записи заменяются данными из файла.
 
 Формат данных:
@@ -172,6 +167,56 @@ python main.py
 
 - `CSV/XLSX отчёта` и `CSV/XLSX данных` — это разные форматы.
 - `CSV/XLSX отчёта` используется только для чтения пользователем и **не должен** использоваться как источник данных для импорта.
+
+### ImportPolicy
+
+Для импорта записей доступны 3 режима:
+
+- `Full Backup` (`ImportPolicy.FULL_BACKUP`)  
+  Используется для полного импорта с фиксированным курсом операции. Ожидаемый формат строк:
+  `date,type,category,amount_original,currency,rate_at_operation,amount_kzt,description,period`.
+- `Import Records (Current Rate)` (`ImportPolicy.CURRENT_RATE`)  
+  Для каждой импортируемой строки курс берётся на момент импорта через `CurrencyService.get_rate(currency)`, а `rate_at_operation` и `amount_kzt` пересчитываются и фиксируются заново.
+- `Legacy Import` (`ImportPolicy.LEGACY`)  
+  Старый формат `date,type,category,amount` автоматически мигрируется в новый:
+  `currency="KZT"`, `rate_at_operation=1.0`, `amount_kzt=amount`.
+
+Все режимы выполняют построчную валидацию и формируют отчёт:
+`(imported, skipped, errors)`.
+
+### Backup
+
+Полный backup реализован в формате `JSON`:
+
+- Поля: `initial_balance`, `records`, `mandatory_expenses`.
+- Вкладка `Settings` содержит кнопки:
+  - `Export Full Backup`
+  - `Import Full Backup`
+
+Backup восстанавливает:
+
+- начальный баланс;
+- все записи с полями `amount_original/currency/rate_at_operation/amount_kzt`;
+- все обязательные расходы с `description/period`.
+
+### FX Revaluation
+
+`Report` поддерживает:
+
+- `total_fixed()` — бухгалтерский итог по курсу на дату операции;
+- `total_current(currency_service)` — итог по текущему курсу;
+- `fx_difference(currency_service)` — переоценка (`current - fixed`);
+- `total()` — alias для `total_fixed()` (backward compatibility).
+
+### Migration
+
+Правила миграции старых форматов:
+
+- legacy `amount` -> `amount_original`;
+- отсутствующая валюта -> `KZT`;
+- отсутствующий курс -> `1.0`;
+- отсутствующий `amount_kzt` -> вычисляется по политике импорта;
+- недопустимые строки пропускаются и попадают в список ошибок.
 
 ### Хранение данных
 
@@ -268,16 +313,20 @@ python main.py
 
 ### Domain
 
+`domain/currency.py`
+
+- `CurrencyService` — конвертация валют в базовую (`KZT`).
+
+`domain/import_policy.py`
+
+- `ImportPolicy` — import policy (enum).
+
 `domain/records.py`
 
 - `Record` — базовая запись (абстрактный класс).
 - `IncomeRecord` — доход.
 - `ExpenseRecord` — расход.
 - `MandatoryExpenseRecord` — обязательный расход с `description` и `period`.
-
-`domain/currency.py`
-
-- `CurrencyService` — конвертация валют в базовую (`KZT`).
 
 `domain/reports.py`
 
@@ -314,7 +363,7 @@ python main.py
 - `GenerateReport.execute()` → `Report` с учётом начального остатка.
 - `DeleteRecord.execute(index)`.
 - `DeleteAllRecords.execute()`.
-- `ImportFromCSV.execute(filepath)` — импорт и полная замена записей.
+- `ImportFromCSV.execute(filepath)` — импорт и полная замена записей (CSV, `ImportPolicy.FULL_BACKUP`).
 - `CreateMandatoryExpense.execute(amount, currency, category, description, period)`.
 - `GetMandatoryExpenses.execute()`.
 - `DeleteMandatoryExpense.execute(index)`.
@@ -360,6 +409,8 @@ python main.py
   - `delete_selected()`.
   - `delete_all()`.
   - `import_records()`.
+  - `import_records_data()`.
+  - `export_records_data()`.
 - `reports_tab(parent)`.
   - `generate()`.
   - `export_any()`.
@@ -372,18 +423,23 @@ python main.py
   - `delete_all_mandatory()`.
   - `import_mand()`.
   - `export_mand()`.
+  - `import_backup()`.
+  - `export_backup()`.
 
 `gui/exporters.py`
 
 - `export_report(report, filepath, fmt)`.
 - `export_mandatory_expenses(expenses, filepath, fmt)`.
+- `export_records(records, filepath, fmt, initial_balance)`.
+- `export_full_backup(filepath, initial_balance, records, mandatory_expenses)`.
 
 `gui/importers.py`
 
-- `import_report_from_csv(filepath)`
-- `import_report_from_xlsx(filepath)`
-- `import_mandatory_expenses_from_csv(filepath)`
-- `import_mandatory_expenses_from_xlsx(filepath)`
+- `import_records_from_csv(filepath, policy, currency_service)` -> `(records, initial_balance, (imported, skipped, errors))`
+- `import_records_from_xlsx(filepath, policy, currency_service)` -> `(records, initial_balance, (imported, skipped, errors))`
+- `import_mandatory_expenses_from_csv(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`
+- `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`
+- `import_full_backup(filepath)` -> `(initial_balance, records, mandatory_expenses, (imported, skipped, errors))`
 
 `gui/helpers.py`
 
@@ -393,24 +449,32 @@ python main.py
 
 ### Utils
 
+`utils/backup.py`
+
+- `create_full_backup(filepath, initial_balance, records, mandatory_expenses)`.
+- `load_full_backup(filepath)`.
+
 `utils/csv_utils.py`
 
 - `report_to_csv(report, filepath)`.
 - `report_from_csv(filepath)`.
+- `export_records_to_csv(records, filepath, initial_balance)`.
+- `import_records_from_csv(filepath, policy, currency_service)`.
 - `export_mandatory_expenses_to_csv(expenses, filepath)`.
-- `import_mandatory_expenses_from_csv(filepath)`.
+- `import_mandatory_expenses_from_csv(filepath, policy, currency_service)`.
 
 `utils/excel_utils.py`
 
 - `report_to_xlsx(report, filepath)`.
 - `report_from_xlsx(filepath)`.
+- `export_records_to_xlsx(records, filepath, initial_balance)`.
+- `import_records_from_xlsx(filepath, policy, currency_service)`.
 - `export_mandatory_expenses_to_xlsx(expenses, filepath)`.
-- `import_mandatory_expenses_from_xlsx(filepath)`.
+- `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)`.
 
 `utils/pdf_utils.py`
 
 - `report_to_pdf(report, filepath)`.
-- `export_mandatory_expenses_to_pdf(expenses, filepath)`.
 
 `utils/charting.py`
 
@@ -447,24 +511,27 @@ project/
 │   ├── records.py              # Записи
 │   ├── reports.py              # Отчёты
 │   ├── currency.py             # Доменный CurrencyService
-│   └── validation.py           # Валидация дат и периодов
+│   ├── validation.py           # Валидация дат и периодов
+│   └── import_policy.py        # Политики импорта
 │
 ├── infrastructure/             # Infrastructure layer
 │   └── repositories.py         # JSON-репозиторий
 │
 ├── utils/                      # Импорт/экспорт и графики
 │   ├── __init__.py
+│   ├── backup_utils.py         # Резервное копирование данных
+│   ├── import_core.py          # Валидатор импорта
+│   ├── charting.py             # Графики и агрегации
 │   ├── csv_utils.py
 │   ├── excel_utils.py
-│   ├── pdf_utils.py
-│   └── charting.py             # Графики и агрегации
+│   └── pdf_utils.py
 │
 ├── gui/                        # GUI слой (Tkinter)
 │   ├── __init__.py
 │   ├── tkinter_gui.py          # Основное GUI-приложение
-│   ├── exporters.py            # Экспорт отчётов и обязательных расходов
-│   ├── importers.py            # Импорт обязательных расходов
-│   └── helpers.py              # Помощники для GUI
+│   ├── helpers.py              # Помощники для GUI
+│   ├── importers.py            # Импорт записей, обязательных расходов и backup
+│   └── exporters.py            # Экспорт отчётов, записей, обязательных расходов и backup
 │
 ├── web/                        # Веб-приложение
 │   ├── index.html
@@ -478,6 +545,7 @@ project/
     ├── test_currency.py
     ├── test_excel.py
     ├── test_gui_exporters_importers.py
+    ├── test_import_policy_and_backup.py
     ├── test_pdf.py
     ├── test_records.py
     ├── test_reports.py

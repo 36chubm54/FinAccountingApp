@@ -8,5 +8,4 @@ __pycache__/
 *.csv
 *.xlsx
 *.pdf
-records.json
-currency_rates.json
+*.json

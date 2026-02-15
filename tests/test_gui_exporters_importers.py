@@ -79,12 +79,12 @@ def test_export_and_import_mandatory_expenses_csv_xlsx():
     try:
         exporters.export_mandatory_expenses(expenses, str(csv_path), "csv")
         assert csv_path.exists()
-        data = importers.import_mandatory_expenses_from_csv(str(csv_path))
+        data, _ = importers.import_mandatory_expenses_from_csv(str(csv_path))
         assert len(data) == len(expenses)
 
         exporters.export_mandatory_expenses(expenses, str(xlsx_path), "xlsx")
         assert xlsx_path.exists()
-        data2 = importers.import_mandatory_expenses_from_xlsx(str(xlsx_path))
+        data2, _ = importers.import_mandatory_expenses_from_xlsx(str(xlsx_path))
         assert len(data2) == len(expenses)
     finally:
         for p in (csv_path, xlsx_path):
@@ -100,17 +100,17 @@ def test_import_records_from_csv_xlsx_roundtrip():
         csv_path = Path(csv_tmp.name)
 
     try:
-        from utils.excel_utils import report_to_xlsx
+        from utils.excel_utils import export_records_to_xlsx
 
-        report_to_xlsx(report, str(xlsx_path))
-        records_xlsx, initial_balance_xlsx = importers.import_records_from_xlsx(str(xlsx_path))
+        export_records_to_xlsx(report.records(), str(xlsx_path), report.initial_balance)
+        records_xlsx, initial_balance_xlsx, _ = importers.import_records_from_xlsx(str(xlsx_path))
         assert len(records_xlsx) == len(report.records())
         assert initial_balance_xlsx == report.initial_balance
 
-        from utils.csv_utils import report_to_csv
+        from utils.csv_utils import export_records_to_csv
 
-        report_to_csv(report, str(csv_path))
-        records_csv, initial_balance_csv = importers.import_records_from_csv(str(csv_path))
+        export_records_to_csv(report.records(), str(csv_path), report.initial_balance)
+        records_csv, initial_balance_csv, _ = importers.import_records_from_csv(str(csv_path))
         assert len(records_csv) == len(report.records())
         assert initial_balance_csv == report.initial_balance
     finally:

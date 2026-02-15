@@ -1,10 +1,19 @@
 import csv
+import logging
 import os
 from typing import List, Tuple
 
-from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
+from domain.import_policy import ImportPolicy
+from domain.records import MandatoryExpenseRecord, Record
 from domain.reports import Report
+from utils.import_core import (
+    ImportSummary,
+    norm_key,
+    parse_import_row,
+    record_type_name,
+)
 
+logger = logging.getLogger(__name__)
 
 REPORT_HEADERS = ["Date", "Type", "Category", "Amount (KZT)"]
 DATA_HEADERS = [
@@ -20,88 +29,12 @@ DATA_HEADERS = [
 ]
 
 
-def _norm_key(value: str) -> str:
-    return value.strip().lower().replace(" ", "_")
+def _resolve_get_rate(currency_service):
+    if currency_service is None:
+        from app.services import CurrencyService
 
-
-def _as_float(value, default: float = 0.0) -> float:
-    try:
-        raw = str(value).strip()
-        if raw.startswith("(") and raw.endswith(")"):
-            raw = "-" + raw[1:-1]
-        return float(raw)
-    except (TypeError, ValueError):
-        return default
-
-
-def _safe_type(value: str) -> str:
-    normalized = _norm_key(value)
-    if normalized in {"income", "expense", "mandatory_expense"}:
-        return normalized
-    if normalized in {"mandatory_expense_record", "mandatory_expenses"}:
-        return "mandatory_expense"
-    if normalized in {"mandatory", "mandatoryexpense", "mandatory_expense"}:
-        return "mandatory_expense"
-    return normalized
-
-
-def _record_type_name(record: Record) -> str:
-    if isinstance(record, IncomeRecord):
-        return "income"
-    if isinstance(record, MandatoryExpenseRecord):
-        return "mandatory_expense"
-    return "expense"
-
-
-def _parse_data_row(row: dict) -> Record | None:
-    row_lc = {_norm_key(str(k)): v for k, v in row.items()}
-
-    date = str(row_lc.get("date", "") or "")
-    record_type = _safe_type(str(row_lc.get("type", "") or ""))
-    category = str(row_lc.get("category", "General") or "General")
-
-    if "amount_kzt" in row_lc:
-        amount_kzt = _as_float(row_lc.get("amount_kzt"), 0.0)
-        amount_original = _as_float(row_lc.get("amount_original"), amount_kzt)
-        currency = str(row_lc.get("currency", "KZT") or "KZT").upper()
-        rate = _as_float(row_lc.get("rate_at_operation"), 1.0)
-    else:
-        legacy_amount = _as_float(
-            row_lc.get("amount", row_lc.get("amount_(kzt)", row_lc.get("amount_kzt", 0.0))),
-            0.0,
-        )
-        amount_original = legacy_amount
-        amount_kzt = legacy_amount
-        currency = "KZT"
-        rate = 1.0
-
-    common = {
-        "date": date,
-        "amount_original": amount_original,
-        "currency": currency,
-        "rate_at_operation": rate,
-        "amount_kzt": amount_kzt,
-        "category": category,
-    }
-
-    if record_type == "income":
-        return IncomeRecord(**common)
-    if record_type == "expense":
-        common["amount_original"] = abs(common["amount_original"])
-        common["amount_kzt"] = abs(common["amount_kzt"])
-        return ExpenseRecord(**common)
-    if record_type in {"mandatory_expense", "mandatory expense"}:
-        common["amount_original"] = abs(common["amount_original"])
-        common["amount_kzt"] = abs(common["amount_kzt"])
-        period = str(row_lc.get("period", "monthly") or "monthly").lower()
-        if period not in {"daily", "weekly", "monthly", "yearly"}:
-            period = "monthly"
-        return MandatoryExpenseRecord(
-            **common,
-            description=str(row_lc.get("description", "") or ""),
-            period=period,  # type: ignore[arg-type]
-        )
-    return None
+        currency_service = CurrencyService()
+    return currency_service.get_rate
 
 
 def report_to_csv(report: Report, filepath: str) -> None:
@@ -113,12 +46,14 @@ def report_to_csv(report: Report, filepath: str) -> None:
         writer.writerow(["", "", "", "Fixed amounts by operation-time FX rates"])
 
         if report.initial_balance != 0:
-            writer.writerow(["", "Initial Balance", "", f"{report.initial_balance:.2f}"])
+            writer.writerow(
+                ["", "Initial Balance", "", f"{report.initial_balance:.2f}"]
+            )
 
         for record in sorted_records:
-            if isinstance(record, IncomeRecord):
+            if record_type_name(record) == "income":
                 record_type = "Income"
-            elif isinstance(record, MandatoryExpenseRecord):
+            elif record_type_name(record) == "mandatory_expense":
                 record_type = "Mandatory Expense"
             else:
                 record_type = "Expense"
@@ -129,6 +64,12 @@ def report_to_csv(report: Report, filepath: str) -> None:
         records_total = sum(r.signed_amount_kzt() for r in report.records())
         writer.writerow(["SUBTOTAL", "", "", f"{records_total:.2f}"])
         writer.writerow(["FINAL BALANCE", "", "", f"{report.total_fixed():.2f}"])
+
+
+def report_from_csv(filepath: str) -> Report:
+    """Backward-compatible helper. Prefers data CSV and supports legacy report CSV."""
+    records, initial_balance, _ = import_records_from_csv(filepath, ImportPolicy.LEGACY)
+    return Report(records, initial_balance)
 
 
 def export_records_to_csv(
@@ -155,7 +96,7 @@ def export_records_to_csv(
         for record in records:
             payload = {
                 "date": record.date,
-                "type": _record_type_name(record),
+                "type": record_type_name(record),
                 "category": record.category,
                 "amount_original": record.amount_original,
                 "currency": record.currency,
@@ -170,59 +111,75 @@ def export_records_to_csv(
             writer.writerow(payload)
 
 
-def import_records_from_csv(filepath: str) -> Tuple[List[Record], float]:
-    """Import full data model from CSV. Supports legacy CSV with `amount` only."""
+def import_records_from_csv(
+    filepath: str,
+    policy: ImportPolicy = ImportPolicy.FULL_BACKUP,
+    currency_service=None,
+) -> Tuple[List[Record], float, ImportSummary]:
+    """Import full data model from CSV with validation and per-row error report."""
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"CSV file not found: {filepath}")
 
     records: List[Record] = []
     initial_balance = 0.0
+    errors: List[str] = []
+    skipped = 0
+    imported = 0
+
+    get_rate = None
+    if policy == ImportPolicy.CURRENT_RATE:
+        get_rate = _resolve_get_rate(currency_service)
 
     with open(filepath, "r", newline="", encoding="utf-8") as csvfile:
         reader = csv.DictReader(csvfile)
         if not reader.fieldnames:
-            return records, initial_balance
+            return records, initial_balance, (0, 0, [])
 
-        normalized_headers = {_norm_key(h) for h in reader.fieldnames if h}
+        normalized_headers = {norm_key(h) for h in reader.fieldnames if h}
         is_report_csv = {"date", "type", "category", "amount_(kzt)"}.issubset(
             normalized_headers
         ) and "amount_original" not in normalized_headers
 
-        for row in reader:
-            row_lc = {_norm_key(str(k)): v for k, v in row.items()}
+        for idx, row in enumerate(reader, start=2):
+            row_lc = {norm_key(str(k)): v for k, v in row.items()}
             if not any(str(v or "").strip() for v in row_lc.values()):
                 continue
 
-            row_type = _safe_type(str(row_lc.get("type", "") or "")).lower()
-
             if is_report_csv:
-                date = str(row_lc.get("date", "") or "")
-                if date.upper() in {"SUBTOTAL", "FINAL BALANCE"}:
+                date_value = str(row_lc.get("date", "") or "").strip()
+                if date_value.upper() in {"SUBTOTAL", "FINAL BALANCE"}:
                     continue
                 if (
-                    date.strip() == ""
-                    and str(row_lc.get("type", "")).strip().lower() == "initial balance"
+                    date_value == ""
+                    and str(row_lc.get("type", "") or "").strip().lower()
+                    == "initial balance"
                 ):
-                    initial_balance = _as_float(row_lc.get("amount_(kzt)", 0.0), 0.0)
-                    continue
-                row_lc["amount"] = row_lc.get("amount_(kzt)", 0.0)
-            elif row_type == "initial_balance":
-                initial_balance = _as_float(
-                    row_lc.get("amount_original", row_lc.get("amount_kzt", 0.0)), 0.0
-                )
+                    row_lc["type"] = "initial_balance"
+                    row_lc["amount_original"] = row_lc.get("amount_(kzt)")
+                else:
+                    row_lc["amount"] = row_lc.get("amount_(kzt)")
+
+            record, parsed_balance, error = parse_import_row(
+                row_lc,
+                row_label=f"row {idx}",
+                policy=policy,
+                get_rate=get_rate,
+                mandatory_only=False,
+            )
+            if error:
+                skipped += 1
+                errors.append(error)
+                logger.warning("CSV import skipped %s", error)
                 continue
+            if parsed_balance is not None:
+                initial_balance = parsed_balance
+                continue
+            if record is None:
+                continue
+            imported += 1
+            records.append(record)
 
-            record = _parse_data_row(row_lc)
-            if record is not None:
-                records.append(record)
-
-    return records, initial_balance
-
-
-def report_from_csv(filepath: str) -> Report:
-    """Backward-compatible helper. Prefers data CSV and supports legacy report CSV."""
-    records, initial_balance = import_records_from_csv(filepath)
-    return Report(records, initial_balance)
+    return records, initial_balance, (imported, skipped, errors)
 
 
 def export_mandatory_expenses_to_csv(
@@ -247,51 +204,47 @@ def export_mandatory_expenses_to_csv(
             )
 
 
-def import_mandatory_expenses_from_csv(filepath: str) -> List[MandatoryExpenseRecord]:
+def import_mandatory_expenses_from_csv(
+    filepath: str,
+    policy: ImportPolicy = ImportPolicy.FULL_BACKUP,
+    currency_service=None,
+) -> Tuple[List[MandatoryExpenseRecord], ImportSummary]:
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"CSV file not found: {filepath}")
 
     expenses: List[MandatoryExpenseRecord] = []
+    errors: List[str] = []
+    skipped = 0
+    imported = 0
+
+    get_rate = None
+    if policy == ImportPolicy.CURRENT_RATE:
+        get_rate = _resolve_get_rate(currency_service)
+
     with open(filepath, "r", newline="", encoding="utf-8") as csvfile:
         reader = csv.DictReader(csvfile)
         if not reader.fieldnames:
-            return expenses
+            return expenses, (0, 0, [])
 
-        for row in reader:
-            row_lc = {_norm_key(str(k)): v for k, v in row.items()}
+        for idx, row in enumerate(reader, start=2):
+            row_lc = {norm_key(str(k)): v for k, v in row.items()}
             if not any(str(v or "").strip() for v in row_lc.values()):
                 continue
 
-            record_type = _safe_type(str(row_lc.get("type", "mandatory_expense") or ""))
-            if record_type not in {"mandatory_expense", "mandatory expense"}:
-                # Legacy mandatory-only CSV has no type column.
-                if "type" in row_lc:
-                    continue
-
-            if "amount_kzt" not in row_lc:
-                amount = _as_float(
-                    row_lc.get("amount", row_lc.get("amount_(kzt)", 0.0)), 0.0
-                )
-                row_lc["amount_original"] = amount
-                row_lc["amount_kzt"] = amount
-                row_lc["currency"] = "KZT"
-                row_lc["rate_at_operation"] = 1.0
-
-            period = str(row_lc.get("period", "monthly") or "monthly").lower()
-            if period not in {"daily", "weekly", "monthly", "yearly"}:
-                continue
-
-            expenses.append(
-                MandatoryExpenseRecord(
-                    date=str(row_lc.get("date", "") or ""),
-                    amount_original=_as_float(row_lc.get("amount_original"), 0.0),
-                    currency=str(row_lc.get("currency", "KZT") or "KZT").upper(),
-                    rate_at_operation=_as_float(row_lc.get("rate_at_operation"), 1.0),
-                    amount_kzt=_as_float(row_lc.get("amount_kzt"), 0.0),
-                    category=str(row_lc.get("category", "Mandatory") or "Mandatory"),
-                    description=str(row_lc.get("description", "") or ""),
-                    period=period,  # type: ignore[arg-type]
-                )
+            record, _, error = parse_import_row(
+                row_lc,
+                row_label=f"row {idx}",
+                policy=policy,
+                get_rate=get_rate,
+                mandatory_only=True,
             )
+            if error:
+                skipped += 1
+                errors.append(error)
+                logger.warning("Mandatory CSV import skipped %s", error)
+                continue
+            if isinstance(record, MandatoryExpenseRecord):
+                imported += 1
+                expenses.append(record)
 
-    return expenses
+    return expenses, (imported, skipped, errors)

@@ -7,6 +7,7 @@ from app.use_cases import (
     DeleteAllRecords,
     ImportFromCSV,
 )
+from domain.import_policy import ImportPolicy
 from domain.records import IncomeRecord, ExpenseRecord, Record
 from infrastructure.repositories import RecordRepository
 
@@ -178,7 +179,7 @@ class TestImportFromCSV:
 
         with patch("utils.csv_utils.import_records_from_csv") as mock_import:
             test_records = [Mock(spec=Record), Mock(spec=Record), Mock(spec=Record)]
-            mock_import.return_value = (test_records, 0.0)
+            mock_import.return_value = (test_records, 0.0, (3, 0, []))
 
             use_case = ImportFromCSV(repository=mock_repo)
 
@@ -186,7 +187,9 @@ class TestImportFromCSV:
             result = use_case.execute("test.csv")
 
             # Assert
-            mock_import.assert_called_once_with("test.csv")
+            mock_import.assert_called_once_with(
+                "test.csv", policy=ImportPolicy.FULL_BACKUP
+            )
             mock_repo.delete_all.assert_called_once()
             assert mock_repo.save.call_count == 3
             assert result == 3
@@ -194,7 +197,7 @@ class TestImportFromCSV:
     def test_execute_saves_initial_balance(self):
         mock_repo = Mock(spec=RecordRepository)
         with patch("utils.csv_utils.import_records_from_csv") as mock_import:
-            mock_import.return_value = ([], 123.45)
+            mock_import.return_value = ([], 123.45, (0, 0, []))
 
             use_case = ImportFromCSV(repository=mock_repo)
             use_case.execute("test.csv")

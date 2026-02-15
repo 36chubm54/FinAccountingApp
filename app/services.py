@@ -47,6 +47,18 @@ class CurrencyService:
         except KeyError:
             raise ValueError(f"Unsupported currency: {currency}")
 
+    def get_rate(self, currency: str) -> float:
+        code = (currency or "").upper()
+        if not code:
+            raise ValueError("Currency is required")
+        base = getattr(self._service, "_base", "KZT")
+        if code == base:
+            return 1.0
+        rates = getattr(self._service, "_rates", {})
+        if code not in rates:
+            raise ValueError(f"Unsupported currency: {currency}")
+        return float(rates[code])
+
     def _fetch_and_cache_rates(self) -> Optional[Dict[str, float]]:
         """Попытаться получить курсы с RSS-фида НБРК и сохранить в кеш.
 

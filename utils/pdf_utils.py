@@ -1,7 +1,5 @@
 from typing import List
 import os
-import io
-import csv
 import logging
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics
@@ -328,84 +326,4 @@ def report_to_pdf(report: Report, filepath: str) -> None:
     elems.append(monthly_title)
     elems.append(summary_table)
 
-    doc.build(elems)  # type: ignore
-
-
-def export_mandatory_expenses_to_pdf(
-    expenses: List[MandatoryExpenseRecord], filepath: str
-) -> None:
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(["Amount (KZT)", "Category", "Description", "Period"])
-    for e in expenses:
-        amt = (
-            f"{getattr(e, 'amount', 0):.2f}"
-            if getattr(e, "amount", None) is not None
-            else "0.00"
-        )
-        writer.writerow(
-            [
-                amt,
-                _safe_str(getattr(e, "category", "")),
-                _safe_str(getattr(e, "description", "")),
-                _safe_str(getattr(e, "period", "")),
-            ]
-        )
-    # text = buf.getvalue()  # Неиспользуемая переменная
-    buf.close()
-
-    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
-        filepath
-    ) else None
-
-    doc = SimpleDocTemplate(
-        filepath,
-        pagesize=A4,
-        leftMargin=30,
-        rightMargin=30,
-        topMargin=30,
-        bottomMargin=30,
-    )
-    available_width = A4[0] - 60
-    col_widths = [
-        available_width * 0.18,
-        available_width * 0.22,
-        available_width * 0.40,
-        available_width * 0.20,
-    ]
-
-    font_name = _register_cyrillic_font()
-    data = []
-    header = ["Amount (KZT)", "Category", "Description", "Period"]
-    data.append(header)
-    for e in expenses:
-        amt = (
-            f"{getattr(e, 'amount', 0):.2f}"
-            if getattr(e, "amount", None) is not None
-            else "0.00"
-        )
-        data.append(
-            [
-                amt,
-                _safe_str(getattr(e, "category", "")),
-                _safe_str(getattr(e, "description", "")),
-                _safe_str(getattr(e, "period", "")),
-            ]
-        )
-
-    table = Table(data, colWidths=col_widths, repeatRows=1)
-    style = TableStyle(
-        [
-            ("FONT", (0, 0), (-1, -1), font_name),
-            ("FONTSIZE", (0, 0), (-1, -1), 10),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-            ("ALIGN", (0, 0), (0, -1), "RIGHT"),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 6),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        ]
-    )
-    table.setStyle(style)
-    elems: List[Table] = [table]
     doc.build(elems)  # type: ignore

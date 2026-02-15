@@ -63,7 +63,7 @@ def test_mandatory_xlsx_roundtrip():
         tmp_path = tmp.name
     try:
         export_mandatory_expenses_to_xlsx(expenses, tmp_path)
-        imported = import_mandatory_expenses_from_xlsx(tmp_path)
+        imported, _ = import_mandatory_expenses_from_xlsx(tmp_path)
         assert len(imported) == 2
         assert imported[0].amount == 10.0
         assert imported[1].period == "yearly"
@@ -83,7 +83,7 @@ def test_mandatory_csv_roundtrip():
         tmp_path = tmp.name
     try:
         export_mandatory_expenses_to_csv(expenses, tmp_path)
-        imported = import_mandatory_expenses_from_csv(tmp_path)
+        imported, _ = import_mandatory_expenses_from_csv(tmp_path)
         assert len(imported) == 1
         assert imported[0].amount == 5.0
         assert imported[0].period == "daily"
