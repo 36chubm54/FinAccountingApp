@@ -1,7 +1,12 @@
 import pytest
 from datetime import date, timedelta
 
-from domain.validation import parse_ymd, ensure_not_future, ensure_valid_period
+from domain.validation import (
+    parse_ymd,
+    ensure_not_future,
+    ensure_valid_period,
+    parse_report_period_start,
+)
 
 
 def test_parse_ymd_valid():
@@ -40,3 +45,35 @@ def test_ensure_valid_period_ok(period):
 def test_ensure_valid_period_raises():
     with pytest.raises(ValueError):
         ensure_valid_period("hourly")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_start"),
+    [
+        ("2025", "2025-01-01"),
+        ("2025-03", "2025-03-01"),
+        ("2025-03-17", "2025-03-17"),
+    ],
+)
+def test_parse_report_period_start_valid(value, expected_start):
+    assert parse_report_period_start(value) == expected_start
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "2025-13",
+        "2025-00",
+        "2025-02-30",
+        "2025/03",
+        "abcd",
+        "2025-3",
+        "2999",
+        "2999-01",
+        "2999-01-01",
+    ],
+)
+def test_parse_report_period_start_invalid(value):
+    with pytest.raises(ValueError):
+        parse_report_period_start(value)

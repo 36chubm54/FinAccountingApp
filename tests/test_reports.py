@@ -1,5 +1,6 @@
 from domain.reports import Report
 from domain.records import IncomeRecord, ExpenseRecord
+import pytest
 
 
 class TestReport:
@@ -223,3 +224,15 @@ def test_opening_balance_when_filter_after_all_records():
     assert filtered.records() == []
     assert filtered.initial_balance == report.total_fixed()
     assert filtered.total_fixed() == report.total_fixed()
+
+
+def test_filter_by_period_raises_for_invalid_format():
+    report = _build_opening_balance_test_report()
+    with pytest.raises(ValueError):
+        report.filter_by_period("2025/03")
+
+
+def test_filter_by_period_raises_for_future_date():
+    report = _build_opening_balance_test_report()
+    with pytest.raises(ValueError):
+        report.filter_by_period("2999-01")

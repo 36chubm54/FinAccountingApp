@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update report export rows (`CSV/XLSX/PDF`) to show opening balance label for filtered periods.
 - Update GUI report summary label to show `Opening balance` for filtered reports and `Initial balance` otherwise.
 - Expand `Report` tests to cover year/month/day filters, opening-balance invariant, and edge cases.
+- Add strict report period validation for `YYYY`, `YYYY-MM`, `YYYY-MM-DD` and reject future filter dates.
 
 ### Documentation
 

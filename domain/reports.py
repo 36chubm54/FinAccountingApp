@@ -1,9 +1,10 @@
-from datetime import date, datetime
+from datetime import date
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from prettytable import PrettyTable
 
 from .records import IncomeRecord, MandatoryExpenseRecord, Record
+from .validation import parse_report_period_start
 
 
 class Report:
@@ -41,15 +42,8 @@ class Report:
         return self.total_current(currency_service) - self.total_fixed()
 
     def filter_by_period(self, prefix: str) -> "Report":
+        start_date = parse_report_period_start(prefix)
         filtered = [r for r in self._records if r.date.startswith(prefix)]
-        start_date = self._period_start_date(prefix)
-        if start_date is None:
-            return Report(
-                filtered,
-                self._initial_balance,
-                balance_label=self._balance_label,
-                opening_start_date=self._opening_start_date,
-            )
         return Report(
             filtered,
             self.opening_balance(start_date),
@@ -100,25 +94,6 @@ class Report:
     @property
     def is_opening_balance(self) -> bool:
         return self._opening_start_date is not None
-
-    @staticmethod
-    def _period_start_date(prefix: str) -> Optional[str]:
-        value = (prefix or "").strip()
-        if len(value) == 4 and value.isdigit():
-            return f"{value}-01-01"
-        if len(value) == 7:
-            try:
-                datetime.strptime(value, "%Y-%m")
-                return f"{value}-01"
-            except ValueError:
-                return None
-        if len(value) == 10:
-            try:
-                datetime.strptime(value, "%Y-%m-%d")
-                return value
-            except ValueError:
-                return None
-        return None
 
     def opening_balance(self, start_date: str) -> float:
         return self._initial_balance + sum(

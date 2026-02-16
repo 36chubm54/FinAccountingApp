@@ -521,7 +521,11 @@ class FinancialApp(tk.Tk):
             report = GenerateReport(self.repository).execute()
             period = period_entry.get().strip()
             if period:
-                report = report.filter_by_period(period)
+                try:
+                    report = report.filter_by_period(period)
+                except ValueError as e:
+                    messagebox.showerror("Error", str(e))
+                    return
             cat = category_entry.get().strip()
             if cat:
                 report = report.filter_by_category(cat)

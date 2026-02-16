@@ -113,6 +113,7 @@ python main.py
 - Для фильтра `YYYY` старт периода: `YYYY-01-01`.
 - Для фильтра `YYYY-MM` старт периода: `YYYY-MM-01`.
 - Для фильтра `YYYY-MM-DD` старт периода: указанная дата.
+- Фильтр периода не может указывать на будущую дату (для всех форматов).
 - Формула:
   `opening_balance = initial_balance + sum(signed_amount for date < start_date)`.
 - В отчётах с фильтром используется `opening_balance` и подпись `Opening balance as of <start_date>`.
@@ -363,6 +364,7 @@ Backup восстанавливает:
 - `parse_ymd(value)` — парсинг и валидация даты `YYYY-MM-DD`.
 - `ensure_not_future(date)` — запрет будущих дат.
 - `ensure_valid_period(period)` — валидация периодов.
+- `parse_report_period_start(value)` — валидация фильтра отчёта (`YYYY`/`YYYY-MM`/`YYYY-MM-DD`) и вычисление даты старта периода без будущих дат.
 
 ### Application
 

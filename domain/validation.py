@@ -29,3 +29,29 @@ def ensure_valid_period(period: str) -> None:
     valid_periods = ["daily", "weekly", "monthly", "yearly"]
     if period not in valid_periods:
         raise ValueError(f"Invalid period: {period}. Must be one of {valid_periods}")
+
+
+def parse_report_period_start(value: str) -> str:
+    period = (value or "").strip()
+    if not period:
+        raise ValueError("Period filter is empty")
+
+    if re.fullmatch(r"\d{4}", period):
+        start_date = date(int(period), 1, 1)
+        ensure_not_future(start_date)
+        return start_date.isoformat()
+
+    if re.fullmatch(r"\d{4}-\d{2}", period):
+        year, month = map(int, period.split("-"))
+        if not (1 <= month <= 12):
+            raise ValueError("Invalid month in period filter")
+        start_date = date(year, month, 1)
+        ensure_not_future(start_date)
+        return start_date.isoformat()
+
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", period):
+        start_date = parse_ymd(period)
+        ensure_not_future(start_date)
+        return start_date.isoformat()
+
+    raise ValueError("Invalid period filter format. Use YYYY, YYYY-MM or YYYY-MM-DD")

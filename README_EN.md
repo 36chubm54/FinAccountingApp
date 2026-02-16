@@ -113,6 +113,7 @@ Export report:
 - For `YYYY`, period start is `YYYY-01-01`.
 - For `YYYY-MM`, period start is `YYYY-MM-01`.
 - For `YYYY-MM-DD`, period start is the provided date.
+- The period filter cannot point to a future date (for all supported formats).
 - Formula:
   `opening_balance = initial_balance + sum(signed_amount for date < start_date)`.
 - Filtered reports use `opening balance` and the row label `Opening balance as of <start_date>`.
@@ -363,6 +364,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `parse_ymd(value)` — parsing and validating the date `YYYY-MM-DD`.
 - `ensure_not_future(date)` — prohibition of future dates.
 - `ensure_valid_period(period)` — period validation.
+- `parse_report_period_start(value)` — validates report period filter (`YYYY`/`YYYY-MM`/`YYYY-MM-DD`) and returns period start date while rejecting future dates.
 
 ### Application
 
