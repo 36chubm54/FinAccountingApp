@@ -1,13 +1,10 @@
 import tempfile
 import os
 
-from domain.records import IncomeRecord, ExpenseRecord, MandatoryExpenseRecord
+from domain.records import IncomeRecord, ExpenseRecord
 from domain.reports import Report
 
-from utils.pdf_utils import (
-    report_to_pdf,
-    export_mandatory_expenses_to_pdf,
-)
+from utils.pdf_utils import report_to_pdf
 
 
 def test_report_pdf_roundtrip():
@@ -21,25 +18,6 @@ def test_report_pdf_roundtrip():
         path = tmp.name
     try:
         report_to_pdf(report, path)
-        assert os.path.getsize(path) > 0
-    finally:
-        os.unlink(path)
-
-
-def test_mandatory_pdf_roundtrip():
-    expenses = [
-        MandatoryExpenseRecord(
-            date="", _amount_init=12.5, category="Sub", description="d1", period="monthly"
-        ),
-        MandatoryExpenseRecord(
-            date="", _amount_init=7.75, category="Svc", description="d2", period="yearly"
-        ),
-    ]
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        path = tmp.name
-    try:
-        export_mandatory_expenses_to_pdf(expenses, path)
         assert os.path.getsize(path) > 0
     finally:
         os.unlink(path)

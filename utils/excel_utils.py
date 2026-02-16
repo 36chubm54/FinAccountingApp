@@ -48,6 +48,7 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
     ws = wb.active
     if ws is not None:
         ws.title = "Report"
+        ws.append([report.statement_title, "", "", ""])
         ws.append(["Date", "Type", "Category", "Amount (KZT)"])
         ws.append(["", "", "", "Fixed amounts by operation-time FX rates"])
 
@@ -202,7 +203,16 @@ def import_records_from_xlsx(
         if not rows:
             return [], 0.0, (0, 0, [])
 
-        headers = [norm_key(_safe_str(h)) for h in rows[0]]
+        header_row_index = 0
+        first_row = rows[0] if rows else ()
+        if first_row and _safe_str(first_row[0]).strip().startswith(
+            "Transaction statement"
+        ):
+            header_row_index = 1
+        if len(rows) <= header_row_index:
+            return [], 0.0, (0, 0, [])
+
+        headers = [norm_key(_safe_str(h)) for h in rows[header_row_index]]
         records: List[Record] = []
         initial_balance = 0.0
         errors: List[str] = []
@@ -216,7 +226,8 @@ def import_records_from_xlsx(
         if policy == ImportPolicy.CURRENT_RATE:
             get_rate = _resolve_get_rate(currency_service)
 
-        for idx, row in enumerate(rows[1:], start=2):
+        data_rows = rows[header_row_index + 1 :]
+        for idx, row in enumerate(data_rows, start=header_row_index + 2):
             if not row or all(cell is None for cell in row):
                 continue
 
@@ -226,11 +237,9 @@ def import_records_from_xlsx(
                 date_value = _safe_str(raw.get("date", "")).strip()
                 if date_value.upper() in {"SUBTOTAL", "FINAL_BALANCE", "FINAL BALANCE"}:
                     continue
-                if (
-                    date_value == ""
-                    and norm_key(_safe_str(raw.get("type", "")).strip())
-                    == "initial_balance"
-                ):
+                if date_value == "" and norm_key(
+                    _safe_str(raw.get("type", "")).strip()
+                ) in {"initial_balance", "opening_balance"}:
                     raw["type"] = "initial_balance"
                     raw["amount_original"] = raw.get("amount_(kzt)")
                 else:

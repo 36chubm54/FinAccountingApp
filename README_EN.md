@@ -91,7 +91,8 @@ The amount is converted into the base currency `KZT` at the current rates of the
 
 1. Open the `Reports` tab.
 2. Enter filters (optional):
-    - `Period` — date prefix (for example, `2025` or `2025-01`).
+    - `Period` — period start (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`).
+    - `Period end` — period end (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`).
     - `Category` — filter by category.
 3. Enable options:
     - `Group by category` — grouping by category.
@@ -103,6 +104,9 @@ At the bottom, an additional table “Monthly Income/Expense Summary” is displ
 Export report:
 
 - Formats: `CSV`, `XLSX`, `PDF`.
+- Report title includes the selected range:
+  `Transaction statement (<start_date> - <end_date>)`.
+- If `Period end` is not provided, current date is used as the period end.
 - In addition to the main records, a `Yearly Report` sheet with a monthly summary is added to `XLSX`. A second, intermediate sheet `By Category` is also created with records grouped by categories and subtotals.
 - In `PDF` the monthly summary remains, and after the main statement, tables are added broken down by category (each category is a separate table with a subtotal).
 
@@ -116,9 +120,11 @@ Export report:
 - The period filter cannot point to a future date (for all supported formats).
 - Formula:
   `opening_balance = initial_balance + sum(signed_amount for date < start_date)`.
-- Filtered reports use `opening balance` and the row label `Opening balance as of <start_date>`.
+- Filtered reports use `opening balance` and the row label `Opening balance`.
 - Unfiltered reports use `initial balance` and the row label `Initial balance`.
 - `CSV/XLSX/PDF` exports follow the same rule and display the correct balance label.
+- Period validation is applied to both start and end values:
+  both must match `YYYY`, `YYYY-MM`, or `YYYY-MM-DD`, must not be in the future, and `end >= start`.
 - This is required for financial correctness: period totals must start from the real balance at the beginning of that period.
 
 ### Deleting an entry
@@ -352,6 +358,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `total()` — alias `total_fixed()` for backwards compatibility.
 - `opening_balance(start_date)` — computes period start balance: `initial_balance + all records with date < start_date`.
 - `filter_by_period(prefix)` — filtering by date prefix.
+- `filter_by_period_range(start_prefix, end_prefix)` — filtering by date range.
 - `filter_by_category(category)` — filtering by category.
 - `grouped_by_category()` — grouping by categories.
 - `monthly_income_expense_rows(year=None, up_to_month=None)` — monthly aggregates.
@@ -365,6 +372,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `ensure_not_future(date)` — prohibition of future dates.
 - `ensure_valid_period(period)` — period validation.
 - `parse_report_period_start(value)` — validates report period filter (`YYYY`/`YYYY-MM`/`YYYY-MM-DD`) and returns period start date while rejecting future dates.
+- `parse_report_period_end(value)` — validates report period end (`YYYY`/`YYYY-MM`/`YYYY-MM-DD`) and returns period end date while rejecting future dates.
 
 ### Application
 

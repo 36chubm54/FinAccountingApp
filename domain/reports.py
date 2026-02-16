@@ -4,7 +4,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 from prettytable import PrettyTable
 
 from .records import IncomeRecord, MandatoryExpenseRecord, Record
-from .validation import parse_report_period_start
+from .validation import parse_report_period_end, parse_report_period_start
 
 
 class Report:
@@ -14,11 +14,15 @@ class Report:
         initial_balance: float = 0.0,
         balance_label: str = "Initial balance",
         opening_start_date: Optional[str] = None,
+        period_start_date: Optional[str] = None,
+        period_end_date: Optional[str] = None,
     ):
         self._records = list(records)
         self._initial_balance = initial_balance
         self._balance_label = balance_label
         self._opening_start_date = opening_start_date
+        self._period_start_date = period_start_date
+        self._period_end_date = period_end_date
 
     def total_fixed(self) -> float:
         """Accounting total by operation-time rates."""
@@ -43,12 +47,35 @@ class Report:
 
     def filter_by_period(self, prefix: str) -> "Report":
         start_date = parse_report_period_start(prefix)
+        end_date = parse_report_period_end(prefix)
         filtered = [r for r in self._records if r.date.startswith(prefix)]
         return Report(
             filtered,
             self.opening_balance(start_date),
-            balance_label=f"Opening balance as of {start_date}",
+            balance_label="Opening balance",
             opening_start_date=start_date,
+            period_start_date=start_date,
+            period_end_date=end_date,
+        )
+
+    def filter_by_period_range(
+        self, start_prefix: str, end_prefix: Optional[str] = None
+    ) -> "Report":
+        start_date = parse_report_period_start(start_prefix)
+        if end_prefix:
+            end_date = parse_report_period_end(end_prefix)
+        else:
+            end_date = date.today().isoformat()
+        if end_date < start_date:
+            raise ValueError("Period end date cannot be earlier than period start date")
+        filtered = [r for r in self._records if start_date <= r.date <= end_date]
+        return Report(
+            filtered,
+            self.opening_balance(start_date),
+            balance_label="Opening balance",
+            opening_start_date=start_date,
+            period_start_date=start_date,
+            period_end_date=end_date,
         )
 
     def filter_by_category(self, category: str) -> "Report":
@@ -58,6 +85,8 @@ class Report:
             self._initial_balance,
             balance_label=self._balance_label,
             opening_start_date=self._opening_start_date,
+            period_start_date=self._period_start_date,
+            period_end_date=self._period_end_date,
         )
 
     def grouped_by_category(self) -> Dict[str, "Report"]:
@@ -74,6 +103,8 @@ class Report:
             self._initial_balance,
             balance_label=self._balance_label,
             opening_start_date=self._opening_start_date,
+            period_start_date=self._period_start_date,
+            period_end_date=self._period_end_date,
         )
 
     def records(self) -> list[Record]:
@@ -94,6 +125,23 @@ class Report:
     @property
     def is_opening_balance(self) -> bool:
         return self._opening_start_date is not None
+
+    @property
+    def period_start_date(self) -> Optional[str]:
+        return self._period_start_date
+
+    @property
+    def period_end_date(self) -> Optional[str]:
+        return self._period_end_date
+
+    @property
+    def statement_title(self) -> str:
+        if self._period_start_date and self._period_end_date:
+            return (
+                f"Transaction statement ({self._period_start_date} - "
+                f"{self._period_end_date})"
+            )
+        return "Transaction statement"
 
     def opening_balance(self, start_date: str) -> float:
         return self._initial_balance + sum(

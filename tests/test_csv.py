@@ -19,11 +19,12 @@ def test_to_csv():
         with open(tmp_path, "r", encoding="utf-8") as f:
             reader = csv.reader(f)
             rows = list(reader)
-        assert rows[0] == ["Date", "Type", "Category", "Amount (KZT)"]
-        assert rows[1] == ["", "", "", "Fixed amounts by operation-time FX rates"]
-        assert rows[2] == ["2025-01-01", "Income", "Salary", "100.00"]
-        assert rows[3] == ["2025-01-02", "Expense", "Food", "30.00"]
-        assert rows[4] == ["SUBTOTAL", "", "", "70.00"]
+        assert rows[0] == ["Transaction statement", "", "", ""]
+        assert rows[1] == ["Date", "Type", "Category", "Amount (KZT)"]
+        assert rows[2] == ["", "", "", "Fixed amounts by operation-time FX rates"]
+        assert rows[3] == ["2025-01-01", "Income", "Salary", "100.00"]
+        assert rows[4] == ["2025-01-02", "Expense", "Food", "30.00"]
+        assert rows[5] == ["SUBTOTAL", "", "", "70.00"]
     finally:
         os.unlink(tmp_path)
 
@@ -41,13 +42,14 @@ def test_to_csv_with_initial_balance():
         with open(tmp_path, "r", encoding="utf-8") as f:
             reader = csv.reader(f)
             rows = list(reader)
-        assert rows[0] == ["Date", "Type", "Category", "Amount (KZT)"]
-        assert rows[1] == ["", "", "", "Fixed amounts by operation-time FX rates"]
-        assert rows[2] == ["", "Initial balance", "", "50.00"]
-        assert rows[3] == ["2025-01-01", "Income", "Salary", "100.00"]
-        assert rows[4] == ["2025-01-02", "Expense", "Food", "30.00"]
-        assert rows[5] == ["SUBTOTAL", "", "", "70.00"]
-        assert rows[6] == ["FINAL BALANCE", "", "", "120.00"]
+        assert rows[0] == ["Transaction statement", "", "", ""]
+        assert rows[1] == ["Date", "Type", "Category", "Amount (KZT)"]
+        assert rows[2] == ["", "", "", "Fixed amounts by operation-time FX rates"]
+        assert rows[3] == ["", "Initial balance", "", "50.00"]
+        assert rows[4] == ["2025-01-01", "Income", "Salary", "100.00"]
+        assert rows[5] == ["2025-01-02", "Expense", "Food", "30.00"]
+        assert rows[6] == ["SUBTOTAL", "", "", "70.00"]
+        assert rows[7] == ["FINAL BALANCE", "", "", "120.00"]
     finally:
         os.unlink(tmp_path)
 
@@ -65,7 +67,13 @@ def test_to_csv_with_opening_balance_label_for_filtered_report():
         report.to_csv(tmp_path)
         with open(tmp_path, "r", encoding="utf-8") as f:
             rows = list(csv.reader(f))
-        assert rows[2] == ["", "Opening balance as of 2025-01-01", "", "70.00"]
+        assert rows[0] == [
+            "Transaction statement (2025-01-01 - 2025-12-31)",
+            "",
+            "",
+            "",
+        ]
+        assert rows[3] == ["", "Opening balance", "", "70.00"]
         assert rows[-1] == ["FINAL BALANCE", "", "", "140.00"]
     finally:
         os.unlink(tmp_path)

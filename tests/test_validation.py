@@ -5,6 +5,7 @@ from domain.validation import (
     parse_ymd,
     ensure_not_future,
     ensure_valid_period,
+    parse_report_period_end,
     parse_report_period_start,
 )
 
@@ -77,3 +78,24 @@ def test_parse_report_period_start_valid(value, expected_start):
 def test_parse_report_period_start_invalid(value):
     with pytest.raises(ValueError):
         parse_report_period_start(value)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_end"),
+    [
+        ("2025", "2025-12-31"),
+        ("2025-02", "2025-02-28"),
+        ("2025-03-17", "2025-03-17"),
+    ],
+)
+def test_parse_report_period_end_valid(value, expected_end):
+    assert parse_report_period_end(value) == expected_end
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "2025-13", "2025-00", "2025-02-30", "2025/03", "abcd", "2025-3", "2999"],
+)
+def test_parse_report_period_end_invalid(value):
+    with pytest.raises(ValueError):
+        parse_report_period_end(value)

@@ -5,12 +5,16 @@ import pytest
 
 class TestReport:
     def test_creation(self):
-        records = [IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")]
+        records = [
+            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
+        ]
         report = Report(records)
         assert report.records() == records
 
     def test_creation_with_initial_balance(self):
-        records = [IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")]
+        records = [
+            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
+        ]
         report = Report(records, initial_balance=50.0)
         assert report.records() == records
         assert report.total() == 150.0
@@ -20,7 +24,9 @@ class TestReport:
         assert report.total() == 0.0
 
     def test_total_single_income(self):
-        records = [IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")]
+        records = [
+            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
+        ]
         report = Report(records)
         assert report.total() == 100.0
 
@@ -96,7 +102,9 @@ class TestReport:
         assert sorted_dates == ["2025-01-01", "2025-01-02", "2025-01-03"]
 
     def test_records_returns_copy(self):
-        records = [IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")]
+        records = [
+            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
+        ]
         report = Report(records)
         returned_records = report.records()
         returned_records.append(
@@ -188,21 +196,21 @@ def test_filter_year_uses_opening_balance():
     report = _build_opening_balance_test_report()
     filtered = report.filter_by_period("2024")
     assert filtered.initial_balance == 150.0  # 100 + 50 from 2023-12-31
-    assert filtered.balance_label == "Opening balance as of 2024-01-01"
+    assert filtered.balance_label == "Opening balance"
 
 
 def test_filter_month_uses_opening_balance():
     report = _build_opening_balance_test_report()
     filtered = report.filter_by_period("2024-03")
     assert filtered.initial_balance == 130.0  # 100 + 50 - 20
-    assert filtered.balance_label == "Opening balance as of 2024-03-01"
+    assert filtered.balance_label == "Opening balance"
 
 
 def test_filter_day_uses_opening_balance():
     report = _build_opening_balance_test_report()
     filtered = report.filter_by_period("2024-03-20")
     assert filtered.initial_balance == 160.0  # 100 + 50 - 20 + 30
-    assert filtered.balance_label == "Opening balance as of 2024-03-20"
+    assert filtered.balance_label == "Opening balance"
 
 
 def test_opening_balance_invariant_for_filtered_report():
@@ -220,7 +228,7 @@ def test_opening_balance_when_no_records_before_start_date():
 
 def test_opening_balance_when_filter_after_all_records():
     report = _build_opening_balance_test_report()
-    filtered = report.filter_by_period("2026")
+    filtered = report.filter_by_period("2025-12")
     assert filtered.records() == []
     assert filtered.initial_balance == report.total_fixed()
     assert filtered.total_fixed() == report.total_fixed()
@@ -236,3 +244,22 @@ def test_filter_by_period_raises_for_future_date():
     report = _build_opening_balance_test_report()
     with pytest.raises(ValueError):
         report.filter_by_period("2999-01")
+
+
+def test_filter_by_period_range_limits_end_date():
+    report = _build_opening_balance_test_report()
+    filtered = report.filter_by_period_range("2024", "2024-03")
+    assert [r.date for r in filtered.records()] == [
+        "2024-01-10",
+        "2024-03-05",
+        "2024-03-20",
+    ]
+    assert filtered.period_start_date == "2024-01-01"
+    assert filtered.period_end_date == "2024-03-31"
+    assert filtered.statement_title == "Transaction statement (2024-01-01 - 2024-03-31)"
+
+
+def test_filter_by_period_range_raises_when_end_before_start():
+    report = _build_opening_balance_test_report()
+    with pytest.raises(ValueError):
+        report.filter_by_period_range("2024-03", "2024-01")

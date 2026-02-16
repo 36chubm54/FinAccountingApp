@@ -55,3 +55,33 @@ def parse_report_period_start(value: str) -> str:
         return start_date.isoformat()
 
     raise ValueError("Invalid period filter format. Use YYYY, YYYY-MM or YYYY-MM-DD")
+
+
+def parse_report_period_end(value: str) -> str:
+    period = (value or "").strip()
+    if not period:
+        raise ValueError("Period end filter is empty")
+
+    if re.fullmatch(r"\d{4}", period):
+        year = int(period)
+        end_date = date(year, 12, 31)
+        ensure_not_future(end_date)
+        return end_date.isoformat()
+
+    if re.fullmatch(r"\d{4}-\d{2}", period):
+        year, month = map(int, period.split("-"))
+        if not (1 <= month <= 12):
+            raise ValueError("Invalid month in period end filter")
+        last_day = calendar.monthrange(year, month)[1]
+        end_date = date(year, month, last_day)
+        ensure_not_future(end_date)
+        return end_date.isoformat()
+
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", period):
+        end_date = parse_ymd(period)
+        ensure_not_future(end_date)
+        return end_date.isoformat()
+
+    raise ValueError(
+        "Invalid period end filter format. Use YYYY, YYYY-MM or YYYY-MM-DD"
+    )

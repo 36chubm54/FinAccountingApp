@@ -42,11 +42,14 @@ def report_to_csv(report: Report, filepath: str) -> None:
     sorted_records = sorted(report.records(), key=lambda r: r.date)
     with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.writer(csvfile)
+        writer.writerow([report.statement_title, "", "", ""])
         writer.writerow(REPORT_HEADERS)
         writer.writerow(["", "", "", "Fixed amounts by operation-time FX rates"])
 
         if report.initial_balance != 0 or report.is_opening_balance:
-            writer.writerow(["", report.balance_label, "", f"{report.initial_balance:.2f}"])
+            writer.writerow(
+                ["", report.balance_label, "", f"{report.initial_balance:.2f}"]
+            )
 
         for record in sorted_records:
             if record_type_name(record) == "income":
@@ -129,6 +132,12 @@ def import_records_from_csv(
         get_rate = _resolve_get_rate(currency_service)
 
     with open(filepath, "r", newline="", encoding="utf-8") as csvfile:
+        preview_reader = csv.reader(csvfile)
+        first_row = next(preview_reader, [])
+        if first_row and str(first_row[0]).strip().startswith("Transaction statement"):
+            pass
+        else:
+            csvfile.seek(0)
         reader = csv.DictReader(csvfile)
         if not reader.fieldnames:
             return records, initial_balance, (0, 0, [])
@@ -147,11 +156,9 @@ def import_records_from_csv(
                 date_value = str(row_lc.get("date", "") or "").strip()
                 if date_value.upper() in {"SUBTOTAL", "FINAL BALANCE"}:
                     continue
-                if (
-                    date_value == ""
-                    and str(row_lc.get("type", "") or "").strip().lower()
-                    == "initial balance"
-                ):
+                if date_value == "" and str(
+                    row_lc.get("type", "") or ""
+                ).strip().lower() in {"initial balance", "opening balance"}:
                     row_lc["type"] = "initial_balance"
                     row_lc["amount_original"] = row_lc.get("amount_(kzt)")
                 else:

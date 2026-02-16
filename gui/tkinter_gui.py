@@ -12,7 +12,7 @@ from tkinter import (
     filedialog,
 )
 import os
-from datetime import datetime
+from datetime import date, datetime
 
 from infrastructure.repositories import JsonFileRecordRepository
 from app.use_cases import (
@@ -470,21 +470,27 @@ class FinancialApp(tk.Tk):
         tk.Label(controls, text="Period (e.g., 2025-03):").grid(
             row=0, column=0, sticky="w"
         )
-        period_entry = tk.Entry(controls)
-        period_entry.grid(row=0, column=1, padx=6, pady=4)
+        period_start_entry = tk.Entry(controls)
+        period_start_entry.grid(row=0, column=1, padx=6, pady=4)
 
-        tk.Label(controls, text="Category:").grid(row=1, column=0, sticky="w")
+        tk.Label(controls, text="Period end (e.g., 2025-03-31):").grid(
+            row=1, column=0, sticky="w"
+        )
+        period_end_entry = tk.Entry(controls)
+        period_end_entry.grid(row=1, column=1, padx=6, pady=4)
+
+        tk.Label(controls, text="Category:").grid(row=2, column=0, sticky="w")
         category_entry = tk.Entry(controls)
-        category_entry.grid(row=1, column=1, padx=6, pady=4)
+        category_entry.grid(row=2, column=1, padx=6, pady=4)
 
         group_var = tk.BooleanVar()
         tk.Checkbutton(controls, text="Group by category", variable=group_var).grid(
-            row=2, column=0, columnspan=2, sticky="w"
+            row=3, column=0, columnspan=2, sticky="w"
         )
 
         table_var = tk.BooleanVar()
         tk.Checkbutton(controls, text="Display as table", variable=table_var).grid(
-            row=3, column=0, columnspan=2, sticky="w"
+            row=4, column=0, columnspan=2, sticky="w"
         )
 
         result_frame = tk.Frame(parent)
@@ -519,13 +525,21 @@ class FinancialApp(tk.Tk):
 
         def generate():
             report = GenerateReport(self.repository).execute()
-            period = period_entry.get().strip()
-            if period:
+            period_start = period_start_entry.get().strip()
+            period_end = period_end_entry.get().strip()
+            if period_start:
                 try:
-                    report = report.filter_by_period(period)
+                    report = report.filter_by_period_range(
+                        period_start, period_end or date.today().isoformat()
+                    )
                 except ValueError as e:
                     messagebox.showerror("Error", str(e))
                     return
+            elif period_end:
+                messagebox.showerror(
+                    "Error", "Period start is required when period end is provided."
+                )
+                return
             cat = category_entry.get().strip()
             if cat:
                 report = report.filter_by_category(cat)
@@ -535,9 +549,9 @@ class FinancialApp(tk.Tk):
             result_text.delete(1.0, tk.END)
             summary_year = None
             summary_up_to_month = None
-            if period:
+            if period_start:
                 try:
-                    parts = period.split("-")
+                    parts = period_start.split("-")
                     if parts and parts[0].isdigit():
                         summary_year = int(parts[0])
                     if len(parts) > 1 and parts[1].isdigit():
@@ -545,6 +559,8 @@ class FinancialApp(tk.Tk):
                 except Exception:
                     summary_year = None
                     summary_up_to_month = None
+
+            result_text.insert(tk.END, report.statement_title + "\n\n")
 
             if group_var.get():
                 if table_var.get():
@@ -568,7 +584,9 @@ class FinancialApp(tk.Tk):
             else:
                 balance_value = report.initial_balance
                 balance_label = (
-                    "Opening balance" if report.is_opening_balance else "Initial balance"
+                    "Opening balance"
+                    if report.is_opening_balance
+                    else "Initial balance"
                 )
                 records_total_fixed = sum(
                     r.signed_amount_kzt() for r in report.records()
@@ -608,11 +626,11 @@ class FinancialApp(tk.Tk):
             result_text.insert(tk.END, summary_table + "\n")
 
         generate_btn = tk.Button(controls, text="Generate", command=generate)
-        generate_btn.grid(row=4, column=0, pady=8)
+        generate_btn.grid(row=5, column=0, pady=8)
 
         export_format_var = tk.StringVar(value="CSV")
         tk.OptionMenu(controls, export_format_var, "CSV", "XLSX", "PDF").grid(
-            row=4, column=1, padx=6
+            row=5, column=1, padx=6
         )
 
         def export_any():
@@ -637,7 +655,7 @@ class FinancialApp(tk.Tk):
                 messagebox.showerror("Error", f"Failed to export: {str(e)}")
 
         tk.Button(controls, text="Export", command=export_any).grid(
-            row=4, column=2, padx=6
+            row=5, column=2, padx=6
         )
 
     def settings_tab(self, parent: Union[tk.Frame, ttk.Frame]) -> None:

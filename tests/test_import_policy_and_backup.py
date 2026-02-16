@@ -17,7 +17,9 @@ def test_current_rate_policy_fills_missing_fx_fields():
     csv_content = """date,type,category,amount_original,currency
 2025-01-01,income,Salary,100,USD
 """
-    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", encoding="utf-8") as tmp:
+    with tempfile.NamedTemporaryFile(
+        mode="w", delete=False, suffix=".csv", encoding="utf-8"
+    ) as tmp:
         tmp.write(csv_content)
         path = tmp.name
     try:
@@ -40,7 +42,9 @@ def test_current_rate_policy_overrides_existing_fx_fields():
     csv_content = """date,type,category,amount_original,currency,rate_at_operation,amount_kzt
 2025-01-01,income,Salary,100,USD,450,45000
 """
-    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", encoding="utf-8") as tmp:
+    with tempfile.NamedTemporaryFile(
+        mode="w", delete=False, suffix=".csv", encoding="utf-8"
+    ) as tmp:
         tmp.write(csv_content)
         path = tmp.name
     try:
@@ -60,7 +64,9 @@ def test_legacy_policy_imports_old_amount_column():
     csv_content = """date,type,category,amount
 2025-01-02,expense,Food,2500
 """
-    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", encoding="utf-8") as tmp:
+    with tempfile.NamedTemporaryFile(
+        mode="w", delete=False, suffix=".csv", encoding="utf-8"
+    ) as tmp:
         tmp.write(csv_content)
         path = tmp.name
     try:
@@ -81,11 +87,15 @@ bad-date,income,Salary,10,USD,500,5000
 2025-01-03,income,Salary,10,USDX,500,5000
 2025-01-04,income,Salary,10,USD,500,5000
 """
-    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", encoding="utf-8") as tmp:
+    with tempfile.NamedTemporaryFile(
+        mode="w", delete=False, suffix=".csv", encoding="utf-8"
+    ) as tmp:
         tmp.write(csv_content)
         path = tmp.name
     try:
-        records, _, summary = import_records_from_csv(path, policy=ImportPolicy.FULL_BACKUP)
+        records, _, summary = import_records_from_csv(
+            path, policy=ImportPolicy.FULL_BACKUP
+        )
         assert len(records) == 1
         assert isinstance(records[0], IncomeRecord)
         assert summary[0] == 1
@@ -127,7 +137,9 @@ def test_full_backup_roundtrip():
             records=records,
             mandatory_expenses=mandatory,
         )
-        initial_balance, imported_records, imported_mandatory, summary = import_full_backup_from_json(path)
+        initial_balance, imported_records, imported_mandatory, summary = (
+            import_full_backup_from_json(path)
+        )
         assert initial_balance == 123.0
         assert len(imported_records) == 1
         assert len(imported_mandatory) == 1

@@ -37,7 +37,8 @@ def test_report_xlsx_roundtrip():
         wb = load_workbook(tmp_path, data_only=True)
         try:
             report_ws = wb["Report"]
-            assert report_ws.cell(3, 2).value == "Initial balance"
+            assert report_ws.cell(1, 1).value == "Transaction statement"
+            assert report_ws.cell(4, 2).value == "Initial balance"
             assert "Yearly Report" in wb.sheetnames
             summary_ws = wb["Yearly Report"]
             assert summary_ws.cell(1, 1).value == "Month (2025)"
@@ -66,8 +67,11 @@ def test_report_xlsx_uses_opening_balance_label_for_filtered_report():
         wb = load_workbook(tmp_path, data_only=True)
         try:
             ws = wb["Report"]
-            assert ws.cell(3, 2).value == "Opening balance as of 2025-01-01"
-            assert ws.cell(3, 4).value == "70.00"
+            assert (
+                ws.cell(1, 1).value == "Transaction statement (2025-01-01 - 2025-12-31)"
+            )
+            assert ws.cell(4, 2).value == "Opening balance"
+            assert ws.cell(4, 4).value == "70.00"
         finally:
             wb.close()
     finally:
@@ -77,10 +81,18 @@ def test_report_xlsx_uses_opening_balance_label_for_filtered_report():
 def test_mandatory_xlsx_roundtrip():
     expenses = [
         MandatoryExpenseRecord(
-            date="", _amount_init=10.0, category="Sub", description="d1", period="monthly"
+            date="",
+            _amount_init=10.0,
+            category="Sub",
+            description="d1",
+            period="monthly",
         ),
         MandatoryExpenseRecord(
-            date="", _amount_init=20.5, category="Svc", description="d2", period="yearly"
+            date="",
+            _amount_init=20.5,
+            category="Svc",
+            description="d2",
+            period="yearly",
         ),
     ]
 

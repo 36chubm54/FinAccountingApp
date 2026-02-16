@@ -1,6 +1,6 @@
 import json
 import os
-from typing import List, Tuple
+from typing import List, Tuple, Sequence
 
 from domain.import_policy import ImportPolicy
 from domain.records import MandatoryExpenseRecord, Record
@@ -11,7 +11,7 @@ def export_full_backup_to_json(
     filepath: str,
     *,
     initial_balance: float,
-    records: List[Record],
+    records: Sequence[Record],
     mandatory_expenses: List[MandatoryExpenseRecord],
 ) -> None:
     payload_records = []

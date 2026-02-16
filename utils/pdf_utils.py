@@ -119,9 +119,9 @@ def report_to_pdf(report: Report, filepath: str) -> None:
     header = ["Date", "Type", "Category", "Amount (KZT, fixed)"]
     data.append(header)
 
+    data.append(["", "", "", "Fixed amounts by operation-time FX rates"])
     if getattr(report, "initial_balance", 0) != 0 or report.is_opening_balance:
         data.append(["", report.balance_label, "", f"{report.initial_balance:.2f}"])
-    data.append(["", "", "", "Fixed amounts by operation-time FX rates"])
 
     for record in sorted(report.records(), key=lambda r: r.date):
         if isinstance(record, IncomeRecord):
@@ -183,7 +183,7 @@ def report_to_pdf(report: Report, filepath: str) -> None:
     table.setStyle(style)
     elems: List[Table] = [table]
     # Add a header before the statement table
-    title_table = Table([["Transaction statement"]], colWidths=[available_width])
+    title_table = Table([[report.statement_title]], colWidths=[available_width])
     title_style = TableStyle(
         [
             ("FONT", (0, 0), (-1, -1), font_name),
