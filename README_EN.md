@@ -6,7 +6,7 @@ Graphical and web application for personal financial accounting with multicurren
 
 - [Quick start](#-quick-start)
 - [Using the application](#️-using-the-application)
-- [Web application](#-web application)
+- [Web application](#-web-application)
 - [Project architecture](#️-project-architecture)
 - [Software API](#-software-api)
 - [File structure](#-file-structure)
@@ -105,6 +105,20 @@ Export report:
 - Formats: `CSV`, `XLSX`, `PDF`.
 - In addition to the main records, a `Yearly Report` sheet with a monthly summary is added to `XLSX`. A second, intermediate sheet `By Category` is also created with records grouped by categories and subtotals.
 - In `PDF` the monthly summary remains, and after the main statement, tables are added broken down by category (each category is a separate table with a subtotal).
+
+### Opening Balance in Filtered Reports
+
+- `Initial balance` is the starting balance of the whole history and does not depend on filters.
+- `Opening balance` is the balance at the beginning of the selected period and is calculated dynamically.
+- For `YYYY`, period start is `YYYY-01-01`.
+- For `YYYY-MM`, period start is `YYYY-MM-01`.
+- For `YYYY-MM-DD`, period start is the provided date.
+- Formula:
+  `opening_balance = initial_balance + sum(signed_amount for date < start_date)`.
+- Filtered reports use `opening balance` and the row label `Opening balance as of <start_date>`.
+- Unfiltered reports use `initial balance` and the row label `Initial balance`.
+- `CSV/XLSX/PDF` exports follow the same rule and display the correct balance label.
+- This is required for financial correctness: period totals must start from the real balance at the beginning of that period.
 
 ### Deleting an entry
 
@@ -335,6 +349,7 @@ Below are the key classes and functions synchronized with the actual code.
 - `total_current(currency_service)` — total at the current exchange rate.
 - `fx_difference(currency_service)` — exchange rate difference.
 - `total()` — alias `total_fixed()` for backwards compatibility.
+- `opening_balance(start_date)` — computes period start balance: `initial_balance + all records with date < start_date`.
 - `filter_by_period(prefix)` — filtering by date prefix.
 - `filter_by_category(category)` — filtering by category.
 - `grouped_by_category()` — grouping by categories.
@@ -435,11 +450,11 @@ Methods:
 
 `gui/importers.py`
 
-- `import_records_from_csv(filepath, policy, currency_service)` -> `(records, initial_balance, (imported, skipped, errors))`
-- `import_records_from_xlsx(filepath, policy, currency_service)` -> `(records, initial_balance, (imported, skipped, errors))`
-- `import_mandatory_expenses_from_csv(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`
-- `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`
-- `import_full_backup(filepath)` -> `(initial_balance, records, mandatory_expenses, (imported, skipped, errors))`
+- `import_records_from_csv(filepath, policy, currency_service)` -> `(records, initial_balance, (imported, skipped, errors))`.
+- `import_records_from_xlsx(filepath, policy, currency_service)` -> `(records, initial_balance, (imported, skipped, errors))`.
+- `import_mandatory_expenses_from_csv(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`.
+- `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`.
+- `import_full_backup(filepath)` -> `(initial_balance, records, mandatory_expenses, (imported, skipped, errors))`.
 
 `gui/helpers.py`
 

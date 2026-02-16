@@ -126,7 +126,7 @@ class TestReport:
         ]
         report = Report(records, initial_balance=50.0)
         table_str = report.as_table()
-        assert "Initial Balance" in table_str
+        assert "Initial balance" in table_str
         assert "50.00" in table_str
         assert "SUBTOTAL" in table_str
         assert "70.00" in table_str  # 100 - 30
@@ -162,3 +162,64 @@ class TestReport:
         assert len(rows) == 2
         assert rows[0][0] == "2025-01"
         assert rows[1][0] == "2025-02"
+
+
+def _build_opening_balance_test_report() -> Report:
+    records = [
+        IncomeRecord(date="2023-12-31", _amount_init=50.0, category="Legacy"),
+        ExpenseRecord(date="2024-01-10", _amount_init=20.0, category="Rent"),
+        IncomeRecord(date="2024-03-05", _amount_init=30.0, category="Salary"),
+        ExpenseRecord(date="2024-03-20", _amount_init=10.0, category="Food"),
+        IncomeRecord(date="2024-04-01", _amount_init=40.0, category="Bonus"),
+        ExpenseRecord(date="2025-01-01", _amount_init=5.0, category="Fees"),
+    ]
+    return Report(records, initial_balance=100.0)
+
+
+def test_unfiltered_report_uses_initial_balance():
+    report = _build_opening_balance_test_report()
+    records_total = sum(r.signed_amount_kzt() for r in report.records())
+    assert report.initial_balance == 100.0
+    assert report.total_fixed() == 100.0 + records_total
+
+
+def test_filter_year_uses_opening_balance():
+    report = _build_opening_balance_test_report()
+    filtered = report.filter_by_period("2024")
+    assert filtered.initial_balance == 150.0  # 100 + 50 from 2023-12-31
+    assert filtered.balance_label == "Opening balance as of 2024-01-01"
+
+
+def test_filter_month_uses_opening_balance():
+    report = _build_opening_balance_test_report()
+    filtered = report.filter_by_period("2024-03")
+    assert filtered.initial_balance == 130.0  # 100 + 50 - 20
+    assert filtered.balance_label == "Opening balance as of 2024-03-01"
+
+
+def test_filter_day_uses_opening_balance():
+    report = _build_opening_balance_test_report()
+    filtered = report.filter_by_period("2024-03-20")
+    assert filtered.initial_balance == 160.0  # 100 + 50 - 20 + 30
+    assert filtered.balance_label == "Opening balance as of 2024-03-20"
+
+
+def test_opening_balance_invariant_for_filtered_report():
+    report = _build_opening_balance_test_report()
+    filtered = report.filter_by_period("2024-03")
+    period_sum = sum(r.signed_amount_kzt() for r in filtered.records())
+    assert filtered.initial_balance + period_sum == filtered.total_fixed()
+
+
+def test_opening_balance_when_no_records_before_start_date():
+    report = _build_opening_balance_test_report()
+    filtered = report.filter_by_period("2023")
+    assert filtered.initial_balance == report.initial_balance
+
+
+def test_opening_balance_when_filter_after_all_records():
+    report = _build_opening_balance_test_report()
+    filtered = report.filter_by_period("2026")
+    assert filtered.records() == []
+    assert filtered.initial_balance == report.total_fixed()
+    assert filtered.total_fixed() == report.total_fixed()

@@ -45,10 +45,8 @@ def report_to_csv(report: Report, filepath: str) -> None:
         writer.writerow(REPORT_HEADERS)
         writer.writerow(["", "", "", "Fixed amounts by operation-time FX rates"])
 
-        if report.initial_balance != 0:
-            writer.writerow(
-                ["", "Initial Balance", "", f"{report.initial_balance:.2f}"]
-            )
+        if report.initial_balance != 0 or report.is_opening_balance:
+            writer.writerow(["", report.balance_label, "", f"{report.initial_balance:.2f}"])
 
         for record in sorted_records:
             if record_type_name(record) == "income":

@@ -562,7 +562,10 @@ class FinancialApp(tk.Tk):
             elif table_var.get():
                 result_text.insert(tk.END, report.as_table())
             else:
-                initial_balance = self.repository.load_initial_balance()
+                balance_value = report.initial_balance
+                balance_label = (
+                    "Opening balance" if report.is_opening_balance else "Initial balance"
+                )
                 records_total_fixed = sum(
                     r.signed_amount_kzt() for r in report.records()
                 )
@@ -570,7 +573,7 @@ class FinancialApp(tk.Tk):
                 final_balance_current = report.total_current(self.currency)
                 fx_diff = report.fx_difference(self.currency)
                 result_text.insert(
-                    tk.END, f"Initial Balance: {initial_balance:.2f} KZT\n"
+                    tk.END, f"{balance_label}: {balance_value:.2f} KZT\n"
                 )
                 if report_mode_var.get() == "current":
                     result_text.insert(

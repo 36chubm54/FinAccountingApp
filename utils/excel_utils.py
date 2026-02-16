@@ -51,8 +51,10 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
         ws.append(["Date", "Type", "Category", "Amount (KZT)"])
         ws.append(["", "", "", "Fixed amounts by operation-time FX rates"])
 
-    if getattr(report, "initial_balance", 0) != 0 and ws is not None:
-        ws.append(["", "Initial Balance", "", f"{report.initial_balance:.2f}"])
+    if (
+        getattr(report, "initial_balance", 0) != 0 or report.is_opening_balance
+    ) and ws is not None:
+        ws.append(["", report.balance_label, "", f"{report.initial_balance:.2f}"])
 
     for record in sorted(report.records(), key=lambda r: r.date):
         typ = record_type_name(record)

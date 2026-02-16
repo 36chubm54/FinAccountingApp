@@ -119,8 +119,8 @@ def report_to_pdf(report: Report, filepath: str) -> None:
     header = ["Date", "Type", "Category", "Amount (KZT, fixed)"]
     data.append(header)
 
-    if getattr(report, "initial_balance", 0) != 0:
-        data.append(["", "Initial Balance", "", f"{report.initial_balance:.2f}"])
+    if getattr(report, "initial_balance", 0) != 0 or report.is_opening_balance:
+        data.append(["", report.balance_label, "", f"{report.initial_balance:.2f}"])
     data.append(["", "", "", "Fixed amounts by operation-time FX rates"])
 
     for record in sorted(report.records(), key=lambda r: r.date):

@@ -106,6 +106,20 @@ python main.py
 - Кроме основных записей, в `XLSX` добавляется лист `Yearly Report` с помесячной сводкой. Также создаётся второй, промежуточный лист `By Category` с группировкой записей по категориям и подсуммами.
 - В `PDF` помесячная сводка остаётся, а после основной выписки добавляются таблицы с разбивкой по категориям (каждая категория — отдельная таблица с подсуммой).
 
+### Opening Balance in Filtered Reports
+
+- `Initial balance` — начальный остаток всей истории; не зависит от фильтра.
+- `Opening balance` — остаток на начало выбранного периода; вычисляется динамически.
+- Для фильтра `YYYY` старт периода: `YYYY-01-01`.
+- Для фильтра `YYYY-MM` старт периода: `YYYY-MM-01`.
+- Для фильтра `YYYY-MM-DD` старт периода: указанная дата.
+- Формула:
+  `opening_balance = initial_balance + sum(signed_amount for date < start_date)`.
+- В отчётах с фильтром используется `opening_balance` и подпись `Opening balance as of <start_date>`.
+- В отчётах без фильтра используется `initial balance` и подпись `Initial balance`.
+- Экспорт `CSV/XLSX/PDF` отражает ту же логику: корректный стартовый баланс и правильная подпись в строке баланса.
+- Это критично для финансовой корректности: итог периода считается от реального баланса на начало периода, а не от начала всей истории.
+
 ### Удаление записи
 
 1. Откройте вкладку `Operations`.
@@ -335,6 +349,7 @@ Backup восстанавливает:
 - `total_current(currency_service)` — итог по текущему курсу.
 - `fx_difference(currency_service)` — курсовая разница.
 - `total()` — алиас `total_fixed()` для обратной совместимости.
+- `opening_balance(start_date)` — вычисляет баланс на начало периода: `initial_balance + все записи с date < start_date`.
 - `filter_by_period(prefix)` — фильтрация по префиксу даты.
 - `filter_by_category(category)` — фильтрация по категории.
 - `grouped_by_category()` — группировка по категориям.
@@ -435,11 +450,11 @@ Backup восстанавливает:
 
 `gui/importers.py`
 
-- `import_records_from_csv(filepath, policy, currency_service)` -> `(records, initial_balance, (imported, skipped, errors))`
-- `import_records_from_xlsx(filepath, policy, currency_service)` -> `(records, initial_balance, (imported, skipped, errors))`
-- `import_mandatory_expenses_from_csv(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`
-- `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`
-- `import_full_backup(filepath)` -> `(initial_balance, records, mandatory_expenses, (imported, skipped, errors))`
+- `import_records_from_csv(filepath, policy, currency_service)` -> `(records, initial_balance, (imported, skipped, errors))`.
+- `import_records_from_xlsx(filepath, policy, currency_service)` -> `(records, initial_balance, (imported, skipped, errors))`.
+- `import_mandatory_expenses_from_csv(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`.
+- `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`.
+- `import_full_backup(filepath)` -> `(initial_balance, records, mandatory_expenses, (imported, skipped, errors))`.
 
 `gui/helpers.py`
 

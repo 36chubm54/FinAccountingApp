@@ -43,11 +43,30 @@ def test_to_csv_with_initial_balance():
             rows = list(reader)
         assert rows[0] == ["Date", "Type", "Category", "Amount (KZT)"]
         assert rows[1] == ["", "", "", "Fixed amounts by operation-time FX rates"]
-        assert rows[2] == ["", "Initial Balance", "", "50.00"]
+        assert rows[2] == ["", "Initial balance", "", "50.00"]
         assert rows[3] == ["2025-01-01", "Income", "Salary", "100.00"]
         assert rows[4] == ["2025-01-02", "Expense", "Food", "30.00"]
         assert rows[5] == ["SUBTOTAL", "", "", "70.00"]
         assert rows[6] == ["FINAL BALANCE", "", "", "120.00"]
+    finally:
+        os.unlink(tmp_path)
+
+
+def test_to_csv_with_opening_balance_label_for_filtered_report():
+    records = [
+        IncomeRecord(date="2024-12-31", _amount_init=20.0, category="Old"),
+        IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+        ExpenseRecord(date="2025-01-02", _amount_init=30.0, category="Food"),
+    ]
+    report = Report(records, initial_balance=50.0).filter_by_period("2025")
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv") as tmp:
+        tmp_path = tmp.name
+    try:
+        report.to_csv(tmp_path)
+        with open(tmp_path, "r", encoding="utf-8") as f:
+            rows = list(csv.reader(f))
+        assert rows[2] == ["", "Opening balance as of 2025-01-01", "", "70.00"]
+        assert rows[-1] == ["FINAL BALANCE", "", "", "140.00"]
     finally:
         os.unlink(tmp_path)
 

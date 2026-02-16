@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from prettytable import PrettyTable
@@ -7,9 +7,17 @@ from .records import IncomeRecord, MandatoryExpenseRecord, Record
 
 
 class Report:
-    def __init__(self, records: Iterable[Record], initial_balance: float = 0.0):
+    def __init__(
+        self,
+        records: Iterable[Record],
+        initial_balance: float = 0.0,
+        balance_label: str = "Initial balance",
+        opening_start_date: Optional[str] = None,
+    ):
         self._records = list(records)
         self._initial_balance = initial_balance
+        self._balance_label = balance_label
+        self._opening_start_date = opening_start_date
 
     def total_fixed(self) -> float:
         """Accounting total by operation-time rates."""
@@ -34,11 +42,29 @@ class Report:
 
     def filter_by_period(self, prefix: str) -> "Report":
         filtered = [r for r in self._records if r.date.startswith(prefix)]
-        return Report(filtered, self._initial_balance)
+        start_date = self._period_start_date(prefix)
+        if start_date is None:
+            return Report(
+                filtered,
+                self._initial_balance,
+                balance_label=self._balance_label,
+                opening_start_date=self._opening_start_date,
+            )
+        return Report(
+            filtered,
+            self.opening_balance(start_date),
+            balance_label=f"Opening balance as of {start_date}",
+            opening_start_date=start_date,
+        )
 
     def filter_by_category(self, category: str) -> "Report":
         filtered = [r for r in self._records if r.category == category]
-        return Report(filtered, self._initial_balance)
+        return Report(
+            filtered,
+            self._initial_balance,
+            balance_label=self._balance_label,
+            opening_start_date=self._opening_start_date,
+        )
 
     def grouped_by_category(self) -> Dict[str, "Report"]:
         groups: Dict[str, List[Record]] = {}
@@ -50,7 +76,10 @@ class Report:
 
     def sorted_by_date(self) -> "Report":
         return Report(
-            sorted(self._records, key=lambda r: r.date), self._initial_balance
+            sorted(self._records, key=lambda r: r.date),
+            self._initial_balance,
+            balance_label=self._balance_label,
+            opening_start_date=self._opening_start_date,
         )
 
     def records(self) -> list[Record]:
@@ -59,6 +88,44 @@ class Report:
     @property
     def initial_balance(self) -> float:
         return self._initial_balance
+
+    @property
+    def balance_label(self) -> str:
+        return self._balance_label
+
+    @property
+    def opening_start_date(self) -> Optional[str]:
+        return self._opening_start_date
+
+    @property
+    def is_opening_balance(self) -> bool:
+        return self._opening_start_date is not None
+
+    @staticmethod
+    def _period_start_date(prefix: str) -> Optional[str]:
+        value = (prefix or "").strip()
+        if len(value) == 4 and value.isdigit():
+            return f"{value}-01-01"
+        if len(value) == 7:
+            try:
+                datetime.strptime(value, "%Y-%m")
+                return f"{value}-01"
+            except ValueError:
+                return None
+        if len(value) == 10:
+            try:
+                datetime.strptime(value, "%Y-%m-%d")
+                return value
+            except ValueError:
+                return None
+        return None
+
+    def opening_balance(self, start_date: str) -> float:
+        return self._initial_balance + sum(
+            record.signed_amount()
+            for record in self._records
+            if record.date < start_date
+        )
 
     @staticmethod
     def _parse_year_month(date_str: str) -> Optional[Tuple[int, int]]:
@@ -156,7 +223,7 @@ class Report:
                 if self._initial_balance >= 0
                 else f"({abs(self._initial_balance):.2f})"
             )
-            table.add_row(["", "Initial Balance", "", balance_str])
+            table.add_row(["", self._balance_label, "", balance_str])
 
         sorted_records = sorted(self._records, key=lambda r: r.date)
 

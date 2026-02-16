@@ -42,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improve PDF font registration to support Cyrillic on Windows/Linux, with multiple fallbacks.
 - Improve GUI error handling: export/import handlers now log exceptions for diagnostics.
 - Redesign GUI (tabs, error handling, and visual feedback).
+- Fix filtered report totals to use period opening balance instead of global initial balance.
+- Update report export rows (`CSV/XLSX/PDF`) to show opening balance label for filtered periods.
+- Update GUI report summary label to show `Opening balance` for filtered reports and `Initial balance` otherwise.
+- Expand `Report` tests to cover year/month/day filters, opening-balance invariant, and edge cases.
 
 ### Documentation
 
@@ -50,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add web application section to README.md with features, setup, and structure details
 - Document main window infographics in README.md and README_EN.md
 - Update READMEs and CHANGELOG to reflect GUI refactor, improved logging and font handling
+- Add section `Opening Balance in Filtered Reports` to `README.md` and `README_EN.md`.
 
 ### Initial
 
