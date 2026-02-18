@@ -6,11 +6,15 @@ from hashlib import sha1
 
 from app.use_cases import (
     AddMandatoryExpenseToReport,
+    CreateExpense,
+    CreateIncome,
     CreateMandatoryExpense,
     DeleteAllMandatoryExpenses,
     DeleteAllRecords,
     DeleteMandatoryExpense,
     DeleteRecord,
+    GenerateReport,
+    GetMandatoryExpenses,
 )
 from domain.import_policy import ImportPolicy
 from domain.records import IncomeRecord, MandatoryExpenseRecord, Record
@@ -38,6 +42,39 @@ class FinancialController:
 
     def delete_all_records(self) -> None:
         DeleteAllRecords(self._repository).execute()
+
+    def create_income(self, *, date: str, amount: float, currency: str, category: str) -> None:
+        CreateIncome(self._repository, self._currency).execute(
+            date=date, amount=amount, currency=currency, category=category
+        )
+
+    def create_expense(self, *, date: str, amount: float, currency: str, category: str) -> None:
+        CreateExpense(self._repository, self._currency).execute(
+            date=date, amount=amount, currency=currency, category=category
+        )
+
+    def generate_report(self):
+        return GenerateReport(self._repository).execute()
+
+    def create_mandatory_expense(
+        self,
+        *,
+        amount: float,
+        currency: str,
+        category: str,
+        description: str,
+        period: str,
+    ) -> None:
+        CreateMandatoryExpense(self._repository, self._currency).execute(
+            amount=amount,
+            currency=currency,
+            category=category,
+            description=description,
+            period=period,
+        )
+
+    def load_mandatory_expenses(self) -> list[MandatoryExpenseRecord]:
+        return GetMandatoryExpenses(self._repository).execute()
 
     def add_mandatory_to_report(self, mandatory_index: int, record_date: str) -> bool:
         return AddMandatoryExpenseToReport(self._repository).execute(mandatory_index, record_date)

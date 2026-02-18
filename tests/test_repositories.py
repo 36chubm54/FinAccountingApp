@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import threading
+from datetime import date
 
 import pytest
 
@@ -33,7 +34,7 @@ class TestJsonFileRecordRepository:
         self.repo.save(record)
         records = self.repo.load_all()
         assert len(records) == 1
-        assert records[0].date == "2025-01-01"
+        assert records[0].date == date(2025, 1, 1)
         assert records[0].amount == 100.0
         assert records[0].category == "Salary"
         assert isinstance(records[0], IncomeRecord)
@@ -43,7 +44,7 @@ class TestJsonFileRecordRepository:
         self.repo.save(record)
         records = self.repo.load_all()
         assert len(records) == 1
-        assert records[0].date == "2025-01-02"
+        assert records[0].date == date(2025, 1, 2)
         assert records[0].amount == 50.0
         assert records[0].category == "Food"
         assert isinstance(records[0], ExpenseRecord)
@@ -229,7 +230,10 @@ class TestJsonFileRecordRepository:
         # Verify JSON file
         with open(self.temp_file.name, encoding="utf-8") as f:
             data = json.load(f)
-        assert data["initial_balance"] == 100.0
+        assert data["initial_balance"] == 0.0
+        assert "wallets" in data
+        assert data["wallets"][0]["id"] == 1
+        assert data["wallets"][0]["initial_balance"] == 100.0
         assert data["records"] == []
 
     def test_load_initial_balance_default(self):
@@ -259,7 +263,8 @@ class TestJsonFileRecordRepository:
         # Verify JSON file
         with open(self.temp_file.name, encoding="utf-8") as f:
             data = json.load(f)
-        assert data["initial_balance"] == 200.0
+        assert data["initial_balance"] == 0.0
+        assert data["wallets"][0]["initial_balance"] == 200.0
         assert len(data["records"]) == 1
 
     def test_concurrent_access_save_and_load(self):

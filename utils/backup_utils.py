@@ -2,6 +2,7 @@ import json
 import logging
 import os
 from collections.abc import Sequence
+from datetime import date as dt_date
 
 from domain.import_policy import ImportPolicy
 from domain.records import MandatoryExpenseRecord, Record
@@ -20,7 +21,7 @@ def export_full_backup_to_json(
     payload_records = []
     for record in records:
         item = {
-            "date": record.date,
+            "date": record.date.isoformat() if isinstance(record.date, dt_date) else record.date,
             "type": record_type_name(record),
             "category": record.category,
             "amount_original": record.amount_original,
@@ -39,7 +40,9 @@ def export_full_backup_to_json(
     for expense in mandatory_expenses:
         payload_mandatory.append(
             {
-                "date": expense.date,
+                "date": expense.date.isoformat()
+                if isinstance(expense.date, dt_date)
+                else expense.date,
                 "type": "mandatory_expense",
                 "category": expense.category,
                 "amount_original": expense.amount_original,

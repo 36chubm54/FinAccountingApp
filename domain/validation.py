@@ -3,7 +3,9 @@ import re
 from datetime import date
 
 
-def parse_ymd(value: str) -> date:
+def parse_ymd(value: str | date) -> date:
+    if isinstance(value, date):
+        return value
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
         raise ValueError("Invalid date format")
     parts = value.split("-")

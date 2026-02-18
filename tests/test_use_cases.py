@@ -1,5 +1,6 @@
 import os
 import tempfile
+from datetime import date
 from unittest.mock import Mock, patch
 
 import pytest
@@ -239,7 +240,7 @@ class TestImportFromCSV:
             assert repository.load_initial_balance() == 77.0
             records = repository.load_all()
             assert len(records) == 1
-            assert records[0].date == "2025-01-01"
+            assert records[0].date == date(2025, 1, 1)
         finally:
             os.unlink(repo_file.name)
             os.unlink(csv_file.name)

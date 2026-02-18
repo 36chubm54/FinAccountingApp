@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
@@ -6,7 +8,7 @@ from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, 
 class TestIncomeRecord:
     def test_creation_with_category(self):
         record = IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
-        assert record.date == "2025-01-01"
+        assert record.date == date(2025, 1, 1)
         assert record.amount == 100.0
         assert record.category == "Salary"
 
@@ -27,7 +29,7 @@ class TestIncomeRecord:
 
     def test_date_is_normalized_to_iso(self):
         record = IncomeRecord(date=" 2025-01-01 ", _amount_init=100.0, category="Salary")
-        assert record.date == "2025-01-01"
+        assert record.date == date(2025, 1, 1)
 
     def test_malformed_date_raises(self):
         with pytest.raises(ValueError):
@@ -37,7 +39,7 @@ class TestIncomeRecord:
 class TestExpenseRecord:
     def test_creation_with_category(self):
         record = ExpenseRecord(date="2025-01-01", _amount_init=50.0, category="Food")
-        assert record.date == "2025-01-01"
+        assert record.date == date(2025, 1, 1)
         assert record.amount == 50.0
         assert record.category == "Food"
 
@@ -66,7 +68,7 @@ class TestMandatoryExpenseRecord:
             description="Rent payment",
             period="monthly",
         )
-        assert record.date == "2025-01-01"
+        assert record.date == date(2025, 1, 1)
         assert record.amount == 100.0
         assert record.category == "Mandatory"
         assert record.description == "Rent payment"

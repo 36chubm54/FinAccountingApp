@@ -4,13 +4,26 @@ import os
 import tempfile
 import threading
 from abc import ABC, abstractmethod
+from datetime import date as dt_date
 
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
+from domain.wallets import Wallet
 
 logger = logging.getLogger(__name__)
+SYSTEM_WALLET_ID = 1
 
 
 class RecordRepository(ABC):
+    @abstractmethod
+    def load_wallets(self) -> list[Wallet]:
+        """Load all wallets."""
+        pass
+
+    @abstractmethod
+    def get_system_wallet(self) -> Wallet:
+        """Return system wallet."""
+        pass
+
     @abstractmethod
     def save(self, record: Record) -> None:
         pass
@@ -93,6 +106,37 @@ class JsonFileRecordRepository(RecordRepository):
                 self._path_locks[abs_path] = threading.RLock()
             self._lock = self._path_locks[abs_path]
 
+    @staticmethod
+    def _wallet_to_dict(wallet: Wallet) -> dict:
+        return {
+            "id": int(wallet.id),
+            "name": str(wallet.name),
+            "currency": str(wallet.currency or "KZT").upper(),
+            "initial_balance": float(wallet.initial_balance),
+            "system": bool(wallet.system),
+        }
+
+    @classmethod
+    def _build_system_wallet(cls, currency: str, initial_balance: float) -> dict:
+        return cls._wallet_to_dict(
+            Wallet(
+                id=SYSTEM_WALLET_ID,
+                name="Main wallet",
+                currency=currency,
+                initial_balance=float(initial_balance),
+                system=True,
+            )
+        )
+
+    @staticmethod
+    def _resolve_base_currency(records: list) -> str:
+        for item in records:
+            if isinstance(item, dict):
+                currency = str(item.get("currency", "") or "").strip().upper()
+                if currency:
+                    return currency
+        return "KZT"
+
     def _load_data(self) -> dict:
         with self._lock:
             try:
@@ -103,23 +147,100 @@ class JsonFileRecordRepository(RecordRepository):
                     "Failed to load JSON data from %s, using empty dataset",
                     self._file_path,
                 )
-                return {"initial_balance": 0.0, "records": [], "mandatory_expenses": []}
+                return {
+                    "initial_balance": 0.0,
+                    "wallets": [self._build_system_wallet("KZT", 0.0)],
+                    "records": [],
+                    "mandatory_expenses": [],
+                }
         if isinstance(data, list):
             # Migrate old format
             logger.info("Migrating JSON repository format: list -> object")
             data = {"initial_balance": 0.0, "records": data}
         if not isinstance(data, dict):
             logger.info("Migrating JSON repository format: invalid root -> default object")
-            data = {"initial_balance": 0.0, "records": [], "mandatory_expenses": []}
+            data = {
+                "initial_balance": 0.0,
+                "wallets": [self._build_system_wallet("KZT", 0.0)],
+                "records": [],
+                "mandatory_expenses": [],
+            }
 
+        migrated = False
         if "initial_balance" not in data or not isinstance(
             data.get("initial_balance"), (int, float)
         ):
             data["initial_balance"] = 0.0
+            migrated = True
         if "records" not in data or not isinstance(data.get("records"), list):
             data["records"] = []
+            migrated = True
         if "mandatory_expenses" not in data or not isinstance(data.get("mandatory_expenses"), list):
             data["mandatory_expenses"] = []
+            migrated = True
+
+        legacy_initial_balance = float(data.get("initial_balance", 0.0))
+        wallets = data.get("wallets")
+        if not isinstance(wallets, list):
+            wallets = []
+            migrated = True
+
+        if not wallets:
+            base_currency = self._resolve_base_currency(data["records"])
+            wallets = [self._build_system_wallet(base_currency, legacy_initial_balance)]
+            data["wallets"] = wallets
+            data["initial_balance"] = 0.0
+            migrated = True
+        else:
+            normalized_wallets: list[dict] = []
+            has_system_wallet = False
+            for index, wallet_item in enumerate(wallets):
+                if not isinstance(wallet_item, dict):
+                    logger.warning("Skipping non-dict wallet at index %s", index)
+                    migrated = True
+                    continue
+                wallet_id = int(self._as_float(wallet_item.get("id"), 0.0))
+                if wallet_id <= 0:
+                    migrated = True
+                    continue
+                wallet_payload = {
+                    "id": wallet_id,
+                    "name": str(wallet_item.get("name", "") or f"Wallet {wallet_id}"),
+                    "currency": str(wallet_item.get("currency", "KZT") or "KZT").upper(),
+                    "initial_balance": self._as_float(wallet_item.get("initial_balance"), 0.0),
+                    "system": bool(wallet_item.get("system", False)),
+                }
+                if wallet_id == SYSTEM_WALLET_ID:
+                    has_system_wallet = True
+                    wallet_payload["system"] = True
+                normalized_wallets.append(wallet_payload)
+            wallets = normalized_wallets
+            if not has_system_wallet:
+                base_currency = self._resolve_base_currency(data["records"])
+                wallets.insert(0, self._build_system_wallet(base_currency, legacy_initial_balance))
+                migrated = True
+            elif legacy_initial_balance != 0.0:
+                for wallet_item in wallets:
+                    if int(wallet_item.get("id", 0)) == SYSTEM_WALLET_ID:
+                        wallet_item["initial_balance"] = (
+                            self._as_float(wallet_item.get("initial_balance"), 0.0)
+                            + legacy_initial_balance
+                        )
+                        break
+                migrated = True
+            data["wallets"] = wallets
+            data["initial_balance"] = 0.0
+
+        for item in data["records"]:
+            if isinstance(item, dict) and "wallet_id" not in item:
+                item["wallet_id"] = SYSTEM_WALLET_ID
+                migrated = True
+
+        if migrated:
+            try:
+                self._save_data(data)
+            except Exception:
+                logger.exception("Failed to persist repository migration for %s", self._file_path)
         return data
 
     def _save_data(self, data: dict) -> None:
@@ -145,9 +266,11 @@ class JsonFileRecordRepository(RecordRepository):
             return default
 
     def _record_to_dict(self, record: Record, record_type: str) -> dict:
+        record_date = record.date.isoformat() if isinstance(record.date, dt_date) else record.date
         payload = {
             "type": record_type,
-            "date": record.date,
+            "date": record_date,
+            "wallet_id": int(getattr(record, "wallet_id", SYSTEM_WALLET_ID)),
             "amount_original": record.amount_original,
             "currency": record.currency,
             "rate_at_operation": record.rate_at_operation,
@@ -175,12 +298,47 @@ class JsonFileRecordRepository(RecordRepository):
 
         return {
             "date": str(item.get("date", "") or ""),
+            "wallet_id": int(self._as_float(item.get("wallet_id"), float(SYSTEM_WALLET_ID))),
             "amount_original": amount_original,
             "currency": currency,
             "rate_at_operation": rate_at_operation,
             "amount_kzt": amount_kzt,
             "category": str(item.get("category", "General") or "General"),
         }
+
+    def load_wallets(self) -> list[Wallet]:
+        data = self._load_data()
+        wallets: list[Wallet] = []
+        for index, item in enumerate(data.get("wallets", [])):
+            if not isinstance(item, dict):
+                logger.warning("Skipping non-dict wallet at index %s", index)
+                continue
+            wallet_id = int(self._as_float(item.get("id"), 0.0))
+            if wallet_id <= 0:
+                continue
+            wallets.append(
+                Wallet(
+                    id=wallet_id,
+                    name=str(item.get("name", "") or f"Wallet {wallet_id}"),
+                    currency=str(item.get("currency", "KZT") or "KZT").upper(),
+                    initial_balance=self._as_float(item.get("initial_balance"), 0.0),
+                    system=bool(item.get("system", wallet_id == SYSTEM_WALLET_ID)),
+                )
+            )
+        return wallets
+
+    def get_system_wallet(self) -> Wallet:
+        wallets = self.load_wallets()
+        for wallet in wallets:
+            if wallet.id == SYSTEM_WALLET_ID or wallet.system:
+                return wallet
+        return Wallet(
+            id=SYSTEM_WALLET_ID,
+            name="Main wallet",
+            currency="KZT",
+            initial_balance=0.0,
+            system=True,
+        )
 
     def save(self, record: Record) -> None:
         with self._lock:
@@ -244,16 +402,27 @@ class JsonFileRecordRepository(RecordRepository):
             self._save_data(data)
 
     def save_initial_balance(self, balance: float) -> None:
-        """Save initial balance."""
+        """Save initial balance to the system wallet (legacy API)."""
         with self._lock:
             data = self._load_data()
-            data["initial_balance"] = balance
+            wallets = data.get("wallets", [])
+            updated = False
+            for wallet in wallets:
+                if isinstance(wallet, dict) and int(wallet.get("id", 0)) == SYSTEM_WALLET_ID:
+                    wallet["initial_balance"] = float(balance)
+                    wallet["system"] = True
+                    updated = True
+                    break
+            if not updated:
+                base_currency = self._resolve_base_currency(data.get("records", []))
+                wallets.insert(0, self._build_system_wallet(base_currency, float(balance)))
+            data["wallets"] = wallets
+            data["initial_balance"] = 0.0
             self._save_data(data)
 
     def load_initial_balance(self) -> float:
-        """Load initial balance. Returns 0.0 if not set."""
-        data = self._load_data()
-        return data.get("initial_balance", 0.0)
+        """Load system-wallet initial balance (legacy API)."""
+        return self.get_system_wallet().initial_balance
 
     def save_mandatory_expense(self, expense: MandatoryExpenseRecord) -> None:
         """Save mandatory expense."""
@@ -303,7 +472,19 @@ class JsonFileRecordRepository(RecordRepository):
     def replace_records(self, records: list[Record], initial_balance: float) -> None:
         with self._lock:
             data = self._load_data()
-            data["initial_balance"] = float(initial_balance)
+            wallets = data.get("wallets", [])
+            updated = False
+            for wallet in wallets:
+                if isinstance(wallet, dict) and int(wallet.get("id", 0)) == SYSTEM_WALLET_ID:
+                    wallet["initial_balance"] = float(initial_balance)
+                    wallet["system"] = True
+                    updated = True
+                    break
+            if not updated:
+                base_currency = self._resolve_base_currency(data.get("records", []))
+                wallets.insert(0, self._build_system_wallet(base_currency, float(initial_balance)))
+            data["wallets"] = wallets
+            data["initial_balance"] = 0.0
             data["records"] = []
             for record in records:
                 if isinstance(record, MandatoryExpenseRecord):
@@ -331,8 +512,15 @@ class JsonFileRecordRepository(RecordRepository):
         mandatory_expenses: list[MandatoryExpenseRecord],
     ) -> None:
         with self._lock:
+            base_currency = "KZT"
+            for record in records:
+                currency = str(getattr(record, "currency", "") or "").upper()
+                if currency:
+                    base_currency = currency
+                    break
             data = {
-                "initial_balance": float(initial_balance),
+                "initial_balance": 0.0,
+                "wallets": [self._build_system_wallet(base_currency, float(initial_balance))],
                 "records": [],
                 "mandatory_expenses": [],
             }

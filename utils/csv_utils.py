@@ -1,6 +1,7 @@
 import csv
 import logging
 import os
+from datetime import date as dt_date
 
 from domain.import_policy import ImportPolicy
 from domain.records import MandatoryExpenseRecord, Record
@@ -38,7 +39,10 @@ def _resolve_get_rate(currency_service):
 
 def report_to_csv(report: Report, filepath: str) -> None:
     """Export report view (fixed amounts) to CSV. Read-only format."""
-    sorted_records = sorted(report.records(), key=lambda r: r.date)
+    sorted_records = sorted(
+        report.records(),
+        key=lambda r: (0, r.date) if isinstance(r.date, dt_date) else (1, dt_date.max),
+    )
     with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow([report.statement_title, "", "", ""])
@@ -62,7 +66,10 @@ def report_to_csv(report: Report, filepath: str) -> None:
                 record_type = "Mandatory Expense"
             else:
                 record_type = "Expense"
-            writer.writerow([record.date, record_type, record.category, f"{record.amount_kzt:.2f}"])
+            record_date = (
+                record.date.isoformat() if isinstance(record.date, dt_date) else record.date
+            )
+            writer.writerow([record_date, record_type, record.category, f"{record.amount_kzt:.2f}"])
 
         records_total = sum(r.signed_amount_kzt() for r in report.records())
         writer.writerow(["SUBTOTAL", "", "", f"{records_total:.2f}"])
@@ -98,7 +105,9 @@ def export_records_to_csv(
 
         for record in records:
             payload = {
-                "date": record.date,
+                "date": record.date.isoformat()
+                if isinstance(record.date, dt_date)
+                else record.date,
                 "type": record_type_name(record),
                 "category": record.category,
                 "amount_original": record.amount_original,
@@ -203,7 +212,9 @@ def export_mandatory_expenses_to_csv(expenses: list[MandatoryExpenseRecord], fil
         for expense in expenses:
             writer.writerow(
                 {
-                    "date": expense.date,
+                    "date": expense.date.isoformat()
+                    if isinstance(expense.date, dt_date)
+                    else expense.date,
                     "type": "mandatory_expense",
                     "category": expense.category,
                     "amount_original": expense.amount_original,

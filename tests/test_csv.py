@@ -1,6 +1,7 @@
 import csv
 import os
 import tempfile
+from datetime import date
 
 import pytest
 
@@ -97,19 +98,19 @@ TOTAL,,,-2000.00"""
         assert len(records) == 3
 
         # Check first record (Income)
-        assert records[0].date == "2025-01-01"
+        assert records[0].date == date(2025, 1, 1)
         assert isinstance(records[0], IncomeRecord)
         assert records[0].category == "Salary"
         assert records[0].amount == 100000.0
 
         # Check second record (Expense)
-        assert records[1].date == "2025-01-02"
+        assert records[1].date == date(2025, 1, 2)
         assert isinstance(records[1], ExpenseRecord)
         assert records[1].category == "Food"
         assert records[1].amount == 15000.0
 
         # Check third record (Income)
-        assert records[2].date == "2025-01-03"
+        assert records[2].date == date(2025, 1, 3)
         assert isinstance(records[2], IncomeRecord)
         assert records[2].category == "Bonus"
         assert records[2].amount == 50000.0

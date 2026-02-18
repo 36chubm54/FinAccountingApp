@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
@@ -94,7 +96,7 @@ class TestReport:
         report = Report(records)
         sorted_report = report.sorted_by_date()
         sorted_dates = [r.date for r in sorted_report.records()]
-        assert sorted_dates == ["2025-01-01", "2025-01-02", "2025-01-03"]
+        assert sorted_dates == [date(2025, 1, 1), date(2025, 1, 2), date(2025, 1, 3)]
 
     def test_records_returns_copy(self):
         records = [IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")]
@@ -243,9 +245,9 @@ def test_filter_by_period_range_limits_end_date():
     report = _build_opening_balance_test_report()
     filtered = report.filter_by_period_range("2024", "2024-03")
     assert [r.date for r in filtered.records()] == [
-        "2024-01-10",
-        "2024-03-05",
-        "2024-03-20",
+        date(2024, 1, 10),
+        date(2024, 3, 5),
+        date(2024, 3, 20),
     ]
     assert filtered.period_start_date == "2024-01-01"
     assert filtered.period_end_date == "2024-03-31"
@@ -266,7 +268,7 @@ def test_filter_by_year_includes_boundary_dates():
     ]
     report = Report(records, initial_balance=0.0)
     filtered = report.filter_by_period("2025")
-    assert [r.date for r in filtered.records()] == ["2025-01-01", "2025-12-31"]
+    assert [r.date for r in filtered.records()] == [date(2025, 1, 1), date(2025, 12, 31)]
 
 
 def test_filter_by_year_month_includes_month_boundaries():
@@ -277,7 +279,7 @@ def test_filter_by_year_month_includes_month_boundaries():
     ]
     report = Report(records, initial_balance=0.0)
     filtered = report.filter_by_period("2025-03")
-    assert [r.date for r in filtered.records()] == ["2025-03-01", "2025-03-31"]
+    assert [r.date for r in filtered.records()] == [date(2025, 3, 1), date(2025, 3, 31)]
 
 
 def test_filter_skips_records_without_date():

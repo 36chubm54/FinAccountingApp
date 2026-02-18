@@ -12,6 +12,7 @@ Graphical and web application for personal financial accounting with multicurren
 - [File structure](#-file-structure)
 - [Tests](#-tests)
 - [Supported currencies](#-supported-currencies)
+- [Wallet Support (Phase 1)](#wallet-support-phase-1)
 
 ---
 
@@ -118,6 +119,19 @@ Export report:
 - For `YYYY-MM`, period start is `YYYY-MM-01`.
 - For `YYYY-MM-DD`, period start is the provided date.
 - The period filter cannot point to a future date (for all supported formats).
+
+### Wallet Support (Phase 1)
+
+- Added `Wallet` domain entity (`id`, `name`, `currency`, `initial_balance`, `system`).
+- Added a system wallet for compatibility:
+  `id=1`, `name="Main wallet"`, `system=True`.
+- Legacy migration rules:
+  move `global initial_balance` into `wallet.initial_balance`,
+  assign `wallet_id=1` to existing records,
+  set root JSON `initial_balance` to `0`.
+- Transfer is intentionally not implemented in this phase.
+- User behavior remains unchanged:
+  no wallet selector in the UI yet, and new records are auto-assigned to `wallet_id=1`.
 - Formula:
   `opening_balance = initial_balance + sum(signed_amount for date < start_date)`.
 - Filtered reports use `opening balance` and the row label `Opening balance`.

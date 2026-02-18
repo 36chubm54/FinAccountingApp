@@ -1,6 +1,7 @@
 import gc
 import logging
 import os
+from datetime import date as dt_date
 
 from openpyxl import Workbook, load_workbook
 
@@ -54,7 +55,10 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
     if (getattr(report, "initial_balance", 0) != 0 or report.is_opening_balance) and ws is not None:
         ws.append(["", report.balance_label, "", f"{report.initial_balance:.2f}"])
 
-    for record in sorted(report.records(), key=lambda r: r.date):
+    for record in sorted(
+        report.records(),
+        key=lambda r: (0, r.date) if isinstance(r.date, dt_date) else (1, dt_date.max),
+    ):
         typ = record_type_name(record)
         if typ == "income":
             record_type = "Income"
@@ -63,7 +67,10 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
         else:
             record_type = "Expense"
         if ws is not None:
-            ws.append([record.date, record_type, record.category, f"{record.amount_kzt:.2f}"])
+            record_date = (
+                record.date.isoformat() if isinstance(record.date, dt_date) else record.date
+            )
+            ws.append([record_date, record_type, record.category, f"{record.amount_kzt:.2f}"])
 
     total = report.total_fixed()
     records_total = sum(r.signed_amount_kzt() for r in report.records())
@@ -93,7 +100,10 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
         bycat_ws.append([f"Category: {category}"])
         bycat_ws.append(["Date", "Type", "Amount (KZT)"])
         records_total = 0.0
-        for r in sorted(subreport.records(), key=lambda rr: rr.date):
+        for r in sorted(
+            subreport.records(),
+            key=lambda rr: (0, rr.date) if isinstance(rr.date, dt_date) else (1, dt_date.max),
+        ):
             typ = record_type_name(r)
             if typ == "income":
                 r_type = "Income"
@@ -105,7 +115,10 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
             records_total += (
                 getattr(r, "amount", 0.0) if getattr(r, "amount", None) is not None else 0.0
             )
-            bycat_ws.append([getattr(r, "date", ""), r_type, f"{abs(amt):.2f}"])
+            display_date = getattr(r, "date", "")
+            if isinstance(display_date, dt_date):
+                display_date = display_date.isoformat()
+            bycat_ws.append([display_date, r_type, f"{abs(amt):.2f}"])
         bycat_ws.append(["SUBTOTAL", "", f"{abs(records_total):.2f}"])
         bycat_ws.append([""])
 
@@ -147,7 +160,7 @@ def export_records_to_xlsx(
 
     for record in records:
         payload = [
-            record.date,
+            record.date.isoformat() if isinstance(record.date, dt_date) else record.date,
             record_type_name(record),
             record.category,
             record.amount_original,
@@ -277,7 +290,7 @@ def export_mandatory_expenses_to_xlsx(
         if ws is not None:
             ws.append(
                 [
-                    e.date,
+                    e.date.isoformat() if isinstance(e.date, dt_date) else e.date,
                     "mandatory_expense",
                     e.category,
                     e.amount_original,

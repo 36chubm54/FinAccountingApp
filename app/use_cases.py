@@ -8,6 +8,7 @@ from infrastructure.repositories import RecordRepository
 from .services import CurrencyService
 
 logger = logging.getLogger(__name__)
+SYSTEM_WALLET_ID = 1
 
 
 def _build_rate(amount: float, amount_kzt: float, currency: str) -> float:
@@ -30,6 +31,7 @@ class CreateIncome:
         amount_kzt = self._currency.convert(amount, currency)
         record = IncomeRecord(
             date=date,
+            wallet_id=SYSTEM_WALLET_ID,
             amount_original=amount,
             currency=currency.upper(),
             rate_at_operation=_build_rate(amount, amount_kzt, currency),
@@ -51,6 +53,7 @@ class CreateExpense:
         amount_kzt = self._currency.convert(amount, currency)
         record = ExpenseRecord(
             date=date,
+            wallet_id=SYSTEM_WALLET_ID,
             amount_original=amount,
             currency=currency.upper(),
             rate_at_operation=_build_rate(amount, amount_kzt, currency),
@@ -64,8 +67,12 @@ class GenerateReport:
     def __init__(self, repository: RecordRepository):
         self._repository = repository
 
-    def execute(self) -> Report:
-        return Report(self._repository.load_all(), self._repository.load_initial_balance())
+    def execute(self, wallet_id: int | None = SYSTEM_WALLET_ID) -> Report:
+        return Report(
+            self._repository.load_all(),
+            self._repository.load_initial_balance(),
+            wallet_id=wallet_id,
+        )
 
 
 class DeleteRecord:
@@ -128,6 +135,7 @@ class CreateMandatoryExpense:
         amount_kzt = self._currency.convert(amount, currency)
         expense = MandatoryExpenseRecord(
             date="",  # Will be set when added to report
+            wallet_id=SYSTEM_WALLET_ID,
             amount_original=amount,
             currency=currency.upper(),
             rate_at_operation=_build_rate(amount, amount_kzt, currency),
@@ -178,6 +186,7 @@ class AddMandatoryExpenseToReport:
             # Create a new record with the specified date
             record = MandatoryExpenseRecord(
                 date=date,
+                wallet_id=SYSTEM_WALLET_ID,
                 amount_original=expense.amount_original,
                 currency=expense.currency,
                 rate_at_operation=expense.rate_at_operation,

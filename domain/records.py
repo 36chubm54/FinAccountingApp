@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import InitVar, dataclass
+from datetime import date as dt_date
 from typing import Literal
 
 from .validation import parse_ymd
@@ -7,7 +8,8 @@ from .validation import parse_ymd
 
 @dataclass(frozen=True)
 class Record(ABC):
-    date: str
+    date: dt_date | str
+    wallet_id: int = 1
     amount_original: float | None = None
     currency: str = "KZT"
     rate_at_operation: float = 1.0
@@ -16,10 +18,15 @@ class Record(ABC):
     _amount_init: InitVar[float | None] = None
 
     def __post_init__(self, amount: float | None) -> None:
-        normalized_date = (self.date or "").strip()
-        if normalized_date:
-            parsed = parse_ymd(normalized_date)
-            object.__setattr__(self, "date", parsed.isoformat())
+        date_value: dt_date | None = None
+        if isinstance(self.date, dt_date):
+            date_value = self.date
+        else:
+            normalized_date = (self.date or "").strip()
+            if normalized_date:
+                date_value = parse_ymd(normalized_date)
+        if date_value is not None:
+            object.__setattr__(self, "date", date_value)
 
         if self.amount_original is None and amount is not None:
             object.__setattr__(self, "amount_original", float(amount))
@@ -37,6 +44,14 @@ class Record(ABC):
 
         if not self.currency:
             object.__setattr__(self, "currency", "KZT")
+
+        try:
+            wallet_id = int(self.wallet_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("wallet_id must be an integer") from exc
+        if wallet_id <= 0:
+            raise ValueError("wallet_id must be a positive integer")
+        object.__setattr__(self, "wallet_id", wallet_id)
 
     def signed_amount(self) -> float:
         """Backward-compatible alias."""

@@ -17,13 +17,6 @@ from tkinter import (
 from typing import Any
 
 from app.services import CurrencyService
-from app.use_cases import (
-    CreateExpense,
-    CreateIncome,
-    CreateMandatoryExpense,
-    GenerateReport,
-    GetMandatoryExpenses,
-)
 from domain.import_policy import ImportPolicy
 from domain.reports import Report
 from gui.controllers import FinancialController
@@ -314,9 +307,14 @@ class FinancialApp(tk.Tk):
             category = (category_entry.get() or "General").strip()
 
             try:
-                use_class = CreateIncome if type_var.get() == "Income" else CreateExpense
-                use_case = use_class(self.repository, self.currency)
-                use_case.execute(date=date_str, amount=amount, currency=currency, category=category)
+                if type_var.get() == "Income":
+                    self.controller.create_income(
+                        date=date_str, amount=amount, currency=currency, category=category
+                    )
+                else:
+                    self.controller.create_expense(
+                        date=date_str, amount=amount, currency=currency, category=category
+                    )
                 if type_var.get() == "Income":
                     messagebox.showinfo("Success", "Income record added.")
                 else:  # Expense
@@ -562,7 +560,7 @@ class FinancialApp(tk.Tk):
         ).grid(row=2, column=2, sticky="w", padx=(12, 0))
 
         def generate():
-            report = GenerateReport(self.repository).execute()
+            report = self.controller.generate_report()
             period_start = period_start_entry.get().strip()
             period_end = period_end_entry.get().strip()
             if period_start:
@@ -728,7 +726,7 @@ class FinancialApp(tk.Tk):
 
         def refresh_mandatory():
             mand_listbox.delete(0, tk.END)
-            expenses = GetMandatoryExpenses(self.repository).execute()
+            expenses = self.controller.load_mandatory_expenses()
             for i, expense in enumerate(expenses):
                 mand_listbox.insert(
                     tk.END,
@@ -792,7 +790,7 @@ class FinancialApp(tk.Tk):
                     if not description:
                         messagebox.showerror("Error", "Description is required.")
                         return
-                    CreateMandatoryExpense(self.repository, self.currency).execute(
+                    self.controller.create_mandatory_expense(
                         amount=amount,
                         currency=(currency_entry.get() or "KZT").strip(),
                         category=(category_entry.get() or "Mandatory").strip(),
@@ -965,7 +963,7 @@ class FinancialApp(tk.Tk):
 
         def export_mand():
             fmt = format_var.get()
-            expenses = GetMandatoryExpenses(self.repository).execute()
+            expenses = self.controller.load_mandatory_expenses()
             if not expenses:
                 messagebox.showinfo("No Expenses", "No mandatory expenses to export.")
                 return
@@ -1249,7 +1247,10 @@ class FinancialApp(tk.Tk):
         filtered = []
         for record in records:
             try:
-                dt = datetime.strptime(record.date, "%Y-%m-%d")
+                if isinstance(record.date, date):
+                    dt = datetime.combine(record.date, datetime.min.time())
+                else:
+                    dt = datetime.strptime(record.date, "%Y-%m-%d")
             except Exception:
                 continue
             if dt.year == year and dt.month == month:

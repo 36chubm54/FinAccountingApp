@@ -12,6 +12,7 @@
 - [Файловая структура](#-файловая-структура)
 - [Тесты](#-тесты)
 - [Поддерживаемые валюты](#-поддерживаемые-валюты)
+- [Wallet Support (Phase 1)](#wallet-support-phase-1)
 
 ---
 
@@ -118,6 +119,19 @@ python main.py
 - Для фильтра `YYYY-MM` старт периода: `YYYY-MM-01`.
 - Для фильтра `YYYY-MM-DD` старт периода: указанная дата.
 - Фильтр периода не может указывать на будущую дату (для всех форматов).
+
+### Wallet Support (Phase 1)
+
+- В домен добавлена сущность `Wallet` (`id`, `name`, `currency`, `initial_balance`, `system`).
+- Для совместимости создан системный кошелёк:
+  `id=1`, `name="Main wallet"`, `system=True`.
+- При миграции старых данных:
+  `global initial_balance` переносится в `wallet.initial_balance`,
+  всем существующим записям назначается `wallet_id=1`,
+  поле `initial_balance` в корне JSON устанавливается в `0`.
+- Transfer на этом этапе не реализован.
+- Поведение интерфейса для пользователя не изменилось:
+  выбор кошелька в форме не добавлялся, новые записи автоматически относятся к `wallet_id=1`.
 - Формула:
   `opening_balance = initial_balance + sum(signed_amount for date < start_date)`.
 - В отчётах с фильтром используется `opening_balance` и подпись `Opening balance`.

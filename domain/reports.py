@@ -12,12 +12,17 @@ class Report:
         self,
         records: Iterable[Record],
         initial_balance: float = 0.0,
+        wallet_id: int | None = 1,
         balance_label: str = "Initial balance",
         opening_start_date: str | None = None,
         period_start_date: str | None = None,
         period_end_date: str | None = None,
     ):
-        self._records = list(records)
+        if wallet_id is None:
+            self._records = list(records)
+        else:
+            self._records = [record for record in records if record.wallet_id == wallet_id]
+        self._wallet_id = wallet_id
         self._initial_balance = initial_balance
         self._balance_label = balance_label
         self._opening_start_date = opening_start_date
@@ -56,6 +61,7 @@ class Report:
         return Report(
             filtered,
             self.opening_balance(start_date),
+            wallet_id=self._wallet_id,
             balance_label="Opening balance",
             opening_start_date=start_date,
             period_start_date=start_date,
@@ -80,6 +86,7 @@ class Report:
         return Report(
             filtered,
             self.opening_balance(start_date),
+            wallet_id=self._wallet_id,
             balance_label="Opening balance",
             opening_start_date=start_date,
             period_start_date=start_date,
@@ -91,6 +98,7 @@ class Report:
         return Report(
             filtered,
             self._initial_balance,
+            wallet_id=self._wallet_id,
             balance_label=self._balance_label,
             opening_start_date=self._opening_start_date,
             period_start_date=self._period_start_date,
@@ -103,12 +111,13 @@ class Report:
             if record.category not in groups:
                 groups[record.category] = []
             groups[record.category].append(record)
-        return {cat: Report(recs, 0.0) for cat, recs in groups.items()}
+        return {cat: Report(recs, 0.0, wallet_id=None) for cat, recs in groups.items()}
 
     def sorted_by_date(self) -> "Report":
         return Report(
-            sorted(self._records, key=lambda r: r.date),
+            sorted(self._records, key=self._sort_key),
             self._initial_balance,
+            wallet_id=self._wallet_id,
             balance_label=self._balance_label,
             opening_start_date=self._opening_start_date,
             period_start_date=self._period_start_date,
@@ -148,7 +157,7 @@ class Report:
             return f"Transaction statement ({self._period_start_date} - {self._period_end_date})"
         return "Transaction statement"
 
-    def opening_balance(self, start_date: str) -> float:
+    def opening_balance(self, start_date: str | dt_date) -> float:
         start = parse_ymd(start_date)
         total = self._initial_balance
         for record in self._records:
@@ -161,10 +170,12 @@ class Report:
     def _record_date(record: Record) -> dt_date | None:
         if not record.date:
             return None
+        if isinstance(record.date, dt_date):
+            return record.date
         return parse_ymd(record.date)
 
     @staticmethod
-    def _parse_year_month(date_str: str) -> tuple[int, int] | None:
+    def _parse_year_month(date_str: str | dt_date) -> tuple[int, int] | None:
         try:
             if not date_str:
                 return None
@@ -253,7 +264,7 @@ class Report:
             )
             table.add_row(["", self._balance_label, "", balance_str], divider=True)
 
-        sorted_records = sorted(self._records, key=lambda r: r.date)
+        sorted_records = sorted(self._records, key=self._sort_key)
 
         for record in sorted_records:
             if isinstance(record, IncomeRecord):
@@ -266,7 +277,10 @@ class Report:
             amount_str = (
                 f"{amount_value:.2f}" if amount_value >= 0 else f"({abs(amount_value):.2f})"
             )
-            table.add_row([record.date, record_type, record.category, amount_str])
+            display_date = (
+                record.date.isoformat() if isinstance(record.date, dt_date) else record.date
+            )
+            table.add_row([display_date, record_type, record.category, amount_str])
 
         records_total = sum(r.signed_amount_kzt() for r in self._records)
         records_total_str = (
@@ -295,3 +309,10 @@ class Report:
         from utils.csv_utils import report_from_csv
 
         return report_from_csv(filepath)
+
+    @staticmethod
+    def _sort_key(record: Record) -> tuple[int, dt_date]:
+        parsed = Report._record_date(record)
+        if parsed is None:
+            return (1, dt_date.max)
+        return (0, parsed)

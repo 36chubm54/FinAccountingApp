@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from calendar import monthrange
 from collections.abc import Iterable
+from datetime import date as dt_date
 from datetime import datetime
 
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 
 
-def _parse_date(date_str: str) -> datetime | None:
+def _parse_date(date_str: str | dt_date) -> datetime | None:
+    if isinstance(date_str, dt_date):
+        return datetime.combine(date_str, datetime.min.time())
     try:
         return datetime.strptime(date_str, "%Y-%m-%d")
     except Exception:

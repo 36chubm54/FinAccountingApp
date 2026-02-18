@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Wallet Support (Phase 1):
+  - Added `Wallet` domain model and system wallet (`id=1`, `Main wallet`).
+  - Added `wallet_id` to records and automatic assignment to system wallet for new entries.
+  - Added repository migration from legacy `initial_balance` to `wallet.initial_balance` with `initial_balance=0` in root JSON.
+  - Added wallet-focused tests for migration invariants, record creation, report totals, opening balance, and date typing.
 - Add initial balance feature to financial tracker
 - Add mandatory expenses management feature
 - Add CSV import and delete all records features
@@ -35,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated report/domain logic to use normalized `datetime.date` in records and opening-balance computations.
+- Updated GUI flow so operation/report creation goes through `FinancialController` instead of direct use-case calls.
 - Refactor online currency rates fetching (online mode remains opt-in)
 - Replace CLI with Tkinter GUI for financial accounting
 - Refactor: move export/import UI logic into `gui/exporters.py` and `gui/importers.py` and add `gui/helpers.py`.
