@@ -1,20 +1,17 @@
-from domain.reports import Report
-from domain.records import IncomeRecord, ExpenseRecord
 import pytest
+
+from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
+from domain.reports import Report
 
 
 class TestReport:
     def test_creation(self):
-        records = [
-            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
-        ]
+        records = [IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")]
         report = Report(records)
         assert report.records() == records
 
     def test_creation_with_initial_balance(self):
-        records = [
-            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
-        ]
+        records = [IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")]
         report = Report(records, initial_balance=50.0)
         assert report.records() == records
         assert report.total() == 150.0
@@ -24,9 +21,7 @@ class TestReport:
         assert report.total() == 0.0
 
     def test_total_single_income(self):
-        records = [
-            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
-        ]
+        records = [IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")]
         report = Report(records)
         assert report.total() == 100.0
 
@@ -102,9 +97,7 @@ class TestReport:
         assert sorted_dates == ["2025-01-01", "2025-01-02", "2025-01-03"]
 
     def test_records_returns_copy(self):
-        records = [
-            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
-        ]
+        records = [IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")]
         report = Report(records)
         returned_records = report.records()
         returned_records.append(
@@ -263,3 +256,42 @@ def test_filter_by_period_range_raises_when_end_before_start():
     report = _build_opening_balance_test_report()
     with pytest.raises(ValueError):
         report.filter_by_period_range("2024-03", "2024-01")
+
+
+def test_filter_by_year_includes_boundary_dates():
+    records = [
+        IncomeRecord(date="2025-01-01", _amount_init=10.0, category="Salary"),
+        ExpenseRecord(date="2025-12-31", _amount_init=3.0, category="Food"),
+        IncomeRecord(date="2024-12-31", _amount_init=5.0, category="Old"),
+    ]
+    report = Report(records, initial_balance=0.0)
+    filtered = report.filter_by_period("2025")
+    assert [r.date for r in filtered.records()] == ["2025-01-01", "2025-12-31"]
+
+
+def test_filter_by_year_month_includes_month_boundaries():
+    records = [
+        IncomeRecord(date="2025-03-01", _amount_init=10.0, category="Salary"),
+        ExpenseRecord(date="2025-03-31", _amount_init=3.0, category="Food"),
+        IncomeRecord(date="2025-04-01", _amount_init=5.0, category="Next"),
+    ]
+    report = Report(records, initial_balance=0.0)
+    filtered = report.filter_by_period("2025-03")
+    assert [r.date for r in filtered.records()] == ["2025-03-01", "2025-03-31"]
+
+
+def test_filter_skips_records_without_date():
+    records = [
+        IncomeRecord(date="2025-03-10", _amount_init=10.0, category="Salary"),
+        MandatoryExpenseRecord(
+            date="",
+            _amount_init=5.0,
+            category="Rent",
+            description="Template",
+            period="monthly",
+        ),
+        IncomeRecord(date="2025-03-11", _amount_init=2.0, category="Bonus"),
+    ]
+    report = Report(records)
+    filtered = report.filter_by_period("2025-03")
+    assert all(record.date for record in filtered.records())

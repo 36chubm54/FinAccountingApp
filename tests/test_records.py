@@ -1,5 +1,6 @@
 import pytest
-from domain.records import Record, IncomeRecord, ExpenseRecord, MandatoryExpenseRecord
+
+from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 
 
 class TestIncomeRecord:
@@ -23,6 +24,14 @@ class TestIncomeRecord:
         record = IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")
         with pytest.raises(AttributeError):
             record.amount = 200.0  # type: ignore
+
+    def test_date_is_normalized_to_iso(self):
+        record = IncomeRecord(date=" 2025-01-01 ", _amount_init=100.0, category="Salary")
+        assert record.date == "2025-01-01"
+
+    def test_malformed_date_raises(self):
+        with pytest.raises(ValueError):
+            IncomeRecord(date="2025/01/01", _amount_init=10.0, category="Salary")
 
 
 class TestExpenseRecord:

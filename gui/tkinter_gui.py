@@ -1,45 +1,41 @@
-import sys
-from typing import Union, Dict, Optional
-import tkinter as tk
-from tkinter import ttk
 import logging
+import os
+import sys
+import tkinter as tk
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import date, datetime
 from pathlib import Path
 from tkinter import (
-    messagebox,
+    VERTICAL,
     Listbox,
     Scrollbar,
-    VERTICAL,
     filedialog,
+    messagebox,
+    ttk,
 )
-import os
-from datetime import date, datetime
+from typing import Any
 
-from infrastructure.repositories import JsonFileRecordRepository
-from app.use_cases import (
-    CreateIncome,
-    CreateExpense,
-    GenerateReport,
-    DeleteRecord,
-    DeleteAllRecords,
-    CreateMandatoryExpense,
-    GetMandatoryExpenses,
-    DeleteMandatoryExpense,
-    DeleteAllMandatoryExpenses,
-    AddMandatoryExpenseToReport,
-)
-from domain.records import IncomeRecord, MandatoryExpenseRecord
-from domain.import_policy import ImportPolicy
 from app.services import CurrencyService
+from app.use_cases import (
+    CreateExpense,
+    CreateIncome,
+    CreateMandatoryExpense,
+    GenerateReport,
+    GetMandatoryExpenses,
+)
+from domain.import_policy import ImportPolicy
 from domain.reports import Report
+from gui.controllers import FinancialController
+from gui.helpers import open_in_file_manager
+from infrastructure.repositories import JsonFileRecordRepository
 from utils.charting import (
-    aggregate_expenses_by_category,
     aggregate_daily_cashflow,
+    aggregate_expenses_by_category,
     aggregate_monthly_cashflow,
     extract_months,
     extract_years,
 )
-
-from gui.helpers import open_in_file_manager
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +72,11 @@ class FinancialApp(tk.Tk):
             str(Path(__file__).resolve().parent.parent / "records.json")
         )
         self.currency = CurrencyService()
+        self.controller = FinancialController(self.repository, self.currency)
+        self._executor = ThreadPoolExecutor(max_workers=2)
+        self._busy = False
+        self._list_index_to_record_id: dict[int, str] = {}
+        self._record_id_to_repo_index: dict[str, int] = {}
 
         # Build main Notebook with four tabs
         notebook = ttk.Notebook(self)
@@ -97,10 +98,66 @@ class FinancialApp(tk.Tk):
         self.reports_tab(self.tab_reports)
         self.settings_tab(self.tab_settings)
 
+        self.progress = ttk.Progressbar(self, mode="indeterminate")
+        self.progress.pack(fill=tk.X, padx=8, pady=(0, 8))
+        self.progress.pack_forget()
+
         # Initial data refresh
         self._refresh_charts()
 
-    def infographics_tab(self, parent: Union[tk.Frame, ttk.Frame]) -> None:
+    def destroy(self) -> None:
+        self._executor.shutdown(wait=False, cancel_futures=True)
+        super().destroy()
+
+    def _set_busy(self, busy: bool, message: str = "") -> None:
+        self._busy = busy
+        try:
+            self.attributes("-disabled", busy)
+        except Exception:
+            pass
+        if busy:
+            self.progress.pack(fill=tk.X, padx=8, pady=(0, 8))
+            self.progress.start(12)
+            self.title(f"Financial Accounting - {message}" if message else "Financial Accounting")
+            self.config(cursor="watch")
+        else:
+            self.progress.stop()
+            self.progress.pack_forget()
+            self.title("Financial Accounting")
+            self.config(cursor="")
+
+    def _run_background(
+        self,
+        task: Callable[[], Any],
+        *,
+        on_success: Callable[[Any], None],
+        on_error: Callable[[BaseException], None] | None = None,
+        busy_message: str = "Processing...",
+    ) -> None:
+        if self._busy:
+            messagebox.showinfo("Please wait", "Operation is already running.")
+            return
+        self._set_busy(True, busy_message)
+        future: Future[Any] = self._executor.submit(task)
+
+        def _poll() -> None:
+            if not future.done():
+                self.after(100, _poll)
+                return
+            self._set_busy(False)
+            error = future.exception()
+            if error is not None:
+                if on_error is not None:
+                    on_error(error)
+                else:
+                    logger.exception("Background operation failed", exc_info=error)
+                    messagebox.showerror("Error", str(error))
+                return
+            on_success(future.result())
+
+        self.after(100, _poll)
+
+    def infographics_tab(self, parent: tk.Frame | ttk.Frame) -> None:
         pie_frame = tk.LabelFrame(parent, text="Expenses by category")
         pie_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
 
@@ -117,25 +174,19 @@ class FinancialApp(tk.Tk):
         daily_frame.grid(row=1, column=1, sticky="nsew", padx=10, pady=10)
 
         monthly_frame = tk.LabelFrame(parent, text="Income/expense by months of year")
-        monthly_frame.grid(
-            row=2, column=0, columnspan=2, sticky="nsew", padx=10, pady=10
-        )
+        monthly_frame.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
 
         parent.grid_columnconfigure(0, weight=1)
         parent.grid_columnconfigure(1, weight=1)
         parent.grid_rowconfigure(1, weight=1)
         parent.grid_rowconfigure(2, weight=1)
 
-        self.expense_pie_canvas = tk.Canvas(
-            pie_frame, height=240, bg="white", highlightthickness=0
-        )
+        self.expense_pie_canvas = tk.Canvas(pie_frame, height=240, bg="white", highlightthickness=0)
         self.expense_pie_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 6))
 
         legend_container = tk.Frame(pie_frame)
         legend_container.pack(fill=tk.BOTH, expand=False, padx=10, pady=(0, 10))
-        self.expense_legend_canvas = tk.Canvas(
-            legend_container, height=110, highlightthickness=0
-        )
+        self.expense_legend_canvas = tk.Canvas(legend_container, height=110, highlightthickness=0)
         self.expense_legend_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         legend_scroll = tk.Scrollbar(
             legend_container,
@@ -170,9 +221,7 @@ class FinancialApp(tk.Tk):
         self.chart_month_menu.pack(side=tk.LEFT, padx=6)
         self.chart_month_var.trace_add("write", self._on_chart_filter_change)
 
-        self.daily_bar_canvas = tk.Canvas(
-            daily_frame, height=220, bg="white", highlightthickness=0
-        )
+        self.daily_bar_canvas = tk.Canvas(daily_frame, height=220, bg="white", highlightthickness=0)
         self.daily_bar_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         monthly_controls = tk.Frame(monthly_frame)
@@ -204,16 +253,14 @@ class FinancialApp(tk.Tk):
         self.daily_bar_canvas.bind("<Configure>", _schedule_redraw)
         self.monthly_bar_canvas.bind("<Configure>", _schedule_redraw)
 
-    def operations_tab(self, parent: Union[tk.Frame, ttk.Frame]) -> None:
+    def operations_tab(self, parent: tk.Frame | ttk.Frame) -> None:
         parent.grid_columnconfigure(1, weight=1)
 
         # Left: Add record form
         form_frame = tk.LabelFrame(parent, text="Add operation")
         form_frame.grid(row=0, column=0, sticky="nsw", padx=10, pady=10)
 
-        tk.Label(form_frame, text="Type:").grid(
-            row=0, column=0, sticky="w", padx=6, pady=4
-        )
+        tk.Label(form_frame, text="Type:").grid(row=0, column=0, sticky="w", padx=6, pady=4)
         type_var = tk.StringVar(value="Income")
         tk.OptionMenu(form_frame, type_var, "Income", "Expense").grid(
             row=0, column=1, padx=6, pady=4
@@ -225,22 +272,16 @@ class FinancialApp(tk.Tk):
         date_entry = tk.Entry(form_frame)
         date_entry.grid(row=1, column=1, padx=6, pady=4)
 
-        tk.Label(form_frame, text="Amount:").grid(
-            row=2, column=0, sticky="w", padx=6, pady=4
-        )
+        tk.Label(form_frame, text="Amount:").grid(row=2, column=0, sticky="w", padx=6, pady=4)
         amount_entry = tk.Entry(form_frame)
         amount_entry.grid(row=2, column=1, padx=6, pady=4)
 
-        tk.Label(form_frame, text="Currency:").grid(
-            row=3, column=0, sticky="w", padx=6, pady=4
-        )
+        tk.Label(form_frame, text="Currency:").grid(row=3, column=0, sticky="w", padx=6, pady=4)
         currency_entry = tk.Entry(form_frame)
         currency_entry.insert(0, "KZT")
         currency_entry.grid(row=3, column=1, padx=6, pady=4)
 
-        tk.Label(form_frame, text="Category:").grid(
-            row=4, column=0, sticky="w", padx=6, pady=4
-        )
+        tk.Label(form_frame, text="Category:").grid(row=4, column=0, sticky="w", padx=6, pady=4)
         category_entry = tk.Entry(form_frame)
         category_entry.insert(0, "General")
         category_entry.grid(row=4, column=1, padx=6, pady=4)
@@ -251,14 +292,12 @@ class FinancialApp(tk.Tk):
                 messagebox.showerror("Error", "Date is required.")
                 return
             try:
-                from domain.validation import parse_ymd, ensure_not_future
+                from domain.validation import ensure_not_future, parse_ymd
 
                 entered_date = parse_ymd(date_str)
                 ensure_not_future(entered_date)
             except ValueError as e:
-                messagebox.showerror(
-                    "Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD."
-                )
+                messagebox.showerror("Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD.")
                 return
 
             amount_str = amount_entry.get().strip()
@@ -275,13 +314,9 @@ class FinancialApp(tk.Tk):
             category = (category_entry.get() or "General").strip()
 
             try:
-                use_class = (
-                    CreateIncome if type_var.get() == "Income" else CreateExpense
-                )
+                use_class = CreateIncome if type_var.get() == "Income" else CreateExpense
                 use_case = use_class(self.repository, self.currency)
-                use_case.execute(
-                    date=date_str, amount=amount, currency=currency, category=category
-                )
+                use_case.execute(date=date_str, amount=amount, currency=currency, category=category)
                 if type_var.get() == "Income":
                     messagebox.showinfo("Success", "Income record added.")
                 else:  # Expense
@@ -306,9 +341,7 @@ class FinancialApp(tk.Tk):
         self.records_listbox = Listbox(list_frame)
         self.records_listbox.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
 
-        scrollbar = Scrollbar(
-            list_frame, orient=VERTICAL, command=self.records_listbox.yview
-        )
+        scrollbar = Scrollbar(list_frame, orient=VERTICAL, command=self.records_listbox.yview)
         scrollbar.grid(row=0, column=1, sticky="ns", pady=6)
         self.records_listbox.config(yscrollcommand=scrollbar.set)
 
@@ -317,10 +350,15 @@ class FinancialApp(tk.Tk):
             if not selection:
                 messagebox.showerror("Error", "Please select a record to delete.")
                 return
-            index = selection[0]
-            delete_use_case = DeleteRecord(self.repository)
-            if delete_use_case.execute(index):
-                messagebox.showinfo("Success", f"Deleted record at index {index}.")
+            list_index = selection[0]
+            record_id = self._list_index_to_record_id.get(list_index)
+            repository_index = self._record_id_to_repo_index.get(record_id) if record_id else None
+            if repository_index is None:
+                messagebox.showerror("Error", "Selected record is no longer available.")
+                self._refresh_list()
+                return
+            if self.controller.delete_record(repository_index):
+                messagebox.showinfo("Success", f"Deleted record at index {repository_index}.")
                 self._refresh_list()
                 self._refresh_charts()
             else:
@@ -332,7 +370,7 @@ class FinancialApp(tk.Tk):
                 "Are you sure you want to delete ALL records? This action cannot be undone.",
             )
             if confirm:
-                DeleteAllRecords(self.repository).execute()
+                self.controller.delete_all_records()
                 messagebox.showinfo("Success", "All records have been deleted.")
                 self._refresh_list()
                 self._refresh_charts()
@@ -366,15 +404,15 @@ class FinancialApp(tk.Tk):
             ):
                 return
 
-            try:
-                imported_count, skipped_count, errors = self._import_record_by_format(
-                    fmt, filepath, policy
-                )
+            def _task() -> tuple[int, int, list[str]]:
+                return self.controller.import_records(fmt, filepath, policy)
+
+            def _on_success(result: tuple[int, int, list[str]]) -> None:
+                imported_count, skipped_count, errors = result
                 details = ""
                 if skipped_count:
-                    details = (
-                        f"\nSkipped: {skipped_count} rows."
-                        f"\nFirst errors:\n- " + "\n- ".join(errors[:5])
+                    details = f"\nSkipped: {skipped_count} rows.\nFirst errors:\n- " + "\n- ".join(
+                        errors[:5]
                     )
                 messagebox.showinfo(
                     "Success",
@@ -384,14 +422,20 @@ class FinancialApp(tk.Tk):
                 self._refresh_list()
                 self._refresh_charts()
 
-            except FileNotFoundError:
-                logger.exception(f"{cfg['desc']} import file not found: %s", filepath)
-                messagebox.showerror("Error", f"File not found: {filepath}")
-            except Exception as e:
-                logger.exception(f"Failed to import {cfg['desc']} from %s", filepath)
-                messagebox.showerror(
-                    "Error", f"Failed to import {cfg['desc']}: {str(e)}"
-                )
+            def _on_error(exc: BaseException) -> None:
+                if isinstance(exc, FileNotFoundError):
+                    logger.error("%s import file not found: %s", cfg["desc"], filepath)
+                    messagebox.showerror("Error", f"File not found: {filepath}")
+                    return
+                logger.error("Failed to import %s from %s: %s", cfg["desc"], filepath, exc)
+                messagebox.showerror("Error", f"Failed to import {cfg['desc']}: {str(exc)}")
+
+            self._run_background(
+                _task,
+                on_success=_on_success,
+                on_error=_on_error,
+                busy_message=f"Importing {cfg['desc']}...",
+            )
 
         def export_records_data():
             fmt = import_format_var.get()
@@ -399,7 +443,6 @@ class FinancialApp(tk.Tk):
             if not cfg or fmt == "JSON":
                 messagebox.showerror("Error", "Unsupported export format for records.")
                 return
-            records = self.repository.load_all()
             filepath = filedialog.asksaveasfilename(
                 defaultextension=cfg["ext"],
                 filetypes=[
@@ -410,19 +453,28 @@ class FinancialApp(tk.Tk):
             )
             if not filepath:
                 return
-            try:
+            records = self.repository.load_all()
+            initial_balance = self.repository.load_initial_balance()
+
+            def _task() -> None:
                 from gui.exporters import export_records
 
                 export_records(
                     records,
                     filepath,
                     fmt.lower(),
-                    initial_balance=self.repository.load_initial_balance(),
+                    initial_balance=initial_balance,
                 )
+
+            def _on_success(_: Any) -> None:
                 messagebox.showinfo("Success", f"Records exported to {filepath}")
                 open_in_file_manager(os.path.dirname(filepath))
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to export records: {str(e)}")
+
+            self._run_background(
+                _task,
+                on_success=_on_success,
+                busy_message=f"Exporting {cfg['desc']}...",
+            )
 
         btn_frame = tk.Frame(list_frame)
         btn_frame.grid(row=1, column=0, columnspan=2, pady=6)
@@ -430,12 +482,8 @@ class FinancialApp(tk.Tk):
         tk.Button(btn_frame, text="Delete Selected", command=delete_selected).pack(
             side=tk.LEFT, padx=6
         )
-        tk.Button(btn_frame, text="Delete All", command=delete_all).pack(
-            side=tk.LEFT, padx=6
-        )
-        tk.Button(btn_frame, text="Refresh", command=self._refresh_list).pack(
-            side=tk.LEFT, padx=6
-        )
+        tk.Button(btn_frame, text="Delete All", command=delete_all).pack(side=tk.LEFT, padx=6)
+        tk.Button(btn_frame, text="Refresh", command=self._refresh_list).pack(side=tk.LEFT, padx=6)
 
         # Import controls (reuse existing import handler)
         import_mode_var = tk.StringVar(value="Import Records (Current Rate)")
@@ -447,12 +495,8 @@ class FinancialApp(tk.Tk):
             "Legacy Import",
         ).pack(side=tk.LEFT, padx=6)
         import_format_var = tk.StringVar(value="CSV")
-        tk.OptionMenu(btn_frame, import_format_var, "CSV", "XLSX").pack(
-            side=tk.LEFT, padx=6
-        )
-        tk.Button(btn_frame, text="Import", command=import_records_data).pack(
-            side=tk.LEFT, padx=6
-        )
+        tk.OptionMenu(btn_frame, import_format_var, "CSV", "XLSX").pack(side=tk.LEFT, padx=6)
+        tk.Button(btn_frame, text="Import", command=import_records_data).pack(side=tk.LEFT, padx=6)
         tk.Button(btn_frame, text="Export Data", command=export_records_data).pack(
             side=tk.LEFT, padx=6
         )
@@ -460,22 +504,18 @@ class FinancialApp(tk.Tk):
         # Initial refresh
         self._refresh_list()
 
-    def reports_tab(self, parent: Union[tk.Frame, ttk.Frame]) -> None:
+    def reports_tab(self, parent: tk.Frame | ttk.Frame) -> None:
         parent.grid_rowconfigure(1, weight=1)
         parent.grid_columnconfigure(0, weight=1)
 
         controls = tk.Frame(parent)
         controls.grid(row=0, column=0, sticky="nw", padx=10, pady=10)
 
-        tk.Label(controls, text="Period (e.g., 2025-03):").grid(
-            row=0, column=0, sticky="w"
-        )
+        tk.Label(controls, text="Period (e.g., 2025-03):").grid(row=0, column=0, sticky="w")
         period_start_entry = tk.Entry(controls)
         period_start_entry.grid(row=0, column=1, padx=6, pady=4)
 
-        tk.Label(controls, text="Period end (e.g., 2025-03-31):").grid(
-            row=1, column=0, sticky="w"
-        )
+        tk.Label(controls, text="Period end (e.g., 2025-03-31):").grid(row=1, column=0, sticky="w")
         period_end_entry = tk.Entry(controls)
         period_end_entry.grid(row=1, column=1, padx=6, pady=4)
 
@@ -504,12 +544,10 @@ class FinancialApp(tk.Tk):
         scrollbar.grid(row=0, column=1, sticky="ns")
         result_text.config(yscrollcommand=scrollbar.set)
 
-        current_report: Dict[str, Optional[Report]] = {"report": None}
+        current_report: dict[str, Report | None] = {"report": None}
         report_mode_var = tk.StringVar(value="fixed")
 
-        tk.Label(controls, text="Totals mode:").grid(
-            row=0, column=2, sticky="w", padx=(12, 0)
-        )
+        tk.Label(controls, text="Totals mode:").grid(row=0, column=2, sticky="w", padx=(12, 0))
         ttk.Radiobutton(
             controls,
             text="On fixed rate",
@@ -584,19 +622,13 @@ class FinancialApp(tk.Tk):
             else:
                 balance_value = report.initial_balance
                 balance_label = (
-                    "Opening balance"
-                    if report.is_opening_balance
-                    else "Initial balance"
+                    "Opening balance" if report.is_opening_balance else "Initial balance"
                 )
-                records_total_fixed = sum(
-                    r.signed_amount_kzt() for r in report.records()
-                )
+                records_total_fixed = sum(r.signed_amount_kzt() for r in report.records())
                 final_balance_fixed = report.total_fixed()
                 final_balance_current = report.total_current(self.currency)
                 fx_diff = report.fx_difference(self.currency)
-                result_text.insert(
-                    tk.END, f"{balance_label}: {balance_value:.2f} KZT\n"
-                )
+                result_text.insert(tk.END, f"{balance_label}: {balance_value:.2f} KZT\n")
                 if report_mode_var.get() == "current":
                     result_text.insert(
                         tk.END,
@@ -654,11 +686,9 @@ class FinancialApp(tk.Tk):
                 logger.exception("Failed to export report")
                 messagebox.showerror("Error", f"Failed to export: {str(e)}")
 
-        tk.Button(controls, text="Export", command=export_any).grid(
-            row=5, column=2, padx=6
-        )
+        tk.Button(controls, text="Export", command=export_any).grid(row=5, column=2, padx=6)
 
-    def settings_tab(self, parent: Union[tk.Frame, ttk.Frame]) -> None:
+    def settings_tab(self, parent: tk.Frame | ttk.Frame) -> None:
         parent.grid_columnconfigure(1, weight=1)
 
         # Initial balance panel
@@ -682,9 +712,7 @@ class FinancialApp(tk.Tk):
             messagebox.showinfo("Success", f"Initial balance set to {balance:.2f} KZT.")
             self._refresh_charts()
 
-        tk.Button(balance_frame, text="Save", command=save_balance).grid(
-            row=2, column=0, pady=6
-        )
+        tk.Button(balance_frame, text="Save", command=save_balance).grid(row=2, column=0, pady=6)
 
         # Mandatory expenses management
         mand_frame = tk.LabelFrame(parent, text="Mandatory expenses")
@@ -711,7 +739,7 @@ class FinancialApp(tk.Tk):
                     ),
                 )
 
-        current_panel: Dict[str, Optional[tk.Frame]] = {"add": None, "report": None}
+        current_panel: dict[str, tk.Frame | None] = {"add": None, "report": None}
 
         def add_mandatory_inline():
             # Close the previous panel if it is open
@@ -734,9 +762,7 @@ class FinancialApp(tk.Tk):
             amt = tk.Entry(add_panel)
             amt.grid(row=0, column=1)
 
-            tk.Label(add_panel, text="Currency (default KZT):").grid(
-                row=1, column=0, sticky="w"
-            )
+            tk.Label(add_panel, text="Currency (default KZT):").grid(row=1, column=0, sticky="w")
             currency_entry = tk.Entry(add_panel)
             currency_entry.insert(0, "KZT")
             currency_entry.grid(row=1, column=1)
@@ -754,9 +780,9 @@ class FinancialApp(tk.Tk):
 
             tk.Label(add_panel, text="Period:").grid(row=4, column=0, sticky="w")
             period_var = tk.StringVar(value="monthly")
-            tk.OptionMenu(
-                add_panel, period_var, "daily", "weekly", "monthly", "yearly"
-            ).grid(row=4, column=1)
+            tk.OptionMenu(add_panel, period_var, "daily", "weekly", "monthly", "yearly").grid(
+                row=4, column=1
+            )
 
             def save():
                 try:
@@ -788,12 +814,8 @@ class FinancialApp(tk.Tk):
                 except Exception:
                     pass
 
-            tk.Button(add_panel, text="Save", command=save).grid(
-                row=5, column=0, padx=6
-            )
-            tk.Button(add_panel, text="Cancel", command=cancel).grid(
-                row=5, column=1, padx=6
-            )
+            tk.Button(add_panel, text="Save", command=save).grid(row=5, column=0, padx=6)
+            tk.Button(add_panel, text="Cancel", command=cancel).grid(row=5, column=1, padx=6)
 
         def add_to_report_inline():
             # Close the previous panel if it is open
@@ -823,16 +845,13 @@ class FinancialApp(tk.Tk):
 
             def save():
                 try:
-                    from domain.validation import parse_ymd, ensure_not_future
+                    from domain.validation import ensure_not_future, parse_ymd
 
                     date = date_entry.get()
                     entered_date = parse_ymd(date)
                     ensure_not_future(entered_date)
 
-                    add_to_report_use_case = AddMandatoryExpenseToReport(
-                        self.repository, self.currency
-                    )
-                    if add_to_report_use_case.execute(index, date):
+                    if self.controller.add_mandatory_to_report(index, date):
                         messagebox.showinfo(
                             "Success", f"Mandatory expense added to report for {date}."
                         )
@@ -848,9 +867,7 @@ class FinancialApp(tk.Tk):
                             "Please select a mandatory expense to add to report. \nThen click 'Add to Report' and try again.",
                         )
                 except ValueError as e:
-                    messagebox.showerror(
-                        "Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD."
-                    )
+                    messagebox.showerror("Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD.")
 
             def cancel():
                 try:
@@ -859,9 +876,7 @@ class FinancialApp(tk.Tk):
                 except Exception:
                     pass
 
-            tk.Button(add_to_report_panel, text="Save", command=save).grid(
-                row=1, column=0, padx=6
-            )
+            tk.Button(add_to_report_panel, text="Save", command=save).grid(row=1, column=0, padx=6)
             tk.Button(add_to_report_panel, text="Cancel", command=cancel).grid(
                 row=1, column=1, padx=6
             )
@@ -872,7 +887,7 @@ class FinancialApp(tk.Tk):
                 messagebox.showerror("Error", "Please select an expense to delete.")
                 return
             idx = sel[0]
-            if DeleteMandatoryExpense(self.repository).execute(idx):
+            if self.controller.delete_mandatory_expense(idx):
                 messagebox.showinfo("Success", "Mandatory expense deleted.")
                 refresh_mandatory()
             else:
@@ -881,13 +896,11 @@ class FinancialApp(tk.Tk):
         def delete_all_mandatory():
             confirm = messagebox.askyesno("Confirm", "Delete all mandatory expenses?")
             if confirm:
-                DeleteAllMandatoryExpenses(self.repository).execute()
+                self.controller.delete_all_mandatory_expenses()
                 messagebox.showinfo("Success", "All mandatory expenses deleted.")
                 refresh_mandatory()
             else:
-                messagebox.showerror(
-                    "Error", "Failed to delete all mandatory expenses."
-                )
+                messagebox.showerror("Error", "Failed to delete all mandatory expenses.")
 
         btns = tk.Frame(mand_frame)
         btns.grid(row=1, column=0, columnspan=2, pady=6)
@@ -917,15 +930,15 @@ class FinancialApp(tk.Tk):
             ):
                 return
 
-            try:
-                imported_count, skipped_count, errors = (
-                    self._import_mandatory_by_format(fmt, filepath)
-                )
+            def _task() -> tuple[int, int, list[str]]:
+                return self.controller.import_mandatory(fmt, filepath)
+
+            def _on_success(result: tuple[int, int, list[str]]) -> None:
+                imported_count, skipped_count, errors = result
                 details = ""
                 if skipped_count:
-                    details = (
-                        f"\nSkipped: {skipped_count} rows."
-                        f"\nFirst errors:\n- " + "\n- ".join(errors[:5])
+                    details = f"\nSkipped: {skipped_count} rows.\nFirst errors:\n- " + "\n- ".join(
+                        errors[:5]
                     )
 
                 messagebox.showinfo(
@@ -937,10 +950,18 @@ class FinancialApp(tk.Tk):
                 refresh_mandatory()
                 self._refresh_charts()
 
-            except FileNotFoundError:
-                messagebox.showerror("Error", f"File not found: {filepath}")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to import {fmt}: {str(e)}")
+            def _on_error(exc: BaseException) -> None:
+                if isinstance(exc, FileNotFoundError):
+                    messagebox.showerror("Error", f"File not found: {filepath}")
+                    return
+                messagebox.showerror("Error", f"Failed to import {fmt}: {str(exc)}")
+
+            self._run_background(
+                _task,
+                on_success=_on_success,
+                on_error=_on_error,
+                busy_message=f"Importing {cfg['desc']} mandatory expenses...",
+            )
 
         def export_mand():
             fmt = format_var.get()
@@ -953,33 +974,29 @@ class FinancialApp(tk.Tk):
             )
             if not filepath:
                 return
-            try:
+
+            def _task() -> None:
                 from gui.exporters import export_mandatory_expenses
 
                 export_mandatory_expenses(expenses, filepath, fmt.lower())
-                messagebox.showinfo(
-                    "Success", f"Mandatory expenses exported to {filepath}"
-                )
-                open_in_file_manager(os.path.dirname(filepath))
-            except Exception as e:
-                logger.exception("Failed to export mandatory expenses")
-                messagebox.showerror("Error", f"Failed to export: {str(e)}")
 
-        tk.Button(btns, text="Add", command=add_mandatory_inline).pack(
-            side=tk.LEFT, padx=6
-        )
-        tk.Button(btns, text="Delete", command=delete_mandatory).pack(
-            side=tk.LEFT, padx=6
-        )
-        tk.Button(btns, text="Delete All", command=delete_all_mandatory).pack(
-            side=tk.LEFT, padx=6
-        )
+            def _on_success(_: Any) -> None:
+                messagebox.showinfo("Success", f"Mandatory expenses exported to {filepath}")
+                open_in_file_manager(os.path.dirname(filepath))
+
+            self._run_background(
+                _task,
+                on_success=_on_success,
+                busy_message=f"Exporting {fmt} mandatory expenses...",
+            )
+
+        tk.Button(btns, text="Add", command=add_mandatory_inline).pack(side=tk.LEFT, padx=6)
+        tk.Button(btns, text="Delete", command=delete_mandatory).pack(side=tk.LEFT, padx=6)
+        tk.Button(btns, text="Delete All", command=delete_all_mandatory).pack(side=tk.LEFT, padx=6)
         tk.Button(btns, text="Add to Report", command=add_to_report_inline).pack(
             side=tk.LEFT, padx=6
         )
-        tk.Button(btns, text="Refresh", command=refresh_mandatory).pack(
-            side=tk.LEFT, padx=6
-        )
+        tk.Button(btns, text="Refresh", command=refresh_mandatory).pack(side=tk.LEFT, padx=6)
         format_var = tk.StringVar(value="CSV")
         tk.OptionMenu(btns, format_var, "CSV", "XLSX").pack(side=tk.LEFT, padx=6)
 
@@ -1002,10 +1019,12 @@ class FinancialApp(tk.Tk):
                 "This will replace all records, mandatory expenses and initial balance. Continue?",
             ):
                 return
-            try:
-                imported, skipped, errors = self._import_record_by_format(
-                    "JSON", filepath, ImportPolicy.FULL_BACKUP
-                )
+
+            def _task() -> tuple[int, int, list[str]]:
+                return self.controller.import_records("JSON", filepath, ImportPolicy.FULL_BACKUP)
+
+            def _on_success(result: tuple[int, int, list[str]]) -> None:
+                imported, skipped, errors = result
                 details = ""
                 if skipped:
                     details = f"\nSkipped: {skipped}\n- " + "\n- ".join(errors[:5])
@@ -1018,8 +1037,12 @@ class FinancialApp(tk.Tk):
                 refresh_mandatory()
                 self._refresh_list()
                 self._refresh_charts()
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to import backup: {str(e)}")
+
+            self._run_background(
+                _task,
+                on_success=_on_success,
+                busy_message="Importing full backup...",
+            )
 
         def export_backup():
             filepath = filedialog.asksaveasfilename(
@@ -1029,19 +1052,29 @@ class FinancialApp(tk.Tk):
             )
             if not filepath:
                 return
-            try:
+            initial_balance = self.repository.load_initial_balance()
+            records = self.repository.load_all()
+            mandatory_expenses = self.repository.load_mandatory_expenses()
+
+            def _task() -> None:
                 from gui.exporters import export_full_backup
 
                 export_full_backup(
                     filepath,
-                    initial_balance=self.repository.load_initial_balance(),
-                    records=self.repository.load_all(),
-                    mandatory_expenses=self.repository.load_mandatory_expenses(),
+                    initial_balance=initial_balance,
+                    records=records,
+                    mandatory_expenses=mandatory_expenses,
                 )
+
+            def _on_success(_: Any) -> None:
                 messagebox.showinfo("Success", f"Full backup exported to {filepath}")
                 open_in_file_manager(os.path.dirname(filepath))
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to export backup: {str(e)}")
+
+            self._run_background(
+                _task,
+                on_success=_on_success,
+                busy_message="Exporting full backup...",
+            )
 
         tk.Button(backup_frame, text="Export Full Backup", command=export_backup).pack(
             side=tk.LEFT, padx=6, pady=6
@@ -1060,104 +1093,14 @@ class FinancialApp(tk.Tk):
             return ImportPolicy.LEGACY
         return ImportPolicy.CURRENT_RATE
 
-    def _import_record_by_format(
-        self, fmt: str, filepath: str, policy: ImportPolicy
-    ) -> tuple[int, int, list[str]]:
-        self.repository.delete_all()
-
-        if fmt == "CSV":
-            from gui.importers import import_records_from_csv
-
-            records, initial_balance, summary = import_records_from_csv(
-                filepath, policy=policy, currency_service=self.currency
-            )
-        elif fmt == "XLSX":
-            from gui.importers import import_records_from_xlsx
-
-            records, initial_balance, summary = import_records_from_xlsx(
-                filepath, policy=policy, currency_service=self.currency
-            )
-        elif fmt == "JSON":
-            from gui.importers import import_full_backup
-
-            # Full backup import replaces both records and mandatory expenses.
-            DeleteAllMandatoryExpenses(self.repository).execute()
-            (
-                initial_balance,
-                records,
-                mandatory_expenses,
-                summary,
-            ) = import_full_backup(filepath)
-            for expense in mandatory_expenses:
-                self.repository.save_mandatory_expense(expense)
-        else:
-            raise ValueError(f"Unsupported format: {fmt}")
-
-        self.repository.save_initial_balance(initial_balance)
-        for record in records:
-            self.repository.save(record)
-        imported, skipped, errors = summary
-        return imported, skipped, errors
-
-    def _import_mandatory_by_format(
-        self, fmt: str, filepath: str
-    ) -> tuple[int, int, list[str]]:
-        if fmt == "CSV":
-            from gui.importers import import_mandatory_expenses_from_csv
-
-            expenses, summary = import_mandatory_expenses_from_csv(
-                filepath,
-                policy=ImportPolicy.FULL_BACKUP,
-                currency_service=self.currency,
-            )
-
-        elif fmt == "XLSX":
-            from gui.importers import import_mandatory_expenses_from_xlsx
-
-            expenses, summary = import_mandatory_expenses_from_xlsx(
-                filepath,
-                policy=ImportPolicy.FULL_BACKUP,
-                currency_service=self.currency,
-            )
-
-        else:
-            raise ValueError(f"Unsupported format: {fmt}")
-
-        # Delete all existing mandatory expenses
-        DeleteAllMandatoryExpenses(self.repository).execute()
-
-        create_use_case = CreateMandatoryExpense(self.repository, self.currency)
-
-        for expense in expenses:
-            create_use_case.execute(
-                amount=expense.amount_original,
-                currency=expense.currency,
-                category=expense.category,
-                description=expense.description,
-                period=expense.period,
-            )
-
-        imported, skipped, errors = summary
-        return imported, skipped, errors
-
     def _refresh_list(self):
         self.records_listbox.delete(0, tk.END)
-        all_records = self.repository.load_all()
-        for i, record in enumerate(all_records):
-            if isinstance(record, IncomeRecord):
-                record_type = "Income"
-            elif isinstance(record, MandatoryExpenseRecord):
-                record_type = "Mandatory Expense"
-            else:
-                record_type = "Expense"
-            self.records_listbox.insert(
-                tk.END,
-                (
-                    f"[{i}] {record.date} - {record_type} - {record.category} - "
-                    f"{record.amount_original:.2f} {record.currency} "
-                    f"(={record.amount_kzt:.2f} KZT)"
-                ),
-            )
+        self._list_index_to_record_id = {}
+        self._record_id_to_repo_index = {}
+        for list_index, item in enumerate(self.controller.build_record_list_items()):
+            self._list_index_to_record_id[list_index] = item.record_id
+            self._record_id_to_repo_index[item.record_id] = item.repository_index
+            self.records_listbox.insert(tk.END, item.label)
 
     def _refresh_charts(self) -> None:
         records = self.repository.load_all()
@@ -1206,9 +1149,7 @@ class FinancialApp(tk.Tk):
             label="Все время", command=lambda value="all": self.pie_month_var.set(value)
         )
         for month in months:
-            menu.add_command(
-                label=month, command=lambda value=month: self.pie_month_var.set(value)
-            )
+            menu.add_command(label=month, command=lambda value=month: self.pie_month_var.set(value))
 
         current_value = self.pie_month_var.get()
         if not current_value:
@@ -1379,9 +1320,7 @@ class FinancialApp(tk.Tk):
         year, month = map(int, month_value.split("-"))
         income, expense = aggregate_daily_cashflow(records, year, month)
         labels = [str(i + 1) for i in range(len(income))]
-        self._draw_bar_chart(
-            self.daily_bar_canvas, labels, income, expense, max_labels=8
-        )
+        self._draw_bar_chart(self.daily_bar_canvas, labels, income, expense, max_labels=8)
 
     def _draw_monthly_bars(self, records) -> None:
         year_value = self.chart_year_var.get()

@@ -1,7 +1,6 @@
 import csv
 import logging
 import os
-from typing import List, Tuple
 
 from domain.import_policy import ImportPolicy
 from domain.records import MandatoryExpenseRecord, Record
@@ -48,7 +47,12 @@ def report_to_csv(report: Report, filepath: str) -> None:
 
         if report.initial_balance != 0 or report.is_opening_balance:
             writer.writerow(
-                ["", report.balance_label, "", f"{report.initial_balance:.2f}"]
+                [
+                    "",
+                    report.balance_label,
+                    "",
+                    f"{report.initial_balance:.2f}",
+                ]
             )
 
         for record in sorted_records:
@@ -58,9 +62,7 @@ def report_to_csv(report: Report, filepath: str) -> None:
                 record_type = "Mandatory Expense"
             else:
                 record_type = "Expense"
-            writer.writerow(
-                [record.date, record_type, record.category, f"{record.amount_kzt:.2f}"]
-            )
+            writer.writerow([record.date, record_type, record.category, f"{record.amount_kzt:.2f}"])
 
         records_total = sum(r.signed_amount_kzt() for r in report.records())
         writer.writerow(["SUBTOTAL", "", "", f"{records_total:.2f}"])
@@ -74,7 +76,7 @@ def report_from_csv(filepath: str) -> Report:
 
 
 def export_records_to_csv(
-    records: List[Record], filepath: str, initial_balance: float = 0.0
+    records: list[Record], filepath: str, initial_balance: float = 0.0
 ) -> None:
     """Export full data model to CSV for backup/restore."""
     with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
@@ -116,14 +118,14 @@ def import_records_from_csv(
     filepath: str,
     policy: ImportPolicy = ImportPolicy.FULL_BACKUP,
     currency_service=None,
-) -> Tuple[List[Record], float, ImportSummary]:
+) -> tuple[list[Record], float, ImportSummary]:
     """Import full data model from CSV with validation and per-row error report."""
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"CSV file not found: {filepath}")
 
-    records: List[Record] = []
+    records: list[Record] = []
     initial_balance = 0.0
-    errors: List[str] = []
+    errors: list[str] = []
     skipped = 0
     imported = 0
 
@@ -131,7 +133,7 @@ def import_records_from_csv(
     if policy == ImportPolicy.CURRENT_RATE:
         get_rate = _resolve_get_rate(currency_service)
 
-    with open(filepath, "r", newline="", encoding="utf-8") as csvfile:
+    with open(filepath, newline="", encoding="utf-8") as csvfile:
         preview_reader = csv.reader(csvfile)
         first_row = next(preview_reader, [])
         if first_row and str(first_row[0]).strip().startswith("Transaction statement"):
@@ -156,9 +158,10 @@ def import_records_from_csv(
                 date_value = str(row_lc.get("date", "") or "").strip()
                 if date_value.upper() in {"SUBTOTAL", "FINAL BALANCE"}:
                     continue
-                if date_value == "" and str(
-                    row_lc.get("type", "") or ""
-                ).strip().lower() in {"initial balance", "opening balance"}:
+                if date_value == "" and str(row_lc.get("type", "") or "").strip().lower() in {
+                    "initial balance",
+                    "opening balance",
+                }:
                     row_lc["type"] = "initial_balance"
                     row_lc["amount_original"] = row_lc.get("amount_(kzt)")
                 else:
@@ -184,12 +187,16 @@ def import_records_from_csv(
             imported += 1
             records.append(record)
 
+    logger.info(
+        "CSV import completed: imported=%s skipped=%s file=%s",
+        imported,
+        skipped,
+        filepath,
+    )
     return records, initial_balance, (imported, skipped, errors)
 
 
-def export_mandatory_expenses_to_csv(
-    expenses: List[MandatoryExpenseRecord], filepath: str
-) -> None:
+def export_mandatory_expenses_to_csv(expenses: list[MandatoryExpenseRecord], filepath: str) -> None:
     with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=DATA_HEADERS)
         writer.writeheader()
@@ -213,12 +220,12 @@ def import_mandatory_expenses_from_csv(
     filepath: str,
     policy: ImportPolicy = ImportPolicy.FULL_BACKUP,
     currency_service=None,
-) -> Tuple[List[MandatoryExpenseRecord], ImportSummary]:
+) -> tuple[list[MandatoryExpenseRecord], ImportSummary]:
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"CSV file not found: {filepath}")
 
-    expenses: List[MandatoryExpenseRecord] = []
-    errors: List[str] = []
+    expenses: list[MandatoryExpenseRecord] = []
+    errors: list[str] = []
     skipped = 0
     imported = 0
 
@@ -226,7 +233,7 @@ def import_mandatory_expenses_from_csv(
     if policy == ImportPolicy.CURRENT_RATE:
         get_rate = _resolve_get_rate(currency_service)
 
-    with open(filepath, "r", newline="", encoding="utf-8") as csvfile:
+    with open(filepath, newline="", encoding="utf-8") as csvfile:
         reader = csv.DictReader(csvfile)
         if not reader.fieldnames:
             return expenses, (0, 0, [])
@@ -252,4 +259,10 @@ def import_mandatory_expenses_from_csv(
                 imported += 1
                 expenses.append(record)
 
+    logger.info(
+        "Mandatory CSV import completed: imported=%s skipped=%s file=%s",
+        imported,
+        skipped,
+        filepath,
+    )
     return expenses, (imported, skipped, errors)

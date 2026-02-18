@@ -1,19 +1,26 @@
 from abc import ABC, abstractmethod
 from dataclasses import InitVar, dataclass
-from typing import Literal, Optional
+from typing import Literal
+
+from .validation import parse_ymd
 
 
 @dataclass(frozen=True)
 class Record(ABC):
     date: str
-    amount_original: Optional[float] = None
+    amount_original: float | None = None
     currency: str = "KZT"
     rate_at_operation: float = 1.0
-    amount_kzt: Optional[float] = None
+    amount_kzt: float | None = None
     category: str = "General"
-    _amount_init: InitVar[Optional[float]] = None
+    _amount_init: InitVar[float | None] = None
 
-    def __post_init__(self, amount: Optional[float]) -> None:
+    def __post_init__(self, amount: float | None) -> None:
+        normalized_date = (self.date or "").strip()
+        if normalized_date:
+            parsed = parse_ymd(normalized_date)
+            object.__setattr__(self, "date", parsed.isoformat())
+
         if self.amount_original is None and amount is not None:
             object.__setattr__(self, "amount_original", float(amount))
 

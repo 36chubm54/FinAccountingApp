@@ -1,7 +1,6 @@
 import gc
 import logging
 import os
-from typing import List, Tuple
 
 from openpyxl import Workbook, load_workbook
 
@@ -52,9 +51,7 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
         ws.append(["Date", "Type", "Category", "Amount (KZT)"])
         ws.append(["", "", "", "Fixed amounts by operation-time FX rates"])
 
-    if (
-        getattr(report, "initial_balance", 0) != 0 or report.is_opening_balance
-    ) and ws is not None:
+    if (getattr(report, "initial_balance", 0) != 0 or report.is_opening_balance) and ws is not None:
         ws.append(["", report.balance_label, "", f"{report.initial_balance:.2f}"])
 
     for record in sorted(report.records(), key=lambda r: r.date):
@@ -66,9 +63,7 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
         else:
             record_type = "Expense"
         if ws is not None:
-            ws.append(
-                [record.date, record_type, record.category, f"{record.amount_kzt:.2f}"]
-            )
+            ws.append([record.date, record_type, record.category, f"{record.amount_kzt:.2f}"])
 
     total = report.total_fixed()
     records_total = sum(r.signed_amount_kzt() for r in report.records())
@@ -108,17 +103,13 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
                 r_type = "Expense"
             amt = getattr(r, "amount", 0.0)
             records_total += (
-                getattr(r, "amount", 0.0)
-                if getattr(r, "amount", None) is not None
-                else 0.0
+                getattr(r, "amount", 0.0) if getattr(r, "amount", None) is not None else 0.0
             )
             bycat_ws.append([getattr(r, "date", ""), r_type, f"{abs(amt):.2f}"])
         bycat_ws.append(["SUBTOTAL", "", f"{abs(records_total):.2f}"])
         bycat_ws.append([""])
 
-    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
-        filepath
-    ) else None
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     wb.save(filepath)
     try:
         wb.close()
@@ -128,14 +119,12 @@ def report_to_xlsx(report: Report, filepath: str) -> None:
 
 
 def report_from_xlsx(filepath: str) -> Report:
-    records, initial_balance, _ = import_records_from_xlsx(
-        filepath, ImportPolicy.LEGACY
-    )
+    records, initial_balance, _ = import_records_from_xlsx(filepath, ImportPolicy.LEGACY)
     return Report(records, initial_balance)
 
 
 def export_records_to_xlsx(
-    records: List[Record], filepath: str, initial_balance: float = 0.0
+    records: list[Record], filepath: str, initial_balance: float = 0.0
 ) -> None:
     wb = Workbook()
     ws = wb.active
@@ -174,9 +163,7 @@ def export_records_to_xlsx(
         if ws is not None:
             ws.append(payload)
 
-    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
-        filepath
-    ) else None
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     wb.save(filepath)
     try:
         wb.close()
@@ -189,7 +176,7 @@ def import_records_from_xlsx(
     filepath: str,
     policy: ImportPolicy = ImportPolicy.FULL_BACKUP,
     currency_service=None,
-) -> Tuple[List[Record], float, ImportSummary]:
+) -> tuple[list[Record], float, ImportSummary]:
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"XLSX file not found: {filepath}")
 
@@ -205,23 +192,19 @@ def import_records_from_xlsx(
 
         header_row_index = 0
         first_row = rows[0] if rows else ()
-        if first_row and _safe_str(first_row[0]).strip().startswith(
-            "Transaction statement"
-        ):
+        if first_row and _safe_str(first_row[0]).strip().startswith("Transaction statement"):
             header_row_index = 1
         if len(rows) <= header_row_index:
             return [], 0.0, (0, 0, [])
 
         headers = [norm_key(_safe_str(h)) for h in rows[header_row_index]]
-        records: List[Record] = []
+        records: list[Record] = []
         initial_balance = 0.0
-        errors: List[str] = []
+        errors: list[str] = []
         skipped = 0
         imported = 0
 
-        is_report_xlsx = {"date", "type", "category", "amount_(kzt)"}.issubset(
-            set(headers)
-        )
+        is_report_xlsx = {"date", "type", "category", "amount_(kzt)"}.issubset(set(headers))
         get_rate = None
         if policy == ImportPolicy.CURRENT_RATE:
             get_rate = _resolve_get_rate(currency_service)
@@ -237,9 +220,10 @@ def import_records_from_xlsx(
                 date_value = _safe_str(raw.get("date", "")).strip()
                 if date_value.upper() in {"SUBTOTAL", "FINAL_BALANCE", "FINAL BALANCE"}:
                     continue
-                if date_value == "" and norm_key(
-                    _safe_str(raw.get("type", "")).strip()
-                ) in {"initial_balance", "opening_balance"}:
+                if date_value == "" and norm_key(_safe_str(raw.get("type", "")).strip()) in {
+                    "initial_balance",
+                    "opening_balance",
+                }:
                     raw["type"] = "initial_balance"
                     raw["amount_original"] = raw.get("amount_(kzt)")
                 else:
@@ -265,6 +249,12 @@ def import_records_from_xlsx(
             imported += 1
             records.append(record)
 
+        logger.info(
+            "XLSX import completed: imported=%s skipped=%s file=%s",
+            imported,
+            skipped,
+            filepath,
+        )
         return records, initial_balance, (imported, skipped, errors)
     finally:
         try:
@@ -275,7 +265,7 @@ def import_records_from_xlsx(
 
 
 def export_mandatory_expenses_to_xlsx(
-    expenses: List[MandatoryExpenseRecord], filepath: str
+    expenses: list[MandatoryExpenseRecord], filepath: str
 ) -> None:
     wb = Workbook()
     ws = wb.active
@@ -299,9 +289,7 @@ def export_mandatory_expenses_to_xlsx(
                 ]
             )
 
-    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
-        filepath
-    ) else None
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     wb.save(filepath)
     try:
         wb.close()
@@ -314,7 +302,7 @@ def import_mandatory_expenses_from_xlsx(
     filepath: str,
     policy: ImportPolicy = ImportPolicy.FULL_BACKUP,
     currency_service=None,
-) -> Tuple[List[MandatoryExpenseRecord], ImportSummary]:
+) -> tuple[list[MandatoryExpenseRecord], ImportSummary]:
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"XLSX file not found: {filepath}")
 
@@ -329,8 +317,8 @@ def import_mandatory_expenses_from_xlsx(
             return [], (0, 0, [])
 
         headers = [norm_key(_safe_str(h)) for h in rows[0]]
-        expenses: List[MandatoryExpenseRecord] = []
-        errors: List[str] = []
+        expenses: list[MandatoryExpenseRecord] = []
+        errors: list[str] = []
         skipped = 0
         imported = 0
 
@@ -359,6 +347,12 @@ def import_mandatory_expenses_from_xlsx(
                 imported += 1
                 expenses.append(record)
 
+        logger.info(
+            "Mandatory XLSX import completed: imported=%s skipped=%s file=%s",
+            imported,
+            skipped,
+            filepath,
+        )
         return expenses, (imported, skipped, errors)
     finally:
         try:

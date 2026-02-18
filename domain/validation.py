@@ -1,6 +1,6 @@
-from datetime import date
 import calendar
 import re
+from datetime import date
 
 
 def parse_ymd(value: str) -> date:
@@ -82,6 +82,4 @@ def parse_report_period_end(value: str) -> str:
         ensure_not_future(end_date)
         return end_date.isoformat()
 
-    raise ValueError(
-        "Invalid period end filter format. Use YYYY, YYYY-MM or YYYY-MM-DD"
-    )
+    raise ValueError("Invalid period end filter format. Use YYYY, YYYY-MM or YYYY-MM-DD")

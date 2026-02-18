@@ -1,9 +1,11 @@
-from domain.reports import Report
-from domain.records import IncomeRecord, ExpenseRecord
 import csv
-import tempfile
 import os
+import tempfile
+
 import pytest
+
+from domain.records import ExpenseRecord, IncomeRecord
+from domain.reports import Report
 
 
 def test_to_csv():
@@ -16,7 +18,7 @@ def test_to_csv():
         tmp_path = tmp.name
     try:
         report.to_csv(tmp_path)
-        with open(tmp_path, "r", encoding="utf-8") as f:
+        with open(tmp_path, encoding="utf-8") as f:
             reader = csv.reader(f)
             rows = list(reader)
         assert rows[0] == ["Transaction statement", "", "", ""]
@@ -39,7 +41,7 @@ def test_to_csv_with_initial_balance():
         tmp_path = tmp.name
     try:
         report.to_csv(tmp_path)
-        with open(tmp_path, "r", encoding="utf-8") as f:
+        with open(tmp_path, encoding="utf-8") as f:
             reader = csv.reader(f)
             rows = list(reader)
         assert rows[0] == ["Transaction statement", "", "", ""]
@@ -65,7 +67,7 @@ def test_to_csv_with_opening_balance_label_for_filtered_report():
         tmp_path = tmp.name
     try:
         report.to_csv(tmp_path)
-        with open(tmp_path, "r", encoding="utf-8") as f:
+        with open(tmp_path, encoding="utf-8") as f:
             rows = list(csv.reader(f))
         assert rows[0] == [
             "Transaction statement (2025-01-01 - 2025-12-31)",
@@ -86,9 +88,7 @@ def test_from_csv():
 2025-01-02,Expense,Food,15000.00
 2025-01-03,Income,Bonus,50000.00
 TOTAL,,,-2000.00"""
-    with tempfile.NamedTemporaryFile(
-        mode="w", delete=False, suffix=".csv", newline=""
-    ) as tmp:
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", newline="") as tmp:
         tmp.write(csv_content)
         tmp_path = tmp.name
     try:
@@ -124,9 +124,7 @@ def test_from_csv_with_negative_amounts():
 2025-01-01,Income,Salary,100.00
 2025-01-02,Expense,Food,(50.00)
 TOTAL,,,-50.00"""
-    with tempfile.NamedTemporaryFile(
-        mode="w", delete=False, suffix=".csv", newline=""
-    ) as tmp:
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", newline="") as tmp:
         tmp.write(csv_content)
         tmp_path = tmp.name
     try:
@@ -148,9 +146,7 @@ def test_from_csv_with_initial_balance():
 2025-01-01,Income,Salary,100000.00
 2025-01-02,Expense,Food,15000.00
 TOTAL,,,-2000.00"""
-    with tempfile.NamedTemporaryFile(
-        mode="w", delete=False, suffix=".csv", newline=""
-    ) as tmp:
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", newline="") as tmp:
         tmp.write(csv_content)
         tmp_path = tmp.name
     try:
@@ -167,3 +163,30 @@ TOTAL,,,-2000.00"""
 def test_from_csv_file_not_found():
     with pytest.raises(FileNotFoundError):
         Report.from_csv("nonexistent_file.csv")
+
+
+def test_import_records_from_csv_with_partial_errors_keeps_valid_rows():
+    from domain.import_policy import ImportPolicy
+    from utils.csv_utils import import_records_from_csv
+
+    csv_content = """date,type,category,amount_original,currency,rate_at_operation,amount_kzt
+2025-01-01,income,Salary,10,USD,500,5000
+2025-13-01,expense,Food,2,KZT,1,2
+2025-01-03,expense,Food,3,KZT,1,3
+"""
+    with tempfile.NamedTemporaryFile(
+        mode="w", delete=False, suffix=".csv", newline="", encoding="utf-8"
+    ) as tmp:
+        tmp.write(csv_content)
+        tmp_path = tmp.name
+    try:
+        records, initial_balance, summary = import_records_from_csv(
+            tmp_path, policy=ImportPolicy.FULL_BACKUP
+        )
+        assert initial_balance == 0.0
+        assert len(records) == 2
+        assert summary[0] == 2
+        assert summary[1] == 1
+        assert len(summary[2]) == 1
+    finally:
+        os.unlink(tmp_path)

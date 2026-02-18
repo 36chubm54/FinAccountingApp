@@ -1,7 +1,7 @@
-from domain.records import IncomeRecord, ExpenseRecord, MandatoryExpenseRecord
+from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
 from utils.charting import (
-    aggregate_expenses_by_category,
     aggregate_daily_cashflow,
+    aggregate_expenses_by_category,
     aggregate_monthly_cashflow,
     extract_months,
     extract_years,

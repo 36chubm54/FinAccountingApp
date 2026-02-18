@@ -1,15 +1,20 @@
+import os
+import tempfile
 from unittest.mock import Mock, patch
+
+import pytest
+
 from app.use_cases import (
-    CreateIncome,
     CreateExpense,
-    GenerateReport,
-    DeleteRecord,
+    CreateIncome,
     DeleteAllRecords,
+    DeleteRecord,
+    GenerateReport,
     ImportFromCSV,
 )
 from domain.import_policy import ImportPolicy
-from domain.records import IncomeRecord, ExpenseRecord, Record
-from infrastructure.repositories import RecordRepository
+from domain.records import ExpenseRecord, IncomeRecord, Record
+from infrastructure.repositories import JsonFileRecordRepository, RecordRepository
 
 
 class TestCreateIncome:
@@ -22,9 +27,7 @@ class TestCreateIncome:
         use_case = CreateIncome(repository=mock_repo, currency=mock_currency)
 
         # Act
-        use_case.execute(
-            date="2025-01-01", amount=100.0, currency="USD", category="Salary"
-        )
+        use_case.execute(date="2025-01-01", amount=100.0, currency="USD", category="Salary")
 
         # Assert
         mock_currency.convert.assert_called_once_with(100.0, "USD")
@@ -71,9 +74,7 @@ class TestCreateExpense:
         use_case = CreateExpense(repository=mock_repo, currency=mock_currency)
 
         # Act
-        use_case.execute(
-            date="2025-01-02", amount=50.0, currency="USD", category="Food"
-        )
+        use_case.execute(date="2025-01-02", amount=50.0, currency="USD", category="Food")
 
         # Assert
         mock_currency.convert.assert_called_once_with(50.0, "USD")
@@ -187,11 +188,8 @@ class TestImportFromCSV:
             result = use_case.execute("test.csv")
 
             # Assert
-            mock_import.assert_called_once_with(
-                "test.csv", policy=ImportPolicy.FULL_BACKUP
-            )
-            mock_repo.delete_all.assert_called_once()
-            assert mock_repo.save.call_count == 3
+            mock_import.assert_called_once_with("test.csv", policy=ImportPolicy.FULL_BACKUP)
+            mock_repo.replace_records.assert_called_once_with(test_records, 0.0)
             assert result == 3
 
     def test_execute_saves_initial_balance(self):
@@ -202,4 +200,46 @@ class TestImportFromCSV:
             use_case = ImportFromCSV(repository=mock_repo)
             use_case.execute("test.csv")
 
-            mock_repo.save_initial_balance.assert_called_once_with(123.45)
+            mock_repo.replace_records.assert_called_once_with([], 123.45)
+
+    def test_execute_does_not_modify_repository_on_import_error(self):
+        mock_repo = Mock(spec=RecordRepository)
+        with patch("utils.csv_utils.import_records_from_csv") as mock_import:
+            mock_import.side_effect = ValueError("invalid csv")
+            use_case = ImportFromCSV(repository=mock_repo)
+
+            with patch.object(mock_repo, "replace_records") as replace_records:
+                with patch.object(mock_repo, "delete_all") as delete_all:
+                    with patch.object(mock_repo, "save") as save_record:
+                        with patch.object(mock_repo, "save_initial_balance") as save_balance:
+                            with pytest.raises(ValueError):
+                                use_case.execute("broken.csv")
+
+                        replace_records.assert_not_called()
+                        delete_all.assert_not_called()
+                        save_record.assert_not_called()
+                        save_balance.assert_not_called()
+
+    def test_execute_keeps_existing_data_when_csv_invalid(self):
+        repo_file = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json")
+        repo_file.close()
+        csv_file = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv")
+        csv_file.write("date,type,category,amount_original,currency,rate_at_operation,amount_kzt\n")
+        csv_file.write("bad-date,income,Salary,10,USD,500,5000\n")
+        csv_file.close()
+        try:
+            repository = JsonFileRecordRepository(repo_file.name)
+            repository.save_initial_balance(77.0)
+            repository.save(IncomeRecord(date="2025-01-01", _amount_init=10.0, category="Salary"))
+
+            use_case = ImportFromCSV(repository=repository)
+            with pytest.raises(ValueError):
+                use_case.execute(csv_file.name)
+
+            assert repository.load_initial_balance() == 77.0
+            records = repository.load_all()
+            assert len(records) == 1
+            assert records[0].date == "2025-01-01"
+        finally:
+            os.unlink(repo_file.name)
+            os.unlink(csv_file.name)

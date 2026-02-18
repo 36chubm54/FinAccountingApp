@@ -1,10 +1,10 @@
-from datetime import date
-from typing import Dict, Iterable, List, Optional, Tuple
+from collections.abc import Iterable
+from datetime import date as dt_date
 
 from prettytable import PrettyTable
 
 from .records import IncomeRecord, MandatoryExpenseRecord, Record
-from .validation import parse_report_period_end, parse_report_period_start
+from .validation import parse_report_period_end, parse_report_period_start, parse_ymd
 
 
 class Report:
@@ -13,9 +13,9 @@ class Report:
         records: Iterable[Record],
         initial_balance: float = 0.0,
         balance_label: str = "Initial balance",
-        opening_start_date: Optional[str] = None,
-        period_start_date: Optional[str] = None,
-        period_end_date: Optional[str] = None,
+        opening_start_date: str | None = None,
+        period_start_date: str | None = None,
+        period_end_date: str | None = None,
     ):
         self._records = list(records)
         self._initial_balance = initial_balance
@@ -35,9 +35,7 @@ class Report:
     def total_current(self, currency_service) -> float:
         total = self._initial_balance
         for record in self._records:
-            converted = float(
-                currency_service.convert(record.amount_original, record.currency)
-            )
+            converted = float(currency_service.convert(record.amount_original, record.currency))
             sign = 1.0 if record.signed_amount_kzt() >= 0 else -1.0
             total += sign * abs(converted)
         return total
@@ -48,7 +46,13 @@ class Report:
     def filter_by_period(self, prefix: str) -> "Report":
         start_date = parse_report_period_start(prefix)
         end_date = parse_report_period_end(prefix)
-        filtered = [r for r in self._records if r.date.startswith(prefix)]
+        start = parse_ymd(start_date)
+        end = parse_ymd(end_date)
+        filtered: list[Record] = []
+        for record in self._records:
+            record_date = self._record_date(record)
+            if record_date is not None and start <= record_date <= end:
+                filtered.append(record)
         return Report(
             filtered,
             self.opening_balance(start_date),
@@ -58,17 +62,21 @@ class Report:
             period_end_date=end_date,
         )
 
-    def filter_by_period_range(
-        self, start_prefix: str, end_prefix: Optional[str] = None
-    ) -> "Report":
+    def filter_by_period_range(self, start_prefix: str, end_prefix: str | None = None) -> "Report":
         start_date = parse_report_period_start(start_prefix)
         if end_prefix:
             end_date = parse_report_period_end(end_prefix)
         else:
-            end_date = date.today().isoformat()
+            end_date = dt_date.today().isoformat()
         if end_date < start_date:
             raise ValueError("Period end date cannot be earlier than period start date")
-        filtered = [r for r in self._records if start_date <= r.date <= end_date]
+        start = parse_ymd(start_date)
+        end = parse_ymd(end_date)
+        filtered: list[Record] = []
+        for record in self._records:
+            record_date = self._record_date(record)
+            if record_date is not None and start <= record_date <= end:
+                filtered.append(record)
         return Report(
             filtered,
             self.opening_balance(start_date),
@@ -89,8 +97,8 @@ class Report:
             period_end_date=self._period_end_date,
         )
 
-    def grouped_by_category(self) -> Dict[str, "Report"]:
-        groups: Dict[str, List[Record]] = {}
+    def grouped_by_category(self) -> dict[str, "Report"]:
+        groups: dict[str, list[Record]] = {}
         for record in self._records:
             if record.category not in groups:
                 groups[record.category] = []
@@ -119,7 +127,7 @@ class Report:
         return self._balance_label
 
     @property
-    def opening_start_date(self) -> Optional[str]:
+    def opening_start_date(self) -> str | None:
         return self._opening_start_date
 
     @property
@@ -127,45 +135,46 @@ class Report:
         return self._opening_start_date is not None
 
     @property
-    def period_start_date(self) -> Optional[str]:
+    def period_start_date(self) -> str | None:
         return self._period_start_date
 
     @property
-    def period_end_date(self) -> Optional[str]:
+    def period_end_date(self) -> str | None:
         return self._period_end_date
 
     @property
     def statement_title(self) -> str:
         if self._period_start_date and self._period_end_date:
-            return (
-                f"Transaction statement ({self._period_start_date} - "
-                f"{self._period_end_date})"
-            )
+            return f"Transaction statement ({self._period_start_date} - {self._period_end_date})"
         return "Transaction statement"
 
     def opening_balance(self, start_date: str) -> float:
-        return self._initial_balance + sum(
-            record.signed_amount()
-            for record in self._records
-            if record.date < start_date
-        )
+        start = parse_ymd(start_date)
+        total = self._initial_balance
+        for record in self._records:
+            record_date = self._record_date(record)
+            if record_date is not None and record_date < start:
+                total += record.signed_amount()
+        return total
 
     @staticmethod
-    def _parse_year_month(date_str: str) -> Optional[Tuple[int, int]]:
+    def _record_date(record: Record) -> dt_date | None:
+        if not record.date:
+            return None
+        return parse_ymd(record.date)
+
+    @staticmethod
+    def _parse_year_month(date_str: str) -> tuple[int, int] | None:
         try:
-            parts = date_str.split("-")
-            if len(parts) < 2:
+            if not date_str:
                 return None
-            year = int(parts[0])
-            month = int(parts[1])
-            if 1 <= month <= 12:
-                return year, month
+            parsed = parse_ymd(date_str)
+            return parsed.year, parsed.month
         except Exception:
             return None
-        return None
 
-    def _year_months(self) -> List[Tuple[int, int]]:
-        year_months: List[Tuple[int, int]] = []
+    def _year_months(self) -> list[tuple[int, int]]:
+        year_months: list[tuple[int, int]] = []
         for record in self._records:
             parsed = self._parse_year_month(record.date)
             if parsed:
@@ -173,10 +182,10 @@ class Report:
         return year_months
 
     def monthly_income_expense_rows(
-        self, year: Optional[int] = None, up_to_month: Optional[int] = None
-    ) -> Tuple[int, List[Tuple[str, float, float]]]:
+        self, year: int | None = None, up_to_month: int | None = None
+    ) -> tuple[int, list[tuple[str, float, float]]]:
         year_months = self._year_months()
-        today = date.today()
+        today = dt_date.today()
 
         if year is None:
             if year_months:
@@ -193,7 +202,7 @@ class Report:
 
         up_to_month = max(1, min(12, up_to_month))
 
-        aggregates: Dict[Tuple[int, int], Tuple[float, float]] = {}
+        aggregates: dict[tuple[int, int], tuple[float, float]] = {}
         for record in self._records:
             parsed = self._parse_year_month(record.date)
             if not parsed:
@@ -201,16 +210,14 @@ class Report:
             rec_year, rec_month = parsed
             if rec_year != year or not (1 <= rec_month <= up_to_month):
                 continue
-            income_total, expense_total = aggregates.get(
-                (rec_year, rec_month), (0.0, 0.0)
-            )
+            income_total, expense_total = aggregates.get((rec_year, rec_month), (0.0, 0.0))
             if isinstance(record, IncomeRecord):
                 income_total += record.amount
             else:
                 expense_total += abs(record.amount)
             aggregates[(rec_year, rec_month)] = (income_total, expense_total)
 
-        rows: List[Tuple[str, float, float]] = []
+        rows: list[tuple[str, float, float]] = []
         for month in range(1, up_to_month + 1):
             income_total, expense_total = aggregates.get((year, month), (0.0, 0.0))
             rows.append((f"{year}-{month:02d}", income_total, expense_total))
@@ -218,7 +225,7 @@ class Report:
         return year, rows
 
     def monthly_income_expense_table(
-        self, year: Optional[int] = None, up_to_month: Optional[int] = None
+        self, year: int | None = None, up_to_month: int | None = None
     ) -> str:
         year, rows = self.monthly_income_expense_rows(year, up_to_month)
         table = PrettyTable()
@@ -231,9 +238,7 @@ class Report:
             total_expense += expense
             table.add_row([month_label, f"{income:.2f}", f"{expense:.2f}"])
 
-        table.add_row(
-            ["TOTAL", f"{total_income:.2f}", f"{total_expense:.2f}"], divider=True
-        )
+        table.add_row(["TOTAL", f"{total_income:.2f}", f"{total_expense:.2f}"], divider=True)
         return str(table)
 
     def as_table(self, summary_mode: str = "full") -> str:
@@ -246,7 +251,7 @@ class Report:
                 if self._initial_balance >= 0
                 else f"({abs(self._initial_balance):.2f})"
             )
-            table.add_row(["", self._balance_label, "", balance_str])
+            table.add_row(["", self._balance_label, "", balance_str], divider=True)
 
         sorted_records = sorted(self._records, key=lambda r: r.date)
 
@@ -259,23 +264,17 @@ class Report:
                 record_type = "Expense"
             amount_value = record.amount
             amount_str = (
-                f"{amount_value:.2f}"
-                if amount_value >= 0
-                else f"({abs(amount_value):.2f})"
+                f"{amount_value:.2f}" if amount_value >= 0 else f"({abs(amount_value):.2f})"
             )
             table.add_row([record.date, record_type, record.category, amount_str])
 
         records_total = sum(r.signed_amount_kzt() for r in self._records)
         records_total_str = (
-            f"{records_total:.2f}"
-            if records_total >= 0
-            else f"({abs(records_total):.2f})"
+            f"{records_total:.2f}" if records_total >= 0 else f"({abs(records_total):.2f})"
         )
         final_balance = self.total_fixed()
         final_balance_str = (
-            f"{final_balance:.2f}"
-            if final_balance >= 0
-            else f"({abs(final_balance):.2f})"
+            f"{final_balance:.2f}" if final_balance >= 0 else f"({abs(final_balance):.2f})"
         )
 
         if summary_mode == "total_only":

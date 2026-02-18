@@ -1,5 +1,6 @@
 import re
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections.abc import Callable
+from typing import Any
 
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
@@ -7,14 +8,14 @@ from domain.validation import ensure_valid_period, parse_ymd
 
 MANDATORY_PERIODS = {"daily", "weekly", "monthly", "yearly"}
 
-ImportSummary = Tuple[int, int, List[str]]
+ImportSummary = tuple[int, int, list[str]]
 
 
 def norm_key(value: str) -> str:
     return value.strip().lower().replace(" ", "_")
 
 
-def as_float(value: Any, default: Optional[float] = None) -> Optional[float]:
+def as_float(value: Any, default: float | None = None) -> float | None:
     try:
         raw = str(value).strip()
         if raw.startswith("(") and raw.endswith(")"):
@@ -48,21 +49,19 @@ def _validate_currency(currency: str) -> bool:
 
 
 def parse_import_row(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     *,
     row_label: str,
     policy: ImportPolicy,
-    get_rate: Optional[Callable[[str], float]] = None,
+    get_rate: Callable[[str], float] | None = None,
     mandatory_only: bool = False,
-) -> Tuple[Optional[Record], Optional[float], Optional[str]]:
+) -> tuple[Record | None, float | None, str | None]:
     row_lc = {norm_key(str(k)): v for k, v in row.items()}
     row_type = safe_type(str(row_lc.get("type", "") or "")).lower()
 
     if row_type == "initial_balance":
         balance = as_float(
-            row_lc.get(
-                "amount_original", row_lc.get("amount_kzt", row_lc.get("amount"))
-            ),
+            row_lc.get("amount_original", row_lc.get("amount_kzt", row_lc.get("amount"))),
             0.0,
         )
         return None, float(balance or 0.0), None

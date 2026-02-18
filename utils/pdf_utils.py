@@ -1,12 +1,11 @@
-from typing import List
-import os
 import logging
+import os
+
+from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Spacer
-from reportlab.lib import colors
-
+from reportlab.platypus import SimpleDocTemplate, Spacer, Table, TableStyle
 
 from domain.records import IncomeRecord, MandatoryExpenseRecord
 from domain.reports import Report
@@ -53,9 +52,7 @@ def _register_cyrillic_font() -> str:
                     logger.debug("Registered font %s from %s", name, path)
                     return name
                 except Exception:
-                    logger.debug(
-                        "Failed to register font %s at %s", name, path, exc_info=True
-                    )
+                    logger.debug("Failed to register font %s at %s", name, path, exc_info=True)
                     continue
         except Exception:
             continue
@@ -85,14 +82,10 @@ def _register_cyrillic_font() -> str:
                     try:
                         name = os.path.splitext(os.path.basename(path))[0]
                         pdfmetrics.registerFont(TTFont(name, path))
-                        logger.debug(
-                            "Registered font %s from discovered path %s", name, path
-                        )
+                        logger.debug("Registered font %s from discovered path %s", name, path)
                         return name
                     except Exception:
-                        logger.debug(
-                            "Failed to register discovered font %s", path, exc_info=True
-                        )
+                        logger.debug("Failed to register discovered font %s", path, exc_info=True)
                         continue
         except Exception:
             continue
@@ -121,7 +114,7 @@ def report_to_pdf(report: Report, filepath: str) -> None:
 
     data.append(["", "", "", "Fixed amounts by operation-time FX rates"])
     if getattr(report, "initial_balance", 0) != 0 or report.is_opening_balance:
-        data.append(["", report.balance_label, "", f"{report.initial_balance:.2f}"])
+        data.append([f"{report.balance_label.upper()}", "", "", f"{report.initial_balance:.2f}"])
 
     for record in sorted(report.records(), key=lambda r: r.date):
         if isinstance(record, IncomeRecord):
@@ -145,9 +138,7 @@ def report_to_pdf(report: Report, filepath: str) -> None:
     data.append(["FINAL BALANCE", "", "", f"{total:.2f}"])
 
     # Ensure directory
-    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
-        filepath
-    ) else None
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
 
     # Build PDF with a Table for nicer tabular layout and word-wrap
     doc = SimpleDocTemplate(
@@ -181,7 +172,7 @@ def report_to_pdf(report: Report, filepath: str) -> None:
         ]
     )
     table.setStyle(style)
-    elems: List[Table] = [table]
+    elems: list[Table] = [table]
     # Add a header before the statement table
     title_table = Table([[report.statement_title]], colWidths=[available_width])
     title_style = TableStyle(
@@ -196,7 +187,7 @@ def report_to_pdf(report: Report, filepath: str) -> None:
     )
     title_table.setStyle(title_style)
 
-    elems: List[Table] = [title_table, table]
+    elems: list[Table] = [title_table, table]
     # After the detailed listing, add grouped tables by category
     try:
         groups = report.grouped_by_category()
@@ -248,9 +239,7 @@ def report_to_pdf(report: Report, filepath: str) -> None:
                 r_type = "Expense"
             amt = getattr(r, "amount_kzt", 0.0)
             cat_total += (
-                getattr(r, "amount_kzt", 0.0)
-                if getattr(r, "amount_kzt", None) is not None
-                else 0.0
+                getattr(r, "amount_kzt", 0.0) if getattr(r, "amount_kzt", None) is not None else 0.0
             )
             cat_data.append([_safe_str(r.date), r_type, f"{abs(amt):.2f}"])
         cat_data.append(["SUBTOTAL", "", f"{abs(cat_total):.2f}"])
@@ -309,9 +298,7 @@ def report_to_pdf(report: Report, filepath: str) -> None:
     HEIGHT = 14
     elems.append(Spacer(WIDTH, HEIGHT))  # type: ignore
     # Add a title before the report of monthly income/expenses
-    monthly_title = Table(
-        [["Monthly income and expense report"]], colWidths=[available_width]
-    )
+    monthly_title = Table([["Monthly income and expense report"]], colWidths=[available_width])
     monthly_title_style = TableStyle(
         [
             ("FONT", (0, 0), (-1, -1), font_name),

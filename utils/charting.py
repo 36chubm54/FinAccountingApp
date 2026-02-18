@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from calendar import monthrange
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Iterable, Dict, List, Tuple
 
-from domain.records import IncomeRecord, ExpenseRecord, MandatoryExpenseRecord, Record
+from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 
 
 def _parse_date(date_str: str) -> datetime | None:
@@ -14,8 +14,8 @@ def _parse_date(date_str: str) -> datetime | None:
         return None
 
 
-def aggregate_expenses_by_category(records: Iterable[Record]) -> Dict[str, float]:
-    totals: Dict[str, float] = {}
+def aggregate_expenses_by_category(records: Iterable[Record]) -> dict[str, float]:
+    totals: dict[str, float] = {}
     for record in records:
         if isinstance(record, IncomeRecord):
             continue
@@ -28,7 +28,7 @@ def aggregate_expenses_by_category(records: Iterable[Record]) -> Dict[str, float
 
 def aggregate_daily_cashflow(
     records: Iterable[Record], year: int, month: int
-) -> Tuple[List[float], List[float]]:
+) -> tuple[list[float], list[float]]:
     days_in_month = monthrange(year, month)[1]
     income = [0.0 for _ in range(days_in_month)]
     expense = [0.0 for _ in range(days_in_month)]
@@ -54,7 +54,7 @@ def aggregate_daily_cashflow(
 
 def aggregate_monthly_cashflow(
     records: Iterable[Record], year: int
-) -> Tuple[List[float], List[float]]:
+) -> tuple[list[float], list[float]]:
     income = [0.0 for _ in range(12)]
     expense = [0.0 for _ in range(12)]
 
@@ -77,7 +77,7 @@ def aggregate_monthly_cashflow(
     return income, expense
 
 
-def extract_years(records: Iterable[Record]) -> List[int]:
+def extract_years(records: Iterable[Record]) -> list[int]:
     years = set()
     for record in records:
         dt = _parse_date(record.date)
@@ -86,7 +86,7 @@ def extract_years(records: Iterable[Record]) -> List[int]:
     return sorted(years)
 
 
-def extract_months(records: Iterable[Record]) -> List[str]:
+def extract_months(records: Iterable[Record]) -> list[str]:
     months = set()
     for record in records:
         dt = _parse_date(record.date)

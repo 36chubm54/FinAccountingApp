@@ -1,4 +1,5 @@
 import pytest
+
 from app.services import CurrencyService
 
 
@@ -25,9 +26,7 @@ class TestCurrencyServiceAdapter:
 
     def test_domain_service_keyerror_converted_to_valueerror(self):
         # Since the adapter catches KeyError from domain service and raises ValueError
-        service = CurrencyService(
-            rates={}
-        )  # Empty rates, no currencies supported except base
+        service = CurrencyService(rates={})  # Empty rates, no currencies supported except base
         with pytest.raises(ValueError, match="Unsupported currency: USD"):
             service.convert(100.0, "USD")
 
@@ -35,3 +34,24 @@ class TestCurrencyServiceAdapter:
         service = CurrencyService(rates={"USD": 510.0})
         assert service.get_rate("USD") == 510.0
         assert service.get_rate("KZT") == 1.0
+
+    def test_get_rate_uses_public_domain_interface(self):
+        class StubDomainService:
+            base_currency = "KZT"
+
+            def get_rate(self, currency: str) -> float:
+                if currency == "USD":
+                    return 505.0
+                raise KeyError(currency)
+
+            def get_all_rates(self) -> dict[str, float]:
+                return {"USD": 505.0}
+
+            def convert(self, amount: float, currency: str) -> float:
+                return amount * self.get_rate(currency)
+
+        service = CurrencyService(rates={"USD": 500.0})
+        service._service = StubDomainService()  # type: ignore[assignment]
+        assert service.get_rate("USD") == 505.0
+        assert service.get_all_rates() == {"USD": 505.0}
+        assert service.base_currency == "KZT"

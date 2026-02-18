@@ -1,15 +1,13 @@
 import logging
 import os
-from typing import Iterable
+from collections.abc import Iterable
 
 logger = logging.getLogger(__name__)
 
 
 def export_report(report, filepath: str, fmt: str) -> None:
     fmt = (fmt or "csv").lower()
-    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
-        filepath
-    ) else None
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     try:
         if fmt == "csv":
             from utils.csv_utils import report_to_csv
@@ -32,9 +30,7 @@ def export_report(report, filepath: str, fmt: str) -> None:
 
 def export_mandatory_expenses(expenses: Iterable, filepath: str, fmt: str) -> None:
     fmt = (fmt or "csv").lower()
-    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
-        filepath
-    ) else None
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     try:
         if fmt == "csv":
             from utils.csv_utils import export_mandatory_expenses_to_csv
@@ -47,9 +43,7 @@ def export_mandatory_expenses(expenses: Iterable, filepath: str, fmt: str) -> No
         else:
             raise ValueError(f"Unsupported export format: {fmt}")
     except Exception:
-        logger.exception(
-            "Failed to export mandatory expenses to %s (%s)", filepath, fmt
-        )
+        logger.exception("Failed to export mandatory expenses to %s (%s)", filepath, fmt)
         raise
 
 
@@ -60,9 +54,7 @@ def export_records(
     initial_balance: float = 0.0,
 ) -> None:
     fmt = (fmt or "csv").lower()
-    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
-        filepath
-    ) else None
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     try:
         if fmt == "csv":
             from utils.csv_utils import export_records_to_csv
@@ -86,9 +78,7 @@ def export_full_backup(
     records,
     mandatory_expenses,
 ) -> None:
-    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(
-        filepath
-    ) else None
+    os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     try:
         from utils.backup_utils import export_full_backup_to_json
 

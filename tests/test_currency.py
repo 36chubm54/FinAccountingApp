@@ -1,4 +1,5 @@
 import pytest
+
 from domain.currency import CurrencyService
 
 

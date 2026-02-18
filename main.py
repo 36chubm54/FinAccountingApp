@@ -1,6 +1,6 @@
+import logging
 import sys
 from pathlib import Path
-import logging
 
 # Ensure project package root is on sys.path so imports work regardless of CWD
 _ROOT = Path(__file__).resolve().parent

@@ -93,9 +93,7 @@ bad-date,income,Salary,10,USD,500,5000
         tmp.write(csv_content)
         path = tmp.name
     try:
-        records, _, summary = import_records_from_csv(
-            path, policy=ImportPolicy.FULL_BACKUP
-        )
+        records, _, summary = import_records_from_csv(path, policy=ImportPolicy.FULL_BACKUP)
         assert len(records) == 1
         assert isinstance(records[0], IncomeRecord)
         assert summary[0] == 1

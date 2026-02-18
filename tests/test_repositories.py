@@ -1,9 +1,12 @@
-import os
 import json
+import os
 import tempfile
+import threading
+
 import pytest
-from infrastructure.repositories import RecordRepository, JsonFileRecordRepository
-from domain.records import IncomeRecord, ExpenseRecord
+
+from domain.records import ExpenseRecord, IncomeRecord
+from infrastructure.repositories import JsonFileRecordRepository, RecordRepository
 
 
 class TestRecordRepository:
@@ -16,9 +19,7 @@ class TestRecordRepository:
 class TestJsonFileRecordRepository:
     def setup_method(self):
         # Create a temporary file for each test
-        self.temp_file = tempfile.NamedTemporaryFile(
-            mode="w", delete=False, suffix=".json"
-        )
+        self.temp_file = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json")
         self.temp_file.close()
         self.repo = JsonFileRecordRepository(self.temp_file.name)
 
@@ -75,7 +76,7 @@ class TestJsonFileRecordRepository:
         self.repo.save(record)
 
         # Read the raw JSON to verify format
-        with open(self.temp_file.name, "r", encoding="utf-8") as f:
+        with open(self.temp_file.name, encoding="utf-8") as f:
             data = json.load(f)
 
         assert isinstance(data, dict)
@@ -214,7 +215,7 @@ class TestJsonFileRecordRepository:
         assert len(records) == 0
 
         # Verify JSON file contains empty records but initial_balance
-        with open(self.temp_file.name, "r", encoding="utf-8") as f:
+        with open(self.temp_file.name, encoding="utf-8") as f:
             data = json.load(f)
         assert data["records"] == []
         assert data["initial_balance"] == 0.0
@@ -226,7 +227,7 @@ class TestJsonFileRecordRepository:
         assert balance == 100.0
 
         # Verify JSON file
-        with open(self.temp_file.name, "r", encoding="utf-8") as f:
+        with open(self.temp_file.name, encoding="utf-8") as f:
             data = json.load(f)
         assert data["initial_balance"] == 100.0
         assert data["records"] == []
@@ -256,7 +257,27 @@ class TestJsonFileRecordRepository:
         assert len(records) == 1
 
         # Verify JSON file
-        with open(self.temp_file.name, "r", encoding="utf-8") as f:
+        with open(self.temp_file.name, encoding="utf-8") as f:
             data = json.load(f)
         assert data["initial_balance"] == 200.0
         assert len(data["records"]) == 1
+
+    def test_concurrent_access_save_and_load(self):
+        def writer(start: int) -> None:
+            for index in range(start, start + 20):
+                self.repo.save(
+                    IncomeRecord(
+                        date="2025-01-01",
+                        _amount_init=float(index),
+                        category=f"C{index}",
+                    )
+                )
+
+        threads = [threading.Thread(target=writer, args=(i * 20,)) for i in range(3)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        records = self.repo.load_all()
+        assert len(records) == 60

@@ -1,10 +1,13 @@
 import json
+import logging
 import os
-from typing import List, Tuple, Sequence
+from collections.abc import Sequence
 
 from domain.import_policy import ImportPolicy
 from domain.records import MandatoryExpenseRecord, Record
 from utils.import_core import ImportSummary, parse_import_row, record_type_name
+
+logger = logging.getLogger(__name__)
 
 
 def export_full_backup_to_json(
@@ -12,7 +15,7 @@ def export_full_backup_to_json(
     *,
     initial_balance: float,
     records: Sequence[Record],
-    mandatory_expenses: List[MandatoryExpenseRecord],
+    mandatory_expenses: list[MandatoryExpenseRecord],
 ) -> None:
     payload_records = []
     for record in records:
@@ -63,11 +66,11 @@ def export_full_backup_to_json(
 
 def import_full_backup_from_json(
     filepath: str,
-) -> Tuple[float, List[Record], List[MandatoryExpenseRecord], ImportSummary]:
+) -> tuple[float, list[Record], list[MandatoryExpenseRecord], ImportSummary]:
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"JSON file not found: {filepath}")
 
-    with open(filepath, "r", encoding="utf-8") as fp:
+    with open(filepath, encoding="utf-8") as fp:
         data = json.load(fp)
 
     if not isinstance(data, dict):
@@ -82,9 +85,9 @@ def import_full_backup_from_json(
             "Invalid backup JSON structure: records and mandatory_expenses must be arrays"
         )
 
-    records: List[Record] = []
-    mandatory_expenses: List[MandatoryExpenseRecord] = []
-    errors: List[str] = []
+    records: list[Record] = []
+    mandatory_expenses: list[MandatoryExpenseRecord] = []
+    errors: list[str] = []
     skipped = 0
     imported = 0
 
@@ -127,4 +130,10 @@ def import_full_backup_from_json(
             imported += 1
             mandatory_expenses.append(record)
 
+    logger.info(
+        "JSON backup import completed: imported=%s skipped=%s file=%s",
+        imported,
+        skipped,
+        filepath,
+    )
     return initial_balance, records, mandatory_expenses, (imported, skipped, errors)

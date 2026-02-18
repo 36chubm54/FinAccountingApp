@@ -1,9 +1,8 @@
-import tempfile
 import os
+import tempfile
 
-from domain.records import IncomeRecord, ExpenseRecord
+from domain.records import ExpenseRecord, IncomeRecord
 from domain.reports import Report
-
 from utils.pdf_utils import report_to_pdf
 
 

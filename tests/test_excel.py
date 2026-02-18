@@ -1,25 +1,23 @@
-import tempfile
 import os
+import tempfile
 
 from openpyxl import load_workbook
 
 from domain.records import (
-    IncomeRecord,
     ExpenseRecord,
+    IncomeRecord,
     MandatoryExpenseRecord,
 )
 from domain.reports import Report
-
-from utils.excel_utils import (
-    report_to_xlsx,
-    report_from_xlsx,
-    export_mandatory_expenses_to_xlsx,
-    import_mandatory_expenses_from_xlsx,
-)
-
 from utils.csv_utils import (
     export_mandatory_expenses_to_csv,
     import_mandatory_expenses_from_csv,
+)
+from utils.excel_utils import (
+    export_mandatory_expenses_to_xlsx,
+    import_mandatory_expenses_from_xlsx,
+    report_from_xlsx,
+    report_to_xlsx,
 )
 
 
@@ -67,9 +65,7 @@ def test_report_xlsx_uses_opening_balance_label_for_filtered_report():
         wb = load_workbook(tmp_path, data_only=True)
         try:
             ws = wb["Report"]
-            assert (
-                ws.cell(1, 1).value == "Transaction statement (2025-01-01 - 2025-12-31)"
-            )
+            assert ws.cell(1, 1).value == "Transaction statement (2025-01-01 - 2025-12-31)"
             assert ws.cell(4, 2).value == "Opening balance"
             assert ws.cell(4, 4).value == "70.00"
         finally:
@@ -114,9 +110,7 @@ def test_mandatory_csv_roundtrip():
             date="", _amount_init=5.0, category="A", description="x", period="daily"
         ),
     ]
-    with tempfile.NamedTemporaryFile(
-        delete=False, suffix=".csv", mode="w", newline=""
-    ) as tmp:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="w", newline="") as tmp:
         tmp_path = tmp.name
     try:
         export_mandatory_expenses_to_csv(expenses, tmp_path)

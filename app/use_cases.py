@@ -1,8 +1,13 @@
-from domain.records import IncomeRecord, ExpenseRecord, MandatoryExpenseRecord
+import logging
+
 from domain.import_policy import ImportPolicy
+from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
 from domain.reports import Report
 from infrastructure.repositories import RecordRepository
+
 from .services import CurrencyService
+
+logger = logging.getLogger(__name__)
 
 
 def _build_rate(amount: float, amount_kzt: float, currency: str) -> float:
@@ -20,7 +25,8 @@ class CreateIncome:
 
     def execute(
         self, *, date: str, amount: float, currency: str, category: str = "General"
-    ):
+    ) -> None:
+        """Create and persist an income record."""
         amount_kzt = self._currency.convert(amount, currency)
         record = IncomeRecord(
             date=date,
@@ -40,7 +46,8 @@ class CreateExpense:
 
     def execute(
         self, *, date: str, amount: float, currency: str, category: str = "General"
-    ):
+    ) -> None:
+        """Create and persist an expense record."""
         amount_kzt = self._currency.convert(amount, currency)
         record = ExpenseRecord(
             date=date,
@@ -58,9 +65,7 @@ class GenerateReport:
         self._repository = repository
 
     def execute(self) -> Report:
-        return Report(
-            self._repository.load_all(), self._repository.load_initial_balance()
-        )
+        return Report(self._repository.load_all(), self._repository.load_initial_balance())
 
 
 class DeleteRecord:
@@ -86,22 +91,18 @@ class ImportFromCSV:
         self._repository = repository
 
     def execute(self, filepath: str) -> int:
-        """Import records from CSV file, replace all existing records in repository. Returns number of imported records."""
+        """Import records from CSV and atomically replace repository data."""
         from utils.csv_utils import import_records_from_csv
 
-        records, initial_balance, _ = import_records_from_csv(
+        records, initial_balance, summary = import_records_from_csv(
             filepath, policy=ImportPolicy.FULL_BACKUP
         )
-
-        # Delete all existing records first
-        self._repository.delete_all()
-        self._repository.save_initial_balance(initial_balance)
-
-        # Import new records
-        imported_count = 0
-        for record in records:
-            self._repository.save(record)
-            imported_count += 1
+        imported_count, skipped_count, _ = summary
+        logger.info("CSV import parsed: imported=%s skipped=%s", imported_count, skipped_count)
+        if skipped_count > 0:
+            logger.warning("CSV import aborted due to validation errors: skipped=%s", skipped_count)
+            raise ValueError("Import aborted: CSV contains invalid rows")
+        self._repository.replace_records(records, initial_balance)
         return imported_count
 
 
@@ -118,7 +119,8 @@ class CreateMandatoryExpense:
         category: str,
         description: str,
         period: str,
-    ):
+    ) -> None:
+        """Create and persist a mandatory expense template."""
         from domain.validation import ensure_valid_period
 
         ensure_valid_period(period)
@@ -142,6 +144,7 @@ class GetMandatoryExpenses:
         self._repository = repository
 
     def execute(self) -> list[MandatoryExpenseRecord]:
+        """Return all mandatory expense templates."""
         return self._repository.load_mandatory_expenses()
 
 
@@ -164,10 +167,11 @@ class DeleteAllMandatoryExpenses:
 
 
 class AddMandatoryExpenseToReport:
-    def __init__(self, repository: RecordRepository, currency: CurrencyService):
+    def __init__(self, repository: RecordRepository):
         self._repository = repository
 
-    def execute(self, index: int, date: str):
+    def execute(self, index: int, date: str) -> bool:
+        """Add selected mandatory expense to records with provided date."""
         mandatory_expenses = self._repository.load_mandatory_expenses()
         if 0 <= index < len(mandatory_expenses):
             expense = mandatory_expenses[index]
