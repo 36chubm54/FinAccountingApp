@@ -55,6 +55,7 @@ def test_create_record_assigns_system_wallet_id():
     repo = JsonFileRecordRepository(path)
     CreateIncome(repo, CurrencyService()).execute(
         date="2025-01-01",
+        wallet_id=1,
         amount=10.0,
         currency="KZT",
         category="Test",

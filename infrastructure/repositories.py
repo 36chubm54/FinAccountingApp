@@ -16,6 +16,11 @@ SYSTEM_WALLET_ID = 1
 
 class RecordRepository(ABC):
     @abstractmethod
+    def load_active_wallets(self) -> list[Wallet]:
+        """Load active wallets only."""
+        pass
+
+    @abstractmethod
     def create_wallet(
         self,
         *,
@@ -31,6 +36,11 @@ class RecordRepository(ABC):
     @abstractmethod
     def save_wallet(self, wallet: Wallet) -> None:
         """Save wallet data."""
+        pass
+
+    @abstractmethod
+    def soft_delete_wallet(self, wallet_id: int) -> bool:
+        """Mark wallet as inactive."""
         pass
 
     @abstractmethod
@@ -144,6 +154,7 @@ class JsonFileRecordRepository(RecordRepository):
             "initial_balance": float(wallet.initial_balance),
             "system": bool(wallet.system),
             "allow_negative": bool(wallet.allow_negative),
+            "is_active": bool(wallet.is_active),
         }
 
     @classmethod
@@ -156,6 +167,7 @@ class JsonFileRecordRepository(RecordRepository):
                 initial_balance=float(initial_balance),
                 system=True,
                 allow_negative=False,
+                is_active=True,
             )
         )
 
@@ -246,6 +258,7 @@ class JsonFileRecordRepository(RecordRepository):
                     "initial_balance": self._as_float(wallet_item.get("initial_balance"), 0.0),
                     "system": bool(wallet_item.get("system", False)),
                     "allow_negative": bool(wallet_item.get("allow_negative", False)),
+                    "is_active": bool(wallet_item.get("is_active", True)),
                 }
                 if wallet_id == SYSTEM_WALLET_ID:
                     has_system_wallet = True
@@ -370,9 +383,13 @@ class JsonFileRecordRepository(RecordRepository):
                     initial_balance=self._as_float(item.get("initial_balance"), 0.0),
                     system=bool(item.get("system", wallet_id == SYSTEM_WALLET_ID)),
                     allow_negative=bool(item.get("allow_negative", False)),
+                    is_active=bool(item.get("is_active", True)),
                 )
             )
         return wallets
+
+    def load_active_wallets(self) -> list[Wallet]:
+        return [wallet for wallet in self.load_wallets() if wallet.is_active]
 
     def create_wallet(
         self,
@@ -398,6 +415,7 @@ class JsonFileRecordRepository(RecordRepository):
                 initial_balance=float(initial_balance),
                 system=bool(system),
                 allow_negative=bool(allow_negative),
+                is_active=True,
             )
             data["wallets"].append(self._wallet_to_dict(wallet))
             self._save_data(data)
@@ -418,6 +436,20 @@ class JsonFileRecordRepository(RecordRepository):
             data["wallets"] = wallets
             self._save_data(data)
 
+    def soft_delete_wallet(self, wallet_id: int) -> bool:
+        with self._lock:
+            data = self._load_data()
+            wallets = data.get("wallets", [])
+            for item in wallets:
+                if isinstance(item, dict) and int(item.get("id", 0)) == int(wallet_id):
+                    if bool(item.get("system", False)):
+                        return False
+                    item["is_active"] = False
+                    data["wallets"] = wallets
+                    self._save_data(data)
+                    return True
+            return False
+
     def get_system_wallet(self) -> Wallet:
         wallets = self.load_wallets()
         for wallet in wallets:
@@ -430,6 +462,7 @@ class JsonFileRecordRepository(RecordRepository):
             initial_balance=0.0,
             system=True,
             allow_negative=False,
+            is_active=True,
         )
 
     @staticmethod

@@ -28,13 +28,22 @@ class CreateIncome:
         self._currency = currency
 
     def execute(
-        self, *, date: str, amount: float, currency: str, category: str = "General"
+        self,
+        *,
+        date: str,
+        wallet_id: int,
+        amount: float,
+        currency: str,
+        category: str = "General",
     ) -> None:
         """Create and persist an income record."""
+        wallet = _wallet_by_id(self._repository, wallet_id)
+        if not wallet.is_active:
+            raise ValueError("Cannot create operation for inactive wallet")
         amount_kzt = self._currency.convert(amount, currency)
         record = IncomeRecord(
             date=date,
-            wallet_id=SYSTEM_WALLET_ID,
+            wallet_id=wallet_id,
             amount_original=amount,
             currency=currency.upper(),
             rate_at_operation=_build_rate(amount, amount_kzt, currency),
@@ -50,13 +59,26 @@ class CreateExpense:
         self._currency = currency
 
     def execute(
-        self, *, date: str, amount: float, currency: str, category: str = "General"
+        self,
+        *,
+        date: str,
+        wallet_id: int,
+        amount: float,
+        currency: str,
+        category: str = "General",
     ) -> None:
         """Create and persist an expense record."""
+        wallet = _wallet_by_id(self._repository, wallet_id)
+        if not wallet.is_active:
+            raise ValueError("Cannot create operation for inactive wallet")
         amount_kzt = self._currency.convert(amount, currency)
+        if not wallet.allow_negative:
+            balance = _wallet_balance_kzt(wallet, self._repository.load_all())
+            if balance - amount_kzt < 0:
+                raise ValueError("Insufficient funds in wallet")
         record = ExpenseRecord(
             date=date,
-            wallet_id=SYSTEM_WALLET_ID,
+            wallet_id=wallet_id,
             amount_original=amount,
             currency=currency.upper(),
             rate_at_operation=_build_rate(amount, amount_kzt, currency),
@@ -101,6 +123,13 @@ def _wallet_balance_kzt(wallet: Wallet, records: list) -> float:
     return total
 
 
+def _wallet_by_id(repository: RecordRepository, wallet_id: int) -> Wallet:
+    wallet = next((w for w in repository.load_wallets() if w.id == wallet_id), None)
+    if wallet is None:
+        raise ValueError(f"Wallet not found: {wallet_id}")
+    return wallet
+
+
 class CreateWallet:
     def __init__(self, repository: RecordRepository):
         self._repository = repository
@@ -129,6 +158,14 @@ class GetWallets:
         return self._repository.load_wallets()
 
 
+class GetActiveWallets:
+    def __init__(self, repository: RecordRepository):
+        self._repository = repository
+
+    def execute(self) -> list[Wallet]:
+        return self._repository.load_active_wallets()
+
+
 class CalculateWalletBalance:
     def __init__(self, repository: RecordRepository):
         self._repository = repository
@@ -147,12 +184,12 @@ class CalculateNetWorth:
         self._currency = currency
 
     def execute_fixed(self) -> float:
-        wallets = self._repository.load_wallets()
+        wallets = self._repository.load_active_wallets()
         records = self._repository.load_all()
         return sum(_wallet_balance_kzt(wallet, records) for wallet in wallets)
 
     def execute_current(self) -> float:
-        wallets = self._repository.load_wallets()
+        wallets = self._repository.load_active_wallets()
         records = self._repository.load_all()
         total = 0.0
         for wallet in wallets:
@@ -196,6 +233,8 @@ class CreateTransfer:
             raise ValueError(f"Wallet not found: {from_wallet_id}")
         if to_wallet is None:
             raise ValueError(f"Wallet not found: {to_wallet_id}")
+        if not from_wallet.is_active or not to_wallet.is_active:
+            raise ValueError("Transfers are allowed only between active wallets")
 
         transfer_kzt = float(self._currency.convert(amount_original, currency))
         transfer_rate = _build_rate(amount_original, transfer_kzt, currency)
@@ -273,6 +312,21 @@ class DeleteRecord:
     def execute(self, index: int) -> bool:
         """Delete record by index. Returns True if deleted successfully."""
         return self._repository.delete_by_index(index)
+
+
+class SoftDeleteWallet:
+    def __init__(self, repository: RecordRepository):
+        self._repository = repository
+
+    def execute(self, wallet_id: int) -> None:
+        wallet = _wallet_by_id(self._repository, wallet_id)
+        if wallet.system:
+            raise ValueError("System wallet cannot be deleted")
+        balance = _wallet_balance_kzt(wallet, self._repository.load_all())
+        if abs(balance) > 1e-9:
+            raise ValueError("Wallet with non-zero balance cannot be deleted")
+        if not self._repository.soft_delete_wallet(wallet_id):
+            raise ValueError("Wallet not found")
 
 
 class DeleteAllRecords:

@@ -9,3 +9,4 @@ class Wallet:
     initial_balance: float
     system: bool = False
     allow_negative: bool = False
+    is_active: bool = True

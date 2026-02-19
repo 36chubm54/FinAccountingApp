@@ -12,8 +12,6 @@ Graphical and web application for personal financial accounting with multicurren
 - [File structure](#-file-structure)
 - [Tests](#-tests)
 - [Supported currencies](#-supported-currencies)
-- [Wallet Support (Phase 1)](#wallet-support-phase-1)
-- [Wallets, Transfers and Commissions (Phase 2)](#wallets-transfers-and-commissions-phase-2)
 
 ---
 
@@ -152,6 +150,22 @@ Export report:
   - transfer without commission keeps total wallet value unchanged;
   - commission reduces total value exactly by commission amount;
   - global report excludes transfers from net profit while commission remains an expense.
+
+### Wallet Operations Binding and Safe Delete (Phase 3)
+
+- Income and expense operations now require `wallet_id`.
+- Expense creation enforces `allow_negative`:
+  - with `allow_negative=False`, expenses that make balance negative are rejected,
+  - with `allow_negative=True`, negative balances are allowed.
+- Legacy data migration:
+  - records without `wallet_id` are assigned `wallet_id=1` (Main wallet),
+  - migration is idempotent and safe for repeated runs.
+- Wallet soft delete:
+  - introduced `is_active`,
+  - deletion is allowed only when wallet balance is zero,
+  - inactive wallets are hidden from GUI selection lists,
+  - historical records stay intact.
+- Net worth is computed as the sum of active wallet balances.
 - Formula:
   `opening_balance = initial_balance + sum(signed_amount for date < start_date)`.
 - Filtered reports use `opening balance` and the row label `Opening balance`.
@@ -349,7 +363,7 @@ To run: Open `web/index.html` in a browser.
 
 The project follows a layered architecture:
 
-- `domain/` — business models and rules (records, reports, validation of dates and periods, currencies).
+- `domain/` — business models and rules (records, reports, date/period validation, currencies, wallets, transfers).
 - `app/` — use cases and currency service adapter.
 - `infrastructure/` — data storage (JSON repository).
 - `utils/` — import/export and preparation of data for graphs.
@@ -358,7 +372,12 @@ The project follows a layered architecture:
 
 Data flow for GUI:
 
-- UI (Tkinter) → `app/use_cases.py` → `infrastructure/repositories.py` → `records.json`.
+- UI (Tkinter) → `gui/controllers.py` → `app/use_cases.py` → `infrastructure/repositories.py` → `records.json`.
+
+Domain relationships:
+
+- `Record` belongs to `Wallet` through `record.wallet_id`.
+- `Transfer` links two records (`expense`/`income`) through `transfer_id`.
 
 ---
 
@@ -379,9 +398,12 @@ Below are the key classes and functions synchronized with the actual code.
 `domain/records.py`
 
 - `Record` — base record (abstract class).
+- `Record` includes mandatory `wallet_id` and optional `transfer_id`.
 - `IncomeRecord` — income.
 - `ExpenseRecord` — expense.
 - `MandatoryExpenseRecord` — mandatory expense with `description` and `period`.
+- `Wallet` — wallet (`allow_negative`, `is_active`).
+- `Transfer` — wallet-to-wallet transfer aggregate.
 
 `domain/reports.py`
 
@@ -417,9 +439,11 @@ Below are the key classes and functions synchronized with the actual code.
 
 `app/use_cases.py`
 
-- `CreateIncome.execute(date, amount, currency, category)`.
-- `CreateExpense.execute(date, amount, currency, category)`.
+- `CreateIncome.execute(date, wallet_id, amount, currency, category)`.
+- `CreateExpense.execute(date, wallet_id, amount, currency, category)`.
 - `GenerateReport.execute()` → `Report` taking into account the initial balance.
+- `GetActiveWallets.execute()` — active wallets only.
+- `SoftDeleteWallet.execute(wallet_id)` — safe wallet soft delete.
 - `DeleteRecord.execute(index)`.
 - `DeleteAllRecords.execute()`.
 - `ImportFromCSV.execute(filepath)` — import and complete replacement of records (CSV, `ImportPolicy.FULL_BACKUP`).
@@ -615,7 +639,8 @@ project/
     ├── test_use_cases.py
     ├── test_validation.py
     ├── test_wallet_phase1.py
-    └── test_wallet_phase2.py
+    ├── test_wallet_phase2.py
+    └── test_wallet_phase3.py
 ```
 
 ---

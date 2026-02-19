@@ -19,8 +19,10 @@ from app.use_cases import (
     DeleteMandatoryExpense,
     DeleteRecord,
     GenerateReport,
+    GetActiveWallets,
     GetMandatoryExpenses,
     GetWallets,
+    SoftDeleteWallet,
 )
 from domain.import_policy import ImportPolicy
 from domain.records import IncomeRecord, MandatoryExpenseRecord, Record
@@ -57,14 +59,18 @@ class FinancialController:
     def get_system_initial_balance(self) -> float:
         return self._repository.load_initial_balance()
 
-    def create_income(self, *, date: str, amount: float, currency: str, category: str) -> None:
+    def create_income(
+        self, *, date: str, wallet_id: int, amount: float, currency: str, category: str
+    ) -> None:
         CreateIncome(self._repository, self._currency).execute(
-            date=date, amount=amount, currency=currency, category=category
+            date=date, wallet_id=wallet_id, amount=amount, currency=currency, category=category
         )
 
-    def create_expense(self, *, date: str, amount: float, currency: str, category: str) -> None:
+    def create_expense(
+        self, *, date: str, wallet_id: int, amount: float, currency: str, category: str
+    ) -> None:
         CreateExpense(self._repository, self._currency).execute(
-            date=date, amount=amount, currency=currency, category=category
+            date=date, wallet_id=wallet_id, amount=amount, currency=currency, category=category
         )
 
     def generate_report(self) -> Report:
@@ -114,6 +120,12 @@ class FinancialController:
 
     def load_wallets(self):
         return GetWallets(self._repository).execute()
+
+    def load_active_wallets(self):
+        return GetActiveWallets(self._repository).execute()
+
+    def soft_delete_wallet(self, wallet_id: int) -> None:
+        SoftDeleteWallet(self._repository).execute(wallet_id)
 
     def wallet_balance(self, wallet_id: int) -> float:
         return CalculateWalletBalance(self._repository).execute(wallet_id)

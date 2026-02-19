@@ -15,6 +15,7 @@ from app.use_cases import (
 )
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, Record
+from domain.wallets import Wallet
 from infrastructure.repositories import JsonFileRecordRepository, RecordRepository
 
 
@@ -24,16 +25,26 @@ class TestCreateIncome:
         mock_repo = Mock(spec=RecordRepository)
         mock_currency = Mock()
         mock_currency.convert.return_value = 47000.0  # 100 * 470
+        mock_repo.load_wallets.return_value = [
+            Wallet(id=1, name="Main", currency="KZT", initial_balance=0.0, system=True)
+        ]
 
         use_case = CreateIncome(repository=mock_repo, currency=mock_currency)
 
         # Act
-        use_case.execute(date="2025-01-01", amount=100.0, currency="USD", category="Salary")
+        use_case.execute(
+            date="2025-01-01",
+            wallet_id=1,
+            amount=100.0,
+            currency="USD",
+            category="Salary",
+        )
 
         # Assert
         mock_currency.convert.assert_called_once_with(100.0, "USD")
         expected_record = IncomeRecord(
             date="2025-01-01",
+            wallet_id=1,
             amount_original=100.0,
             currency="USD",
             rate_at_operation=470.0,
@@ -47,15 +58,19 @@ class TestCreateIncome:
         mock_repo = Mock(spec=RecordRepository)
         mock_currency = Mock()
         mock_currency.convert.return_value = 47000.0
+        mock_repo.load_wallets.return_value = [
+            Wallet(id=1, name="Main", currency="KZT", initial_balance=0.0, system=True)
+        ]
 
         use_case = CreateIncome(repository=mock_repo, currency=mock_currency)
 
         # Act
-        use_case.execute(date="2025-01-01", amount=100.0, currency="USD")
+        use_case.execute(date="2025-01-01", wallet_id=1, amount=100.0, currency="USD")
 
         # Assert
         expected_record = IncomeRecord(
             date="2025-01-01",
+            wallet_id=1,
             amount_original=100.0,
             currency="USD",
             rate_at_operation=470.0,
@@ -71,16 +86,33 @@ class TestCreateExpense:
         mock_repo = Mock(spec=RecordRepository)
         mock_currency = Mock()
         mock_currency.convert.return_value = 23500.0  # 50 * 470
+        mock_repo.load_wallets.return_value = [
+            Wallet(
+                id=1,
+                name="Main",
+                currency="KZT",
+                initial_balance=50000.0,
+                system=True,
+            )
+        ]
+        mock_repo.load_all.return_value = []
 
         use_case = CreateExpense(repository=mock_repo, currency=mock_currency)
 
         # Act
-        use_case.execute(date="2025-01-02", amount=50.0, currency="USD", category="Food")
+        use_case.execute(
+            date="2025-01-02",
+            wallet_id=1,
+            amount=50.0,
+            currency="USD",
+            category="Food",
+        )
 
         # Assert
         mock_currency.convert.assert_called_once_with(50.0, "USD")
         expected_record = ExpenseRecord(
             date="2025-01-02",
+            wallet_id=1,
             amount_original=50.0,
             currency="USD",
             rate_at_operation=470.0,
@@ -94,15 +126,26 @@ class TestCreateExpense:
         mock_repo = Mock(spec=RecordRepository)
         mock_currency = Mock()
         mock_currency.convert.return_value = 23500.0
+        mock_repo.load_wallets.return_value = [
+            Wallet(
+                id=1,
+                name="Main",
+                currency="KZT",
+                initial_balance=50000.0,
+                system=True,
+            )
+        ]
+        mock_repo.load_all.return_value = []
 
         use_case = CreateExpense(repository=mock_repo, currency=mock_currency)
 
         # Act
-        use_case.execute(date="2025-01-02", amount=50.0, currency="USD")
+        use_case.execute(date="2025-01-02", wallet_id=1, amount=50.0, currency="USD")
 
         # Assert
         expected_record = ExpenseRecord(
             date="2025-01-02",
+            wallet_id=1,
             amount_original=50.0,
             currency="USD",
             rate_at_operation=470.0,

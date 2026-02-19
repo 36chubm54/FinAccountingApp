@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Wallet Operations Binding and Safe Delete (Phase 3):
+  - Added mandatory `wallet_id` flow for income/expense creation.
+  - Added `is_active` for wallets and safe soft delete for zero-balance wallets.
+  - Added active-wallet filtering in GUI operation/transfer selectors.
+  - Added domain/use-case checks for `allow_negative` during expense creation.
+  - Added idempotent migration coverage for missing `wallet_id`.
+  - Added phase-3 tests for wallet-bound operations, migration, soft delete and net worth.
 - Wallets, Transfers and Commissions (Phase 2):
   - Added `Transfer` aggregate model and repository persistence.
   - Added `transfer_id` linkage in records and transfer double-entry creation.

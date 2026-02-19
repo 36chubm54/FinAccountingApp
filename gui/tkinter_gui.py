@@ -290,6 +290,31 @@ class FinancialApp(tk.Tk):
         category_entry.insert(0, "General")
         category_entry.grid(row=4, column=1, sticky="ew", padx=6, pady=4)
 
+        tk.Label(form_frame, text="Wallet:").grid(row=5, column=0, sticky="w", padx=6, pady=4)
+        operation_wallet_var = tk.StringVar(value="")
+        operation_wallet_menu = tk.OptionMenu(form_frame, operation_wallet_var, "")
+        operation_wallet_menu.grid(row=5, column=1, sticky="ew", padx=6, pady=4)
+        operation_wallet_map: dict[str, int] = {}
+
+        def _refresh_operation_wallet_menu() -> None:
+            nonlocal operation_wallet_map
+            wallets = self.controller.load_active_wallets()
+            operation_wallet_map = {
+                f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id for wallet in wallets
+            }
+            labels = list(operation_wallet_map.keys()) or [""]
+            menu = operation_wallet_menu["menu"]
+            menu.delete(0, "end")
+            for label in labels:
+                menu.add_command(
+                    label=label,
+                    command=lambda value=label: operation_wallet_var.set(value),
+                )
+            if operation_wallet_var.get() not in operation_wallet_map:
+                operation_wallet_var.set(labels[0])
+
+        _refresh_operation_wallet_menu()
+
         def save_record():
             date_str = date_entry.get().strip()
             if not date_str:
@@ -316,15 +341,28 @@ class FinancialApp(tk.Tk):
 
             currency = (currency_entry.get() or "KZT").strip()
             category = (category_entry.get() or "General").strip()
+            wallet_label = operation_wallet_var.get()
+            wallet_id = operation_wallet_map.get(wallet_label)
+            if wallet_id is None:
+                messagebox.showerror("Error", "Wallet is required.")
+                return
 
             try:
                 if type_var.get() == "Income":
                     self.controller.create_income(
-                        date=date_str, amount=amount, currency=currency, category=category
+                        date=date_str,
+                        wallet_id=wallet_id,
+                        amount=amount,
+                        currency=currency,
+                        category=category,
                     )
                 else:
                     self.controller.create_expense(
-                        date=date_str, amount=amount, currency=currency, category=category
+                        date=date_str,
+                        wallet_id=wallet_id,
+                        amount=amount,
+                        currency=currency,
+                        category=category,
                     )
                 if type_var.get() == "Income":
                     messagebox.showinfo("Success", "Income record added.")
@@ -335,11 +373,12 @@ class FinancialApp(tk.Tk):
                 category_entry.delete(0, tk.END)
                 self._refresh_list()
                 self._refresh_charts()
+                _refresh_operation_wallet_menu()
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to add record: {str(e)}")
 
         tk.Button(form_frame, text="Save", command=save_record).grid(
-            row=5, column=0, columnspan=2, pady=8
+            row=6, column=0, columnspan=2, pady=8
         )
 
         # -------------------------
@@ -401,7 +440,7 @@ class FinancialApp(tk.Tk):
 
         def _refresh_transfer_wallet_menus() -> None:
             nonlocal wallet_id_map
-            wallets = self.controller.load_wallets()
+            wallets = self.controller.load_active_wallets()
             wallet_id_map = {
                 f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id for wallet in wallets
             }
@@ -429,8 +468,26 @@ class FinancialApp(tk.Tk):
                 messagebox.showerror("Error", "Please select source and destination wallets.")
                 return
 
+            date_str = transfer_date_entry.get().strip()
+            if not date_str:
+                messagebox.showerror("Error", "Transfer date is required.")
+                return
             try:
-                transfer_amount = float(transfer_amount_entry.get().strip())
+                from domain.validation import ensure_not_future, parse_ymd
+
+                entered_date = parse_ymd(date_str)
+                ensure_not_future(entered_date)
+            except ValueError as e:
+                messagebox.showerror("Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD.")
+                return
+
+            amount_str = transfer_amount_entry.get().strip()
+            if not amount_str:
+                messagebox.showerror("Error", "Transfer amount is required.")
+                return
+
+            try:
+                transfer_amount = float(amount_str)
                 commission_amount = float((transfer_commission_entry.get() or "0").strip())
             except ValueError:
                 messagebox.showerror("Error", "Transfer amount/commission must be numeric.")
@@ -440,7 +497,7 @@ class FinancialApp(tk.Tk):
                 transfer_id = self.controller.create_transfer(
                     from_wallet_id=from_wallet_id,
                     to_wallet_id=to_wallet_id,
-                    transfer_date=transfer_date_entry.get().strip(),
+                    transfer_date=date_str,
                     amount=transfer_amount,
                     currency=(transfer_currency_entry.get() or "KZT").strip(),
                     description=transfer_description_entry.get().strip(),
@@ -461,6 +518,7 @@ class FinancialApp(tk.Tk):
             row=8, column=0, columnspan=2, pady=6
         )
         self._refresh_transfer_wallet_menus = _refresh_transfer_wallet_menus
+        self._refresh_operation_wallet_menu = _refresh_operation_wallet_menu
         _refresh_transfer_wallet_menus()
 
         # Right: Records list
@@ -665,7 +723,7 @@ class FinancialApp(tk.Tk):
         def _refresh_report_wallet_menu() -> None:
             nonlocal wallet_label_to_id
             wallet_label_to_id = {"All wallets": None}
-            for wallet in self.controller.load_wallets():
+            for wallet in self.controller.load_active_wallets():
                 wallet_label_to_id[f"[{wallet.id}] {wallet.name} ({wallet.currency})"] = wallet.id
             labels = list(wallet_label_to_id.keys())
             menu = report_wallet_menu["menu"]
@@ -976,16 +1034,46 @@ class FinancialApp(tk.Tk):
                     tk.END,
                     f"[{wallet.id}] {wallet.name} | {wallet.currency} | "
                     f"Initial={wallet.initial_balance:.2f} | Balance={balance:.2f} | "
-                    f"allow_negative={wallet.allow_negative}",
+                    f"allow_negative={wallet.allow_negative} | active={wallet.is_active}",
                 )
             if hasattr(self, "_refresh_transfer_wallet_menus"):
                 try:
                     self._refresh_transfer_wallet_menus()
                 except Exception:
                     pass
+            if hasattr(self, "_refresh_operation_wallet_menu"):
+                try:
+                    self._refresh_operation_wallet_menu()
+                except Exception:
+                    pass
 
-        tk.Button(wallets_frame, text="Refresh", command=refresh_wallets).grid(
-            row=2, column=0, sticky="ew", padx=PAD_X, pady=PAD_Y
+        def delete_wallet() -> None:
+            selection = wallet_listbox.curselection()
+            if not selection:
+                messagebox.showerror("Error", "Select wallet to delete.")
+                return
+            row = wallet_listbox.get(selection[0])
+            try:
+                wallet_id = int(row.split("]")[0].strip().lstrip("["))
+            except Exception:
+                messagebox.showerror("Error", "Failed to parse selected wallet id.")
+                return
+            try:
+                self.controller.soft_delete_wallet(wallet_id)
+                messagebox.showinfo("Success", "Wallet was soft-deleted.")
+                refresh_wallets()
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+
+        wallet_actions = ttk.Frame(wallets_frame)
+        wallet_actions.grid(row=2, column=0, sticky="ew", padx=PAD_X, pady=PAD_Y)
+        wallet_actions.grid_columnconfigure(0, weight=1)
+        wallet_actions.grid_columnconfigure(1, weight=1)
+        tk.Button(wallet_actions, text="Delete wallet", command=delete_wallet).grid(
+            row=0, column=0, sticky="ew", padx=(0, 4)
+        )
+        tk.Button(wallet_actions, text="Refresh", command=refresh_wallets).grid(
+            row=0, column=1, sticky="ew", padx=(4, 0)
         )
 
         refresh_wallets()

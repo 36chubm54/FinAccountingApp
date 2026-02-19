@@ -12,8 +12,6 @@
 - [Файловая структура](#-файловая-структура)
 - [Тесты](#-тесты)
 - [Поддерживаемые валюты](#-поддерживаемые-валюты)
-- [Wallet Support (Phase 1)](#wallet-support-phase-1)
-- [Wallets, Transfers and Commissions (Phase 2)](#wallets-transfers-and-commissions-phase-2)
 
 ---
 
@@ -152,6 +150,22 @@ python main.py
   - transfer без комиссии не меняет суммарную стоимость по кошелькам;
   - комиссия уменьшает суммарную стоимость ровно на свою сумму;
   - в глобальном отчёте transfer исключается из net profit, комиссия остаётся расходом.
+
+### Wallet Operations Binding and Safe Delete (Phase 3)
+
+- Доходы и расходы теперь создаются с обязательным `wallet_id`.
+- Для расходов соблюдается `allow_negative`:
+  - при `allow_negative=False` расход с уходом в минус отклоняется,
+  - при `allow_negative=True` разрешается отрицательный баланс.
+- Миграция старых данных:
+  - записи без `wallet_id` получают `wallet_id=1` (Main wallet),
+  - миграция идемпотентна и безопасна при повторном запуске.
+- Soft delete кошельков:
+  - добавлен флаг `is_active`,
+  - удаление возможно только при нулевом балансе,
+  - неактивные кошельки скрываются из списков выбора в GUI,
+  - исторические записи сохраняются.
+- Net worth считается как сумма балансов активных кошельков.
 - Формула:
   `opening_balance = initial_balance + sum(signed_amount for date < start_date)`.
 - В отчётах с фильтром используется `opening_balance` и подпись `Opening balance`.
@@ -349,7 +363,7 @@ Backup восстанавливает:
 
 Проект следует слоистой архитектуре:
 
-- `domain/` — бизнес‑модели и правила (записи, отчёты, валидация дат и периодов, валюты).
+- `domain/` — бизнес‑модели и правила (записи, отчёты, валидация дат и периодов, валюты, кошельки, transfers).
 - `app/` — сценарии использования (use cases) и адаптер сервиса валют.
 - `infrastructure/` — хранилище данных (JSON‑репозиторий).
 - `utils/` — импорт/экспорт и подготовка данных для графиков.
@@ -358,7 +372,12 @@ Backup восстанавливает:
 
 Поток данных для GUI:
 
-- UI (Tkinter) → `app/use_cases.py` → `infrastructure/repositories.py` → `records.json`.
+- UI (Tkinter) → `gui/controllers.py` → `app/use_cases.py` → `infrastructure/repositories.py` → `records.json`.
+
+Связь домена:
+
+- `Record` принадлежит `Wallet` через `record.wallet_id`.
+- `Transfer` связывает две записи (`expense`/`income`) через `transfer_id`.
 
 ---
 
@@ -379,9 +398,12 @@ Backup восстанавливает:
 `domain/records.py`
 
 - `Record` — базовая запись (абстрактный класс).
+- `Record` содержит обязательный `wallet_id` и опциональный `transfer_id`.
 - `IncomeRecord` — доход.
 - `ExpenseRecord` — расход.
 - `MandatoryExpenseRecord` — обязательный расход с `description` и `period`.
+- `Wallet` — кошелёк (`allow_negative`, `is_active`).
+- `Transfer` — агрегат перевода между кошельками.
 
 `domain/reports.py`
 
@@ -417,9 +439,11 @@ Backup восстанавливает:
 
 `app/use_cases.py`
 
-- `CreateIncome.execute(date, amount, currency, category)`.
-- `CreateExpense.execute(date, amount, currency, category)`.
+- `CreateIncome.execute(date, wallet_id, amount, currency, category)`.
+- `CreateExpense.execute(date, wallet_id, amount, currency, category)`.
 - `GenerateReport.execute()` → `Report` с учётом начального остатка.
+- `GetActiveWallets.execute()` — активные кошельки.
+- `SoftDeleteWallet.execute(wallet_id)` — безопасный soft delete.
 - `DeleteRecord.execute(index)`.
 - `DeleteAllRecords.execute()`.
 - `ImportFromCSV.execute(filepath)` — импорт и полная замена записей (CSV, `ImportPolicy.FULL_BACKUP`).
@@ -615,7 +639,8 @@ project/
     ├── test_use_cases.py
     ├── test_validation.py
     ├── test_wallet_phase1.py
-    └── test_wallet_phase2.py
+    ├── test_wallet_phase2.py
+    └── test_wallet_phase3.py
 ```
 
 ---

@@ -148,12 +148,17 @@ def parse_import_row(
 
     common = {
         "date": date_value,
+        "wallet_id": int(as_float(row_lc.get("wallet_id"), 1.0) or 1),
+        "transfer_id": None,
         "amount_original": float(amount_original),
         "currency": currency,
         "rate_at_operation": float(rate_at_operation),
         "amount_kzt": float(amount_kzt),
         "category": category,
     }
+    if row_lc.get("transfer_id") not in (None, ""):
+        transfer_id = int(as_float(row_lc.get("transfer_id"), 0.0) or 0)
+        common["transfer_id"] = transfer_id if transfer_id > 0 else None
 
     if row_type == "income":
         return IncomeRecord(**common), None, None
