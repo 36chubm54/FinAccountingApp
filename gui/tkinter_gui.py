@@ -247,37 +247,48 @@ class FinancialApp(tk.Tk):
         self.monthly_bar_canvas.bind("<Configure>", _schedule_redraw)
 
     def operations_tab(self, parent: tk.Frame | ttk.Frame) -> None:
+        parent.grid_columnconfigure(0, weight=0)
         parent.grid_columnconfigure(1, weight=1)
+        parent.grid_rowconfigure(0, weight=1)
 
-        # Left: Add record form
-        form_frame = tk.LabelFrame(parent, text="Add operation")
-        form_frame.grid(row=0, column=0, sticky="nsw", padx=10, pady=10)
+        # -------------------------
+        # LEFT COLUMN CONTAINER
+        # -------------------------
+        left_frame = tk.Frame(parent)
+        left_frame.grid(row=0, column=0, sticky="nsw", padx=10, pady=10)
+
+        # -------------------------
+        # Add operation
+        # -------------------------
+        form_frame = tk.LabelFrame(left_frame, text="Add operation")
+        form_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        form_frame.grid_columnconfigure(1, weight=1)
 
         tk.Label(form_frame, text="Type:").grid(row=0, column=0, sticky="w", padx=6, pady=4)
         type_var = tk.StringVar(value="Income")
         tk.OptionMenu(form_frame, type_var, "Income", "Expense").grid(
-            row=0, column=1, padx=6, pady=4
+            row=0, column=1, sticky="ew", padx=6, pady=4
         )
 
         tk.Label(form_frame, text="Date (YYYY-MM-DD):").grid(
             row=1, column=0, sticky="w", padx=6, pady=4
         )
         date_entry = tk.Entry(form_frame)
-        date_entry.grid(row=1, column=1, padx=6, pady=4)
+        date_entry.grid(row=1, column=1, sticky="ew", padx=6, pady=4)
 
         tk.Label(form_frame, text="Amount:").grid(row=2, column=0, sticky="w", padx=6, pady=4)
         amount_entry = tk.Entry(form_frame)
-        amount_entry.grid(row=2, column=1, padx=6, pady=4)
+        amount_entry.grid(row=2, column=1, sticky="ew", padx=6, pady=4)
 
         tk.Label(form_frame, text="Currency:").grid(row=3, column=0, sticky="w", padx=6, pady=4)
         currency_entry = tk.Entry(form_frame)
         currency_entry.insert(0, "KZT")
-        currency_entry.grid(row=3, column=1, padx=6, pady=4)
+        currency_entry.grid(row=3, column=1, sticky="ew", padx=6, pady=4)
 
         tk.Label(form_frame, text="Category:").grid(row=4, column=0, sticky="w", padx=6, pady=4)
         category_entry = tk.Entry(form_frame)
         category_entry.insert(0, "General")
-        category_entry.grid(row=4, column=1, padx=6, pady=4)
+        category_entry.grid(row=4, column=1, sticky="ew", padx=6, pady=4)
 
         def save_record():
             date_str = date_entry.get().strip()
@@ -327,11 +338,16 @@ class FinancialApp(tk.Tk):
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to add record: {str(e)}")
 
-        save_btn = tk.Button(form_frame, text="Save", command=save_record)
-        save_btn.grid(row=5, column=0, columnspan=2, pady=8)
+        tk.Button(form_frame, text="Save", command=save_record).grid(
+            row=5, column=0, columnspan=2, pady=8
+        )
 
-        transfer_frame = tk.LabelFrame(form_frame, text="Transfer")
-        transfer_frame.grid(row=6, column=0, columnspan=2, sticky="ew", padx=6, pady=(6, 4))
+        # -------------------------
+        # Transfer (now separate)
+        # -------------------------
+        transfer_frame = tk.LabelFrame(left_frame, text="Transfer")
+        transfer_frame.grid(row=1, column=0, sticky="ew")
+        transfer_frame.grid_columnconfigure(1, weight=1)
 
         tk.Label(transfer_frame, text="From wallet:").grid(
             row=0, column=0, sticky="w", padx=4, pady=2
@@ -358,22 +374,22 @@ class FinancialApp(tk.Tk):
 
         tk.Label(transfer_frame, text="Currency:").grid(row=4, column=0, sticky="w", padx=4, pady=2)
         transfer_currency_entry = tk.Entry(transfer_frame)
-        transfer_currency_entry.grid(row=4, column=1, sticky="ew", padx=4, pady=2)
         transfer_currency_entry.insert(0, "KZT")
+        transfer_currency_entry.grid(row=4, column=1, sticky="ew", padx=4, pady=2)
 
         tk.Label(transfer_frame, text="Commission:").grid(
             row=5, column=0, sticky="w", padx=4, pady=2
         )
         transfer_commission_entry = tk.Entry(transfer_frame)
-        transfer_commission_entry.grid(row=5, column=1, sticky="ew", padx=4, pady=2)
         transfer_commission_entry.insert(0, "0")
+        transfer_commission_entry.grid(row=5, column=1, sticky="ew", padx=4, pady=2)
 
         tk.Label(transfer_frame, text="Commission currency:").grid(
             row=6, column=0, sticky="w", padx=4, pady=2
         )
         transfer_commission_currency_entry = tk.Entry(transfer_frame)
-        transfer_commission_currency_entry.grid(row=6, column=1, sticky="ew", padx=4, pady=2)
         transfer_commission_currency_entry.insert(0, "KZT")
+        transfer_commission_currency_entry.grid(row=6, column=1, sticky="ew", padx=4, pady=2)
 
         tk.Label(transfer_frame, text="Description:").grid(
             row=7, column=0, sticky="w", padx=4, pady=2
