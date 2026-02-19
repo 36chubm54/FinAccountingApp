@@ -13,6 +13,7 @@
 - [Тесты](#-тесты)
 - [Поддерживаемые валюты](#-поддерживаемые-валюты)
 - [Wallet Support (Phase 1)](#wallet-support-phase-1)
+- [Wallets, Transfers and Commissions (Phase 2)](#wallets-transfers-and-commissions-phase-2)
 
 ---
 
@@ -132,6 +133,25 @@ python main.py
 - Transfer на этом этапе не реализован.
 - Поведение интерфейса для пользователя не изменилось:
   выбор кошелька в форме не добавлялся, новые записи автоматически относятся к `wallet_id=1`.
+
+### Wallets, Transfers and Commissions (Phase 2)
+
+- Добавлено поле `allow_negative` в `Wallet`.
+- Добавлена сущность `Transfer` (aggregate), которая хранится отдельно от `Record`.
+- Transfer реализован как двойная запись:
+  - `Expense` в `from_wallet`
+  - `Income` в `to_wallet`
+  - обе записи связаны через `transfer_id`.
+- Комиссия transfer реализована как отдельный расход:
+  - категория `Commission`
+  - `wallet_id = from_wallet`
+  - уменьшает net worth и учитывается в расходах.
+- Введён расчёт `net worth` (динамический, без хранения):
+  - `fixed` и `current` режимы.
+- Финансовые инварианты:
+  - transfer без комиссии не меняет суммарную стоимость по кошелькам;
+  - комиссия уменьшает суммарную стоимость ровно на свою сумму;
+  - в глобальном отчёте transfer исключается из net profit, комиссия остаётся расходом.
 - Формула:
   `opening_balance = initial_balance + sum(signed_amount for date < start_date)`.
 - В отчётах с фильтром используется `opening_balance` и подпись `Opening balance`.
@@ -482,9 +502,7 @@ Backup восстанавливает:
 
 `gui/helpers.py`
 
-- `open_in_file_manager(path)`
-- `safe_destroy(window)` — безопасное уничтожение окна.
-- `safe_focus(window)` — безопасное фокусирование окна.
+- `open_in_file_manager(path)`.
 
 ### Utils
 
@@ -535,6 +553,7 @@ project/
 ├── currency_rates.json         # Кэш курсов валют (use_online=True)
 ├── requirements.txt            # Python-зависимости
 ├── pytest.ini                  # Настройки pytest
+├── pyproject.toml              # Конфигурация проекта
 ├── README.md                   # Эта документация
 ├── README_EN.md                # Документация на английском
 ├── CHANGELOG.md                # История изменений
@@ -550,6 +569,8 @@ project/
 │   ├── records.py              # Записи
 │   ├── reports.py              # Отчёты
 │   ├── currency.py             # Доменный CurrencyService
+│   ├── wallets.py              # Кошельки
+│   ├── transfers.py            # Переводы
 │   ├── validation.py           # Валидация дат и периодов
 │   └── import_policy.py        # Политики импорта
 │
@@ -569,6 +590,7 @@ project/
 │   ├── __init__.py
 │   ├── tkinter_gui.py          # Основное GUI-приложение
 │   ├── helpers.py              # Помощники для GUI
+│   ├── controllers.py          # Контроллеры GUI
 │   ├── importers.py            # Импорт записей, обязательных расходов и backup
 │   └── exporters.py            # Экспорт отчётов, записей, обязательных расходов и backup
 │
@@ -591,7 +613,9 @@ project/
     ├── test_repositories.py
     ├── test_services.py
     ├── test_use_cases.py
-    └── test_validation.py
+    ├── test_validation.py
+    ├── test_wallet_phase1.py
+    └── test_wallet_phase2.py
 ```
 
 ---

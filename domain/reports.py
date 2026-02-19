@@ -31,7 +31,7 @@ class Report:
 
     def total_fixed(self) -> float:
         """Accounting total by operation-time rates."""
-        return self._initial_balance + sum(r.signed_amount_kzt() for r in self._records)
+        return self._initial_balance + sum(r.signed_amount_kzt() for r in self._profit_records())
 
     def total(self) -> float:
         """Backward-compatible alias."""
@@ -39,7 +39,7 @@ class Report:
 
     def total_current(self, currency_service) -> float:
         total = self._initial_balance
-        for record in self._records:
+        for record in self._profit_records():
             converted = float(currency_service.convert(record.amount_original, record.currency))
             sign = 1.0 if record.signed_amount_kzt() >= 0 else -1.0
             total += sign * abs(converted)
@@ -107,7 +107,7 @@ class Report:
 
     def grouped_by_category(self) -> dict[str, "Report"]:
         groups: dict[str, list[Record]] = {}
-        for record in self._records:
+        for record in self._display_records():
             if record.category not in groups:
                 groups[record.category] = []
             groups[record.category].append(record)
@@ -160,11 +160,14 @@ class Report:
     def opening_balance(self, start_date: str | dt_date) -> float:
         start = parse_ymd(start_date)
         total = self._initial_balance
-        for record in self._records:
+        for record in self._profit_records():
             record_date = self._record_date(record)
             if record_date is not None and record_date < start:
                 total += record.signed_amount()
         return total
+
+    def net_profit_fixed(self) -> float:
+        return sum(r.signed_amount_kzt() for r in self._profit_records())
 
     @staticmethod
     def _record_date(record: Record) -> dt_date | None:
@@ -214,7 +217,7 @@ class Report:
         up_to_month = max(1, min(12, up_to_month))
 
         aggregates: dict[tuple[int, int], tuple[float, float]] = {}
-        for record in self._records:
+        for record in self._display_records():
             parsed = self._parse_year_month(record.date)
             if not parsed:
                 continue
@@ -264,7 +267,7 @@ class Report:
             )
             table.add_row(["", self._balance_label, "", balance_str], divider=True)
 
-        sorted_records = sorted(self._records, key=self._sort_key)
+        sorted_records = sorted(self._display_records(), key=self._sort_key)
 
         for record in sorted_records:
             if isinstance(record, IncomeRecord):
@@ -282,7 +285,7 @@ class Report:
             )
             table.add_row([display_date, record_type, record.category, amount_str])
 
-        records_total = sum(r.signed_amount_kzt() for r in self._records)
+        records_total = self.net_profit_fixed()
         records_total_str = (
             f"{records_total:.2f}" if records_total >= 0 else f"({abs(records_total):.2f})"
         )
@@ -316,3 +319,11 @@ class Report:
         if parsed is None:
             return (1, dt_date.max)
         return (0, parsed)
+
+    def _profit_records(self) -> list[Record]:
+        if self._wallet_id is not None:
+            return list(self._records)
+        return [record for record in self._records if record.transfer_id is None]
+
+    def _display_records(self) -> list[Record]:
+        return self._profit_records()

@@ -10,6 +10,7 @@ from .validation import parse_ymd
 class Record(ABC):
     date: dt_date | str
     wallet_id: int = 1
+    transfer_id: int | None = None
     amount_original: float | None = None
     currency: str = "KZT"
     rate_at_operation: float = 1.0
@@ -53,6 +54,15 @@ class Record(ABC):
             raise ValueError("wallet_id must be a positive integer")
         object.__setattr__(self, "wallet_id", wallet_id)
 
+        if self.transfer_id is not None:
+            try:
+                transfer_id = int(self.transfer_id)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("transfer_id must be an integer") from exc
+            if transfer_id <= 0:
+                raise ValueError("transfer_id must be a positive integer")
+            object.__setattr__(self, "transfer_id", transfer_id)
+
     def signed_amount(self) -> float:
         """Backward-compatible alias."""
         return self.signed_amount_kzt()
@@ -68,8 +78,17 @@ class Record(ABC):
     def signed_amount_kzt(self) -> float:
         raise NotImplementedError
 
+    @property
+    @abstractmethod
+    def type(self) -> str:
+        raise NotImplementedError
+
 
 class IncomeRecord(Record):
+    @property
+    def type(self) -> str:
+        return "income"
+
     def signed_amount_kzt(self) -> float:
         if self.amount_kzt is None:
             return 0.0
@@ -77,6 +96,10 @@ class IncomeRecord(Record):
 
 
 class ExpenseRecord(Record):
+    @property
+    def type(self) -> str:
+        return "expense"
+
     def signed_amount_kzt(self) -> float:
         if self.amount_kzt is None:
             return 0.0
@@ -87,6 +110,10 @@ class ExpenseRecord(Record):
 class MandatoryExpenseRecord(Record):
     description: str = ""
     period: Literal["daily", "weekly", "monthly", "yearly"] = "monthly"
+
+    @property
+    def type(self) -> str:
+        return "expense"
 
     def signed_amount_kzt(self) -> float:
         if self.amount_kzt is None:

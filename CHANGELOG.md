@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Wallets, Transfers and Commissions (Phase 2):
+  - Added `Transfer` aggregate model and repository persistence.
+  - Added `transfer_id` linkage in records and transfer double-entry creation.
+  - Added transfer commission handling as a separate `Commission` expense.
+  - Added wallet management enhancements including `allow_negative`.
+  - Added dynamic net worth calculation (fixed and current).
+  - Added transfer/wallet UI controls in desktop GUI (wallets + transfer form).
+  - Added phase-2 unit tests for transfer invariants, commission effect, opening balance and date typing.
 - Wallet Support (Phase 1):
   - Added `Wallet` domain model and system wallet (`id=1`, `Main wallet`).
   - Added `wallet_id` to records and automatic assignment to system wallet for new entries.
@@ -40,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated global report arithmetic to exclude transfer-linked records from net profit while keeping commission as expense.
+- Updated controller record-list rendering to display transfer-linked records as one logical operation.
 - Updated report/domain logic to use normalized `datetime.date` in records and opening-balance computations.
 - Updated GUI flow so operation/report creation goes through `FinancialController` instead of direct use-case calls.
 - Refactor online currency rates fetching (online mode remains opt-in)

@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from datetime import date as dt_date
 
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
+from domain.transfers import Transfer
 from domain.wallets import Wallet
 
 logger = logging.getLogger(__name__)
@@ -15,6 +16,24 @@ SYSTEM_WALLET_ID = 1
 
 class RecordRepository(ABC):
     @abstractmethod
+    def create_wallet(
+        self,
+        *,
+        name: str,
+        currency: str,
+        initial_balance: float,
+        allow_negative: bool = False,
+        system: bool = False,
+    ) -> Wallet:
+        """Create and persist a wallet."""
+        pass
+
+    @abstractmethod
+    def save_wallet(self, wallet: Wallet) -> None:
+        """Save wallet data."""
+        pass
+
+    @abstractmethod
     def load_wallets(self) -> list[Wallet]:
         """Load all wallets."""
         pass
@@ -22,6 +41,16 @@ class RecordRepository(ABC):
     @abstractmethod
     def get_system_wallet(self) -> Wallet:
         """Return system wallet."""
+        pass
+
+    @abstractmethod
+    def save_transfer(self, transfer: Transfer) -> None:
+        """Persist transfer aggregate."""
+        pass
+
+    @abstractmethod
+    def load_transfers(self) -> list[Transfer]:
+        """Load transfers."""
         pass
 
     @abstractmethod
@@ -114,6 +143,7 @@ class JsonFileRecordRepository(RecordRepository):
             "currency": str(wallet.currency or "KZT").upper(),
             "initial_balance": float(wallet.initial_balance),
             "system": bool(wallet.system),
+            "allow_negative": bool(wallet.allow_negative),
         }
 
     @classmethod
@@ -125,6 +155,7 @@ class JsonFileRecordRepository(RecordRepository):
                 currency=currency,
                 initial_balance=float(initial_balance),
                 system=True,
+                allow_negative=False,
             )
         )
 
@@ -152,6 +183,7 @@ class JsonFileRecordRepository(RecordRepository):
                     "wallets": [self._build_system_wallet("KZT", 0.0)],
                     "records": [],
                     "mandatory_expenses": [],
+                    "transfers": [],
                 }
         if isinstance(data, list):
             # Migrate old format
@@ -164,6 +196,7 @@ class JsonFileRecordRepository(RecordRepository):
                 "wallets": [self._build_system_wallet("KZT", 0.0)],
                 "records": [],
                 "mandatory_expenses": [],
+                "transfers": [],
             }
 
         migrated = False
@@ -177,6 +210,9 @@ class JsonFileRecordRepository(RecordRepository):
             migrated = True
         if "mandatory_expenses" not in data or not isinstance(data.get("mandatory_expenses"), list):
             data["mandatory_expenses"] = []
+            migrated = True
+        if "transfers" not in data or not isinstance(data.get("transfers"), list):
+            data["transfers"] = []
             migrated = True
 
         legacy_initial_balance = float(data.get("initial_balance", 0.0))
@@ -209,6 +245,7 @@ class JsonFileRecordRepository(RecordRepository):
                     "currency": str(wallet_item.get("currency", "KZT") or "KZT").upper(),
                     "initial_balance": self._as_float(wallet_item.get("initial_balance"), 0.0),
                     "system": bool(wallet_item.get("system", False)),
+                    "allow_negative": bool(wallet_item.get("allow_negative", False)),
                 }
                 if wallet_id == SYSTEM_WALLET_ID:
                     has_system_wallet = True
@@ -234,6 +271,9 @@ class JsonFileRecordRepository(RecordRepository):
         for item in data["records"]:
             if isinstance(item, dict) and "wallet_id" not in item:
                 item["wallet_id"] = SYSTEM_WALLET_ID
+                migrated = True
+            if isinstance(item, dict) and "transfer_id" not in item:
+                item["transfer_id"] = None
                 migrated = True
 
         if migrated:
@@ -271,6 +311,7 @@ class JsonFileRecordRepository(RecordRepository):
             "type": record_type,
             "date": record_date,
             "wallet_id": int(getattr(record, "wallet_id", SYSTEM_WALLET_ID)),
+            "transfer_id": getattr(record, "transfer_id", None),
             "amount_original": record.amount_original,
             "currency": record.currency,
             "rate_at_operation": record.rate_at_operation,
@@ -299,6 +340,11 @@ class JsonFileRecordRepository(RecordRepository):
         return {
             "date": str(item.get("date", "") or ""),
             "wallet_id": int(self._as_float(item.get("wallet_id"), float(SYSTEM_WALLET_ID))),
+            "transfer_id": (
+                int(self._as_float(item.get("transfer_id"), 0.0))
+                if item.get("transfer_id") not in (None, "")
+                else None
+            ),
             "amount_original": amount_original,
             "currency": currency,
             "rate_at_operation": rate_at_operation,
@@ -323,9 +369,54 @@ class JsonFileRecordRepository(RecordRepository):
                     currency=str(item.get("currency", "KZT") or "KZT").upper(),
                     initial_balance=self._as_float(item.get("initial_balance"), 0.0),
                     system=bool(item.get("system", wallet_id == SYSTEM_WALLET_ID)),
+                    allow_negative=bool(item.get("allow_negative", False)),
                 )
             )
         return wallets
+
+    def create_wallet(
+        self,
+        *,
+        name: str,
+        currency: str,
+        initial_balance: float,
+        allow_negative: bool = False,
+        system: bool = False,
+    ) -> Wallet:
+        with self._lock:
+            data = self._load_data()
+            existing_ids = [
+                int(self._as_float(item.get("id"), 0.0))
+                for item in data.get("wallets", [])
+                if isinstance(item, dict)
+            ]
+            next_id = max(existing_ids, default=0) + 1
+            wallet = Wallet(
+                id=next_id,
+                name=str(name or f"Wallet {next_id}"),
+                currency=str(currency or "KZT").upper(),
+                initial_balance=float(initial_balance),
+                system=bool(system),
+                allow_negative=bool(allow_negative),
+            )
+            data["wallets"].append(self._wallet_to_dict(wallet))
+            self._save_data(data)
+            return wallet
+
+    def save_wallet(self, wallet: Wallet) -> None:
+        with self._lock:
+            data = self._load_data()
+            wallets = data.get("wallets", [])
+            updated = False
+            for index, item in enumerate(wallets):
+                if isinstance(item, dict) and int(item.get("id", 0)) == wallet.id:
+                    wallets[index] = self._wallet_to_dict(wallet)
+                    updated = True
+                    break
+            if not updated:
+                wallets.append(self._wallet_to_dict(wallet))
+            data["wallets"] = wallets
+            self._save_data(data)
 
     def get_system_wallet(self) -> Wallet:
         wallets = self.load_wallets()
@@ -338,7 +429,64 @@ class JsonFileRecordRepository(RecordRepository):
             currency="KZT",
             initial_balance=0.0,
             system=True,
+            allow_negative=False,
         )
+
+    @staticmethod
+    def _transfer_to_dict(transfer: Transfer) -> dict:
+        return {
+            "id": int(transfer.id),
+            "from_wallet_id": int(transfer.from_wallet_id),
+            "to_wallet_id": int(transfer.to_wallet_id),
+            "date": transfer.date.isoformat()
+            if isinstance(transfer.date, dt_date)
+            else transfer.date,
+            "amount_original": float(transfer.amount_original),
+            "currency": str(transfer.currency).upper(),
+            "rate_at_operation": float(transfer.rate_at_operation),
+            "amount_kzt": float(transfer.amount_kzt),
+            "description": str(transfer.description or ""),
+        }
+
+    def save_transfer(self, transfer: Transfer) -> None:
+        with self._lock:
+            data = self._load_data()
+            transfers = data.get("transfers", [])
+            replaced = False
+            for index, item in enumerate(transfers):
+                if isinstance(item, dict) and int(item.get("id", 0)) == transfer.id:
+                    transfers[index] = self._transfer_to_dict(transfer)
+                    replaced = True
+                    break
+            if not replaced:
+                transfers.append(self._transfer_to_dict(transfer))
+            data["transfers"] = transfers
+            self._save_data(data)
+
+    def load_transfers(self) -> list[Transfer]:
+        data = self._load_data()
+        transfers: list[Transfer] = []
+        for index, item in enumerate(data.get("transfers", [])):
+            if not isinstance(item, dict):
+                logger.warning("Skipping non-dict transfer at index %s", index)
+                continue
+            try:
+                transfers.append(
+                    Transfer(
+                        id=int(self._as_float(item.get("id"), 0.0)),
+                        from_wallet_id=int(self._as_float(item.get("from_wallet_id"), 0.0)),
+                        to_wallet_id=int(self._as_float(item.get("to_wallet_id"), 0.0)),
+                        date=str(item.get("date", "") or ""),
+                        amount_original=self._as_float(item.get("amount_original"), 0.0),
+                        currency=str(item.get("currency", "KZT") or "KZT").upper(),
+                        rate_at_operation=self._as_float(item.get("rate_at_operation"), 1.0),
+                        amount_kzt=self._as_float(item.get("amount_kzt"), 0.0),
+                        description=str(item.get("description", "") or ""),
+                    )
+                )
+            except Exception:
+                logger.exception("Skipping invalid transfer at index %s", index)
+        return transfers
 
     def save(self, record: Record) -> None:
         with self._lock:
@@ -523,6 +671,7 @@ class JsonFileRecordRepository(RecordRepository):
                 "wallets": [self._build_system_wallet(base_currency, float(initial_balance))],
                 "records": [],
                 "mandatory_expenses": [],
+                "transfers": [],
             }
             for record in records:
                 if isinstance(record, MandatoryExpenseRecord):

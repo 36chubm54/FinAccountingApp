@@ -8,3 +8,4 @@ class Wallet:
     currency: str
     initial_balance: float
     system: bool = False
+    allow_negative: bool = False

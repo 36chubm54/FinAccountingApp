@@ -330,6 +330,123 @@ class FinancialApp(tk.Tk):
         save_btn = tk.Button(form_frame, text="Save", command=save_record)
         save_btn.grid(row=5, column=0, columnspan=2, pady=8)
 
+        transfer_frame = tk.LabelFrame(form_frame, text="Transfer")
+        transfer_frame.grid(row=6, column=0, columnspan=2, sticky="ew", padx=6, pady=(6, 4))
+
+        tk.Label(transfer_frame, text="From wallet:").grid(
+            row=0, column=0, sticky="w", padx=4, pady=2
+        )
+        transfer_from_var = tk.StringVar(value="")
+        transfer_from_menu = tk.OptionMenu(transfer_frame, transfer_from_var, "")
+        transfer_from_menu.grid(row=0, column=1, sticky="ew", padx=4, pady=2)
+
+        tk.Label(transfer_frame, text="To wallet:").grid(
+            row=1, column=0, sticky="w", padx=4, pady=2
+        )
+        transfer_to_var = tk.StringVar(value="")
+        transfer_to_menu = tk.OptionMenu(transfer_frame, transfer_to_var, "")
+        transfer_to_menu.grid(row=1, column=1, sticky="ew", padx=4, pady=2)
+
+        tk.Label(transfer_frame, text="Date:").grid(row=2, column=0, sticky="w", padx=4, pady=2)
+        transfer_date_entry = tk.Entry(transfer_frame)
+        transfer_date_entry.grid(row=2, column=1, sticky="ew", padx=4, pady=2)
+        transfer_date_entry.insert(0, date.today().isoformat())
+
+        tk.Label(transfer_frame, text="Amount:").grid(row=3, column=0, sticky="w", padx=4, pady=2)
+        transfer_amount_entry = tk.Entry(transfer_frame)
+        transfer_amount_entry.grid(row=3, column=1, sticky="ew", padx=4, pady=2)
+
+        tk.Label(transfer_frame, text="Currency:").grid(row=4, column=0, sticky="w", padx=4, pady=2)
+        transfer_currency_entry = tk.Entry(transfer_frame)
+        transfer_currency_entry.grid(row=4, column=1, sticky="ew", padx=4, pady=2)
+        transfer_currency_entry.insert(0, "KZT")
+
+        tk.Label(transfer_frame, text="Commission:").grid(
+            row=5, column=0, sticky="w", padx=4, pady=2
+        )
+        transfer_commission_entry = tk.Entry(transfer_frame)
+        transfer_commission_entry.grid(row=5, column=1, sticky="ew", padx=4, pady=2)
+        transfer_commission_entry.insert(0, "0")
+
+        tk.Label(transfer_frame, text="Commission currency:").grid(
+            row=6, column=0, sticky="w", padx=4, pady=2
+        )
+        transfer_commission_currency_entry = tk.Entry(transfer_frame)
+        transfer_commission_currency_entry.grid(row=6, column=1, sticky="ew", padx=4, pady=2)
+        transfer_commission_currency_entry.insert(0, "KZT")
+
+        tk.Label(transfer_frame, text="Description:").grid(
+            row=7, column=0, sticky="w", padx=4, pady=2
+        )
+        transfer_description_entry = tk.Entry(transfer_frame)
+        transfer_description_entry.grid(row=7, column=1, sticky="ew", padx=4, pady=2)
+
+        wallet_id_map: dict[str, int] = {}
+
+        def _refresh_transfer_wallet_menus() -> None:
+            nonlocal wallet_id_map
+            wallets = self.controller.load_wallets()
+            wallet_id_map = {
+                f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id for wallet in wallets
+            }
+            labels = list(wallet_id_map.keys()) or [""]
+
+            for menu_widget, var in (
+                (transfer_from_menu, transfer_from_var),
+                (transfer_to_menu, transfer_to_var),
+            ):
+                menu = menu_widget["menu"]
+                menu.delete(0, "end")
+                for label in labels:
+                    menu.add_command(label=label, command=lambda value=label, v=var: v.set(value))
+                if not var.get() or var.get() not in wallet_id_map:
+                    var.set(labels[0])
+            if len(labels) > 1 and transfer_to_var.get() == transfer_from_var.get():
+                transfer_to_var.set(labels[1])
+
+        def create_transfer() -> None:
+            from_label = transfer_from_var.get()
+            to_label = transfer_to_var.get()
+            from_wallet_id = wallet_id_map.get(from_label)
+            to_wallet_id = wallet_id_map.get(to_label)
+            if from_wallet_id is None or to_wallet_id is None:
+                messagebox.showerror("Error", "Please select source and destination wallets.")
+                return
+
+            try:
+                transfer_amount = float(transfer_amount_entry.get().strip())
+                commission_amount = float((transfer_commission_entry.get() or "0").strip())
+            except ValueError:
+                messagebox.showerror("Error", "Transfer amount/commission must be numeric.")
+                return
+
+            try:
+                transfer_id = self.controller.create_transfer(
+                    from_wallet_id=from_wallet_id,
+                    to_wallet_id=to_wallet_id,
+                    transfer_date=transfer_date_entry.get().strip(),
+                    amount=transfer_amount,
+                    currency=(transfer_currency_entry.get() or "KZT").strip(),
+                    description=transfer_description_entry.get().strip(),
+                    commission_amount=commission_amount,
+                    commission_currency=(transfer_commission_currency_entry.get() or "").strip(),
+                )
+                messagebox.showinfo("Success", f"Transfer created (id={transfer_id}).")
+                transfer_amount_entry.delete(0, tk.END)
+                transfer_description_entry.delete(0, tk.END)
+                transfer_commission_entry.delete(0, tk.END)
+                transfer_commission_entry.insert(0, "0")
+                self._refresh_list()
+                self._refresh_charts()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to create transfer: {str(e)}")
+
+        tk.Button(transfer_frame, text="Create transfer", command=create_transfer).grid(
+            row=8, column=0, columnspan=2, pady=6
+        )
+        self._refresh_transfer_wallet_menus = _refresh_transfer_wallet_menus
+        _refresh_transfer_wallet_menus()
+
         # Right: Records list
         list_frame = tk.LabelFrame(parent, text="List of operations")
         list_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
@@ -398,7 +515,8 @@ class FinancialApp(tk.Tk):
 
             if not messagebox.askyesno(
                 "Confirm Import",
-                f"Are you sure you want to import from file '{filepath}'? This will replace all existing records.",
+                f"Are you sure you want to import from file '{filepath}'?"
+                "\nThis will replace all existing records.",
             ):
                 return
 
@@ -414,8 +532,8 @@ class FinancialApp(tk.Tk):
                     )
                 messagebox.showinfo(
                     "Success",
-                    f"Successfully imported {imported_count} records from {cfg['desc']} file.\nAll existing records have been replaced."
-                    + details,
+                    f"Successfully imported {imported_count} records from {cfg['desc']} file."
+                    "\nAll existing records have been replaced." + details,
                 )
                 self._refresh_list()
                 self._refresh_charts()
@@ -521,14 +639,38 @@ class FinancialApp(tk.Tk):
         category_entry = tk.Entry(controls)
         category_entry.grid(row=2, column=1, padx=6, pady=4)
 
+        tk.Label(controls, text="Wallet:").grid(row=3, column=0, sticky="w")
+        report_wallet_var = tk.StringVar(value="All wallets")
+        report_wallet_menu = tk.OptionMenu(controls, report_wallet_var, "All wallets")
+        report_wallet_menu.grid(row=3, column=1, padx=6, pady=4, sticky="ew")
+
+        wallet_label_to_id: dict[str, int | None] = {"All wallets": None}
+
+        def _refresh_report_wallet_menu() -> None:
+            nonlocal wallet_label_to_id
+            wallet_label_to_id = {"All wallets": None}
+            for wallet in self.controller.load_wallets():
+                wallet_label_to_id[f"[{wallet.id}] {wallet.name} ({wallet.currency})"] = wallet.id
+            labels = list(wallet_label_to_id.keys())
+            menu = report_wallet_menu["menu"]
+            menu.delete(0, "end")
+            for label in labels:
+                menu.add_command(
+                    label=label, command=lambda value=label: report_wallet_var.set(value)
+                )
+            if report_wallet_var.get() not in wallet_label_to_id:
+                report_wallet_var.set("All wallets")
+
+        _refresh_report_wallet_menu()
+
         group_var = tk.BooleanVar()
         tk.Checkbutton(controls, text="Group by category", variable=group_var).grid(
-            row=3, column=0, columnspan=2, sticky="w"
+            row=4, column=0, columnspan=2, sticky="w"
         )
 
         table_var = tk.BooleanVar()
         tk.Checkbutton(controls, text="Display as table", variable=table_var).grid(
-            row=4, column=0, columnspan=2, sticky="w"
+            row=5, column=0, columnspan=2, sticky="w"
         )
 
         result_frame = tk.Frame(parent)
@@ -547,20 +689,16 @@ class FinancialApp(tk.Tk):
 
         tk.Label(controls, text="Totals mode:").grid(row=0, column=2, sticky="w", padx=(12, 0))
         ttk.Radiobutton(
-            controls,
-            text="On fixed rate",
-            variable=report_mode_var,
-            value="fixed",
+            controls, text="On fixed rate", variable=report_mode_var, value="fixed"
         ).grid(row=1, column=2, sticky="w", padx=(12, 0))
         ttk.Radiobutton(
-            controls,
-            text="On current rate",
-            variable=report_mode_var,
-            value="current",
+            controls, text="On current rate", variable=report_mode_var, value="current"
         ).grid(row=2, column=2, sticky="w", padx=(12, 0))
 
         def generate():
-            report = self.controller.generate_report()
+            _refresh_report_wallet_menu()
+            selected_wallet = wallet_label_to_id.get(report_wallet_var.get(), None)
+            report = self.controller.generate_report_for_wallet(selected_wallet)
             period_start = period_start_entry.get().strip()
             period_end = period_end_entry.get().strip()
             if period_start:
@@ -597,6 +735,11 @@ class FinancialApp(tk.Tk):
                     summary_up_to_month = None
 
             result_text.insert(tk.END, report.statement_title + "\n\n")
+            result_text.insert(
+                tk.END,
+                f"Net Worth (fixed): {self.controller.net_worth_fixed():.2f} KZT\n"
+                f"Net Worth (current): {self.controller.net_worth_current():.2f} KZT\n\n",
+            )
 
             if group_var.get():
                 if table_var.get():
@@ -622,7 +765,7 @@ class FinancialApp(tk.Tk):
                 balance_label = (
                     "Opening balance" if report.is_opening_balance else "Initial balance"
                 )
-                records_total_fixed = sum(r.signed_amount_kzt() for r in report.records())
+                records_total_fixed = report.net_profit_fixed()
                 final_balance_fixed = report.total_fixed()
                 final_balance_current = report.total_current(self.currency)
                 fx_diff = report.fx_difference(self.currency)
@@ -656,11 +799,11 @@ class FinancialApp(tk.Tk):
             result_text.insert(tk.END, summary_table + "\n")
 
         generate_btn = tk.Button(controls, text="Generate", command=generate)
-        generate_btn.grid(row=5, column=0, pady=8)
+        generate_btn.grid(row=6, column=0, pady=8)
 
         export_format_var = tk.StringVar(value="CSV")
         tk.OptionMenu(controls, export_format_var, "CSV", "XLSX", "PDF").grid(
-            row=5, column=1, padx=6
+            row=6, column=1, padx=6
         )
 
         def export_any():
@@ -684,21 +827,42 @@ class FinancialApp(tk.Tk):
                 logger.exception("Failed to export report")
                 messagebox.showerror("Error", f"Failed to export: {str(e)}")
 
-        tk.Button(controls, text="Export", command=export_any).grid(row=5, column=2, padx=6)
+        tk.Button(controls, text="Export", command=export_any).grid(row=6, column=2, padx=6)
 
     def settings_tab(self, parent: tk.Frame | ttk.Frame) -> None:
-        parent.grid_columnconfigure(1, weight=1)
+        PAD_X = 8
+        PAD_Y = 6
 
-        # Initial balance panel
-        balance_frame = tk.LabelFrame(parent, text="Initial balance")
-        balance_frame.grid(row=0, column=0, sticky="nw", padx=10, pady=10)
-        current_balance = self.repository.load_initial_balance()
+        # =========================================================
+        # Root layout (2 columns: left / right)
+        # =========================================================
+        parent.grid_columnconfigure(0, weight=0)
+        parent.grid_columnconfigure(1, weight=1)
+        parent.grid_rowconfigure(0, weight=1)
+
+        left_panel = ttk.Frame(parent)
+        left_panel.grid(row=0, column=0, sticky="ns", padx=10, pady=10)
+
+        right_panel = ttk.Frame(parent)
+        right_panel.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        right_panel.grid_rowconfigure(0, weight=1)
+        right_panel.grid_columnconfigure(0, weight=1)
+
+        # =========================================================
+        # INITIAL BALANCE
+        # =========================================================
+        balance_frame = tk.LabelFrame(left_panel, text="Initial balance")
+        balance_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+
+        current_balance = self.controller.get_system_initial_balance()
+
         tk.Label(balance_frame, text=f"Current: {current_balance:.2f} KZT").grid(
-            row=0, column=0, sticky="w", padx=6, pady=4
+            row=0, column=0, sticky="w", padx=PAD_X, pady=PAD_Y
         )
+
         balance_entry = tk.Entry(balance_frame)
         balance_entry.insert(0, str(current_balance))
-        balance_entry.grid(row=1, column=0, padx=6, pady=4)
+        balance_entry.grid(row=1, column=0, sticky="ew", padx=PAD_X, pady=PAD_Y)
 
         def save_balance():
             try:
@@ -706,22 +870,124 @@ class FinancialApp(tk.Tk):
             except ValueError:
                 messagebox.showerror("Error", "Invalid balance amount.")
                 return
-            self.repository.save_initial_balance(balance)
+            self.controller.set_system_initial_balance(balance)
             messagebox.showinfo("Success", f"Initial balance set to {balance:.2f} KZT.")
             self._refresh_charts()
 
-        tk.Button(balance_frame, text="Save", command=save_balance).grid(row=2, column=0, pady=6)
+        tk.Button(balance_frame, text="Save", command=save_balance).grid(
+            row=2, column=0, columnspan=2, sticky="ew", padx=PAD_X, pady=PAD_Y
+        )
 
-        # Mandatory expenses management
-        mand_frame = tk.LabelFrame(parent, text="Mandatory expenses")
-        mand_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        # =========================================================
+        # WALLETS
+        # =========================================================
+        wallets_frame = tk.LabelFrame(left_panel, text="Wallets")
+        wallets_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
+        wallets_frame.grid_columnconfigure(0, weight=1)
+        wallets_frame.grid_rowconfigure(1, weight=1)
+
+        # ---- Wallet Form ----
+        form = ttk.Frame(wallets_frame)
+        form.grid(row=0, column=0, sticky="ew", padx=PAD_X, pady=PAD_Y)
+        form.grid_columnconfigure(1, weight=1)
+
+        tk.Label(form, text="Name:").grid(row=0, column=0, sticky="w")
+        wallet_name_entry = tk.Entry(form)
+        wallet_name_entry.grid(row=0, column=1, sticky="ew", pady=2)
+
+        tk.Label(form, text="Currency:").grid(row=1, column=0, sticky="w")
+        wallet_currency_entry = tk.Entry(form, width=8)
+        wallet_currency_entry.insert(0, "KZT")
+        wallet_currency_entry.grid(row=1, column=1, sticky="ew", pady=2)
+
+        tk.Label(form, text="Initial balance:").grid(row=2, column=0, sticky="w")
+        wallet_initial_entry = tk.Entry(form)
+        wallet_initial_entry.insert(0, "0")
+        wallet_initial_entry.grid(row=2, column=1, sticky="ew", pady=2)
+
+        wallet_allow_negative_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(form, text="Allow negative", variable=wallet_allow_negative_var).grid(
+            row=3, column=0, columnspan=2, sticky="w", pady=2
+        )
+
+        def create_wallet() -> None:
+            try:
+                initial_balance = float(wallet_initial_entry.get().strip() or "0")
+            except ValueError:
+                messagebox.showerror("Error", "Invalid wallet initial balance.")
+                return
+            try:
+                wallet = self.controller.create_wallet(
+                    name=wallet_name_entry.get().strip(),
+                    currency=(wallet_currency_entry.get() or "KZT").strip(),
+                    initial_balance=initial_balance,
+                    allow_negative=wallet_allow_negative_var.get(),
+                )
+                messagebox.showinfo("Success", f"Wallet created: [{wallet.id}] {wallet.name}")
+                wallet_name_entry.delete(0, tk.END)
+                wallet_initial_entry.delete(0, tk.END)
+                wallet_initial_entry.insert(0, "0")
+                refresh_wallets()
+                self._refresh_charts()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to create wallet: {str(e)}")
+
+        tk.Button(form, text="Create wallet", command=create_wallet).grid(
+            row=4, column=0, columnspan=2, sticky="ew", pady=(6, 0)
+        )
+
+        # ---- Wallet List ----
+        list_frame = ttk.Frame(wallets_frame)
+        list_frame.grid(row=1, column=0, sticky="nsew", padx=PAD_X)
+        list_frame.grid_rowconfigure(0, weight=1)
+        list_frame.grid_columnconfigure(0, weight=1)
+
+        wallet_listbox = Listbox(list_frame, height=8)
+        wallet_listbox.grid(row=0, column=0, sticky="nsew")
+
+        wallet_scroll = ttk.Scrollbar(list_frame, orient="vertical", command=wallet_listbox.yview)
+        wallet_scroll.grid(row=0, column=1, sticky="ns")
+        wallet_listbox.config(yscrollcommand=wallet_scroll.set)
+
+        def refresh_wallets() -> None:
+            wallet_listbox.delete(0, tk.END)
+            for wallet in self.controller.load_wallets():
+                try:
+                    balance = self.controller.wallet_balance(wallet.id)
+                except Exception:
+                    balance = wallet.initial_balance
+                wallet_listbox.insert(
+                    tk.END,
+                    f"[{wallet.id}] {wallet.name} | {wallet.currency} | "
+                    f"Initial={wallet.initial_balance:.2f} | Balance={balance:.2f} | "
+                    f"allow_negative={wallet.allow_negative}",
+                )
+            if hasattr(self, "_refresh_transfer_wallet_menus"):
+                try:
+                    self._refresh_transfer_wallet_menus()
+                except Exception:
+                    pass
+
+        tk.Button(wallets_frame, text="Refresh", command=refresh_wallets).grid(
+            row=2, column=0, sticky="ew", padx=PAD_X, pady=PAD_Y
+        )
+
+        refresh_wallets()
+
+        # =========================================================
+        # MANDATORY EXPENSES (RIGHT PANEL)
+        # =========================================================
+        mand_frame = tk.LabelFrame(right_panel, text="Mandatory expenses")
+        mand_frame.grid(row=0, column=0, sticky="nsew")
         mand_frame.grid_rowconfigure(0, weight=1)
         mand_frame.grid_columnconfigure(0, weight=1)
 
-        mand_listbox = Listbox(mand_frame)
-        mand_listbox.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
-        mand_scroll = Scrollbar(mand_frame, orient=VERTICAL, command=mand_listbox.yview)
-        mand_scroll.grid(row=0, column=1, sticky="ns", pady=6)
+        mand_listbox = tk.Listbox(mand_frame)
+        mand_listbox.grid(row=0, column=0, sticky="nsew", padx=PAD_X, pady=PAD_Y)
+
+        mand_scroll = ttk.Scrollbar(mand_frame, orient="vertical", command=mand_listbox.yview)
+        mand_scroll.grid(row=0, column=1, sticky="ns", pady=PAD_Y)
+
         mand_listbox.config(yscrollcommand=mand_scroll.set)
 
         def refresh_mandatory():
@@ -862,7 +1128,8 @@ class FinancialApp(tk.Tk):
                     else:
                         messagebox.showerror(
                             "Error",
-                            "Please select a mandatory expense to add to report. \nThen click 'Add to Report' and try again.",
+                            "Please select a mandatory expense to add to report."
+                            "\nThen click 'Add to Report' and try again.",
                         )
                 except ValueError as e:
                     messagebox.showerror("Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD.")
@@ -900,8 +1167,30 @@ class FinancialApp(tk.Tk):
             else:
                 messagebox.showerror("Error", "Failed to delete all mandatory expenses.")
 
-        btns = tk.Frame(mand_frame)
-        btns.grid(row=1, column=0, columnspan=2, pady=6)
+        # ---- Buttons row ----
+        btns = ttk.Frame(mand_frame)
+        btns.grid(row=1, column=0, columnspan=2, sticky="ew", padx=PAD_X, pady=PAD_Y)
+        for i in range(8):
+            btns.grid_columnconfigure(i, weight=1)
+
+        tk.Button(btns, text="Add", command=add_mandatory_inline).grid(row=0, column=0)
+        tk.Button(btns, text="Delete", command=delete_mandatory).grid(row=0, column=1)
+        tk.Button(btns, text="Delete All", command=delete_all_mandatory).grid(row=0, column=2)
+        tk.Button(btns, text="Add to Report", command=add_to_report_inline).grid(row=0, column=3)
+        tk.Button(btns, text="Refresh", command=refresh_mandatory).grid(row=0, column=4)
+        format_var = tk.StringVar(value="CSV")
+        tk.OptionMenu(btns, format_var, "CSV", "XLSX").grid(row=0, column=5)
+
+        refresh_mandatory()
+
+        # =========================================================
+        # BACKUP
+        # =========================================================
+        backup_frame = tk.LabelFrame(left_panel, text="Backup (JSON)")
+        backup_frame.grid(row=2, column=0, sticky="ew")
+
+        backup_frame.grid_columnconfigure(0, weight=1)
+        backup_frame.grid_columnconfigure(1, weight=1)
 
         def import_mand():
             fmt = format_var.get()
@@ -988,21 +1277,8 @@ class FinancialApp(tk.Tk):
                 busy_message=f"Exporting {fmt} mandatory expenses...",
             )
 
-        tk.Button(btns, text="Add", command=add_mandatory_inline).pack(side=tk.LEFT, padx=6)
-        tk.Button(btns, text="Delete", command=delete_mandatory).pack(side=tk.LEFT, padx=6)
-        tk.Button(btns, text="Delete All", command=delete_all_mandatory).pack(side=tk.LEFT, padx=6)
-        tk.Button(btns, text="Add to Report", command=add_to_report_inline).pack(
-            side=tk.LEFT, padx=6
-        )
-        tk.Button(btns, text="Refresh", command=refresh_mandatory).pack(side=tk.LEFT, padx=6)
-        format_var = tk.StringVar(value="CSV")
-        tk.OptionMenu(btns, format_var, "CSV", "XLSX").pack(side=tk.LEFT, padx=6)
-
-        tk.Button(btns, text="Import", command=import_mand).pack(side=tk.LEFT, padx=6)
-        tk.Button(btns, text="Export", command=export_mand).pack(side=tk.LEFT, padx=6)
-
-        backup_frame = tk.LabelFrame(parent, text="Backup (JSON)")
-        backup_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
+        tk.Button(btns, text="Import", command=import_mand).grid(row=0, column=6)
+        tk.Button(btns, text="Export", command=export_mand).grid(row=0, column=7)
 
         def import_backup():
             filepath = filedialog.askopenfilename(
@@ -1074,11 +1350,12 @@ class FinancialApp(tk.Tk):
                 busy_message="Exporting full backup...",
             )
 
-        tk.Button(backup_frame, text="Export Full Backup", command=export_backup).pack(
-            side=tk.LEFT, padx=6, pady=6
+        tk.Button(backup_frame, text="Export Full Backup", command=export_backup).grid(
+            row=0, column=0, sticky="ew", padx=PAD_X, pady=PAD_Y
         )
-        tk.Button(backup_frame, text="Import Full Backup", command=import_backup).pack(
-            side=tk.LEFT, padx=6, pady=6
+
+        tk.Button(backup_frame, text="Import Full Backup", command=import_backup).grid(
+            row=0, column=1, sticky="ew", padx=PAD_X, pady=PAD_Y
         )
 
         # Initial refresh

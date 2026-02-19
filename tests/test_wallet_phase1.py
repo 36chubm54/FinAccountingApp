@@ -2,6 +2,7 @@ import json
 import tempfile
 from datetime import date
 
+from app.services import CurrencyService
 from app.use_cases import CreateIncome, GenerateReport
 from domain.records import ExpenseRecord, IncomeRecord
 from domain.reports import Report
@@ -42,6 +43,9 @@ def test_create_record_assigns_system_wallet_id():
         def convert(self, amount: float, _currency: str) -> float:
             return amount
 
+        def get_rate(self, currency: str) -> float:
+            return 1.0
+
     with tempfile.NamedTemporaryFile(
         mode="w", delete=False, suffix=".json", encoding="utf-8"
     ) as fp:
@@ -49,7 +53,7 @@ def test_create_record_assigns_system_wallet_id():
         path = fp.name
 
     repo = JsonFileRecordRepository(path)
-    CreateIncome(repo, DummyCurrency()).execute(
+    CreateIncome(repo, CurrencyService()).execute(
         date="2025-01-01",
         amount=10.0,
         currency="KZT",
@@ -62,8 +66,8 @@ def test_create_record_assigns_system_wallet_id():
 
 def test_report_total_unchanged_with_wallet_filter_defaults():
     records = [
-        IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
-        ExpenseRecord(date="2025-01-03", _amount_init=40.0, category="Food"),
+        IncomeRecord(date="2025-01-01", amount_original=100.0, category="Salary"),
+        ExpenseRecord(date="2025-01-03", amount_original=40.0, category="Food"),
     ]
     before = Report(records, initial_balance=50.0, wallet_id=None).total_fixed()
     after = Report(records, initial_balance=50.0).total_fixed()
@@ -72,9 +76,9 @@ def test_report_total_unchanged_with_wallet_filter_defaults():
 
 def test_opening_balance_uses_wallet_initial_balance():
     records = [
-        IncomeRecord(date="2025-01-05", wallet_id=1, _amount_init=20.0, category="Salary"),
-        ExpenseRecord(date="2025-01-10", wallet_id=1, _amount_init=5.0, category="Food"),
-        IncomeRecord(date="2025-01-08", wallet_id=2, _amount_init=999.0, category="Other"),
+        IncomeRecord(date="2025-01-05", wallet_id=1, amount_original=20.0, category="Salary"),
+        ExpenseRecord(date="2025-01-10", wallet_id=1, amount_original=5.0, category="Food"),
+        IncomeRecord(date="2025-01-08", wallet_id=2, amount_original=999.0, category="Other"),
     ]
     report = Report(records, initial_balance=100.0, wallet_id=1)
     assert report.opening_balance("2025-01-09") == 120.0

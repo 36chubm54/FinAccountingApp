@@ -13,6 +13,7 @@ Graphical and web application for personal financial accounting with multicurren
 - [Tests](#-tests)
 - [Supported currencies](#-supported-currencies)
 - [Wallet Support (Phase 1)](#wallet-support-phase-1)
+- [Wallets, Transfers and Commissions (Phase 2)](#wallets-transfers-and-commissions-phase-2)
 
 ---
 
@@ -132,6 +133,25 @@ Export report:
 - Transfer is intentionally not implemented in this phase.
 - User behavior remains unchanged:
   no wallet selector in the UI yet, and new records are auto-assigned to `wallet_id=1`.
+
+### Wallets, Transfers and Commissions (Phase 2)
+
+- Added `allow_negative` to `Wallet`.
+- Added `Transfer` aggregate (stored separately from `Record`).
+- Implemented transfer as a double-entry operation:
+  - `Expense` in `from_wallet`
+  - `Income` in `to_wallet`
+  - both records linked by the same `transfer_id`.
+- Implemented transfer commission as a separate expense:
+  - category `Commission`
+  - `wallet_id = from_wallet`
+  - reduces net worth and is included in expenses.
+- Added dynamic `net worth` calculation:
+  - supports both `fixed` and `current` modes.
+- Financial invariants:
+  - transfer without commission keeps total wallet value unchanged;
+  - commission reduces total value exactly by commission amount;
+  - global report excludes transfers from net profit while commission remains an expense.
 - Formula:
   `opening_balance = initial_balance + sum(signed_amount for date < start_date)`.
 - Filtered reports use `opening balance` and the row label `Opening balance`.
@@ -482,9 +502,7 @@ Methods:
 
 `gui/helpers.py`
 
-- `open_in_file_manager(path)`
-- `safe_destroy(window)` — safe destruction of a window.
-- `safe_focus(window)` — safe window focusing.
+- `open_in_file_manager(path)`.
 
 ### Utils
 
@@ -535,6 +553,7 @@ project/
 ├── currency_rates.json         # Currency rate cache (use_online=True)
 ├── requirements.txt            # Python dependencies
 ├── pytest.ini                  # pytest settings
+├── pyproject.toml              # Project configuration
 ├── README.md                   # This documentation
 ├── README_EN.md                # Documentation in English
 ├── CHANGELOG.md                # History of changes
@@ -542,34 +561,37 @@ project/
 │
 ├── app/                        # Application layer
 │   ├── __init__.py
-│   ├── services.py               # CurrencyService adapter
-│   └── use_cases.py              # Use cases
+│   ├── services.py             # CurrencyService adapter
+│   └── use_cases.py            # Use cases
 │
 ├── domain/                     # Domain layer
 │   ├── __init__.py
-│   ├── records.py                # Records
-│   ├── reports.py                # Reports
-│   ├── currency.py               # Domain CurrencyService
-│   └── validation.py             # Validation of dates and periods
+│   ├── records.py              # Records
+│   ├── reports.py              # Reports
+│   ├── currency.py             # Domain CurrencyService
+│   ├── wallets.py              # Wallets
+│   ├── transfers.py            # Transfers
+│   └── validation.py           # Validation of dates and periods
 │
 ├── infrastructure/             # Infrastructure layer
-│   └── repositories.py           # JSON repository
+│   └── repositories.py         # JSON repository
 │
 ├── utils/                      # Import/export and graphs
 │   ├── __init__.py
 │   ├── backup_utils.py         # Backup of data
 │   ├── import_core.py          # Import validator
-│   ├── charting.py               # Graphs and Aggregations
+│   ├── charting.py             # Graphs and Aggregations
 │   ├── csv_utils.py
 │   ├── excel_utils.py
 │   └── pdf_utils.py
 │
 ├── gui/                        # GUI layer (Tkinter)
 │   ├── __init__.py
-│   ├── helpers.py                # Helpers for GUI
-│   ├── tkinter_gui.py            # Main GUI application
-│   ├── importers.py              # Import mandatory expenses, records and full backup
-│   └── exporters.py              # Export reports, mandatory expenses and backup
+│   ├── tkinter_gui.py          # Main GUI application
+│   ├── helpers.py              # Helpers for GUI
+│   ├── controllers.py          # GUI controllers
+│   ├── importers.py            # Import mandatory expenses, records and full backup
+│   └── exporters.py            # Export reports, mandatory expenses and backup
 │
 ├── web/                        # Web application
 │   ├── __init__.py
@@ -591,7 +613,9 @@ project/
     ├── test_repositories.py
     ├── test_services.py
     ├── test_use_cases.py
-    └── test_validation.py
+    ├── test_validation.py
+    ├── test_wallet_phase1.py
+    └── test_wallet_phase2.py
 ```
 
 ---
