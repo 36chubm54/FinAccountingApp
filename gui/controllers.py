@@ -16,6 +16,7 @@ from app.use_cases import (
     CreateWallet,
     DeleteAllMandatoryExpenses,
     DeleteAllRecords,
+    DeleteTransfer,
     DeleteMandatoryExpense,
     DeleteRecord,
     GenerateReport,
@@ -49,6 +50,15 @@ class FinancialController:
 
     def delete_record(self, repository_index: int) -> bool:
         return DeleteRecord(self._repository).execute(repository_index)
+
+    def delete_transfer(self, transfer_id: int) -> None:
+        DeleteTransfer(self._repository).execute(transfer_id)
+
+    def transfer_id_by_repository_index(self, repository_index: int) -> int | None:
+        records = self._repository.load_all()
+        if 0 <= repository_index < len(records):
+            return records[repository_index].transfer_id
+        return None
 
     def delete_all_records(self) -> None:
         DeleteAllRecords(self._repository).execute()

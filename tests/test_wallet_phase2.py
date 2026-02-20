@@ -66,8 +66,11 @@ def test_transfer_with_commission_creates_three_records():
         commission_amount=2.0,
         commission_currency="KZT",
     )
-    transfer_records = [r for r in repo.load_all() if r.transfer_id == transfer_id]
-    assert len(transfer_records) == 3
+    records = repo.load_all()
+    transfer_records = [r for r in records if r.transfer_id == transfer_id]
+    commission_records = [r for r in records if r.category == "Commission"]
+    assert len(transfer_records) == 2
+    assert len(commission_records) == 1
 
 
 def test_sum_balances_unchanged_for_transfer_without_commission():
@@ -139,7 +142,7 @@ def test_transfer_allowed_if_allow_negative_true():
 
 def test_commission_record_is_expense():
     repo, source_id, target_id = _make_repo_with_two_wallets()
-    transfer_id = CreateTransfer(repo, CurrencyService()).execute(
+    CreateTransfer(repo, CurrencyService()).execute(
         from_wallet_id=source_id,
         to_wallet_id=target_id,
         transfer_date="2025-02-01",
@@ -148,11 +151,10 @@ def test_commission_record_is_expense():
         commission_amount=4.0,
         commission_currency="KZT",
     )
-    commission_records = [
-        r for r in repo.load_all() if r.transfer_id == transfer_id and r.category == "Commission"
-    ]
+    commission_records = [r for r in repo.load_all() if r.category == "Commission"]
     assert len(commission_records) == 1
     assert commission_records[0].type == "expense"
+    assert commission_records[0].transfer_id is None
 
 
 def test_opening_balance_includes_transfer_before_period():

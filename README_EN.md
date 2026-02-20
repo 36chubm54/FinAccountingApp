@@ -175,6 +175,38 @@ Export report:
   both must match `YYYY`, `YYYY-MM`, or `YYYY-MM-DD`, must not be in the future, and `end >= start`.
 - This is required for financial correctness: period totals must start from the real balance at the beginning of that period.
 
+### Transfer Aggregate Integrity and Cascade Delete (Phase 3.1)
+
+- `Transfer` is treated as an aggregate and exists only with exactly two linked records:
+  - `Record (expense)` in source wallet
+  - `Record (income)` in target wallet
+- Partial deletion of transfer-linked records is forbidden:
+  - deleting a record with `transfer_id` triggers cascade transfer deletion.
+- Added atomic `delete_transfer(transfer_id)` use case:
+  - removes both transfer records,
+  - removes transfer entity,
+  - also removes related commission record when it is linked by transfer marker in `description`.
+- JSON load now validates transfer integrity:
+  - dangling `record.transfer_id` is forbidden,
+  - each transfer must have exactly 2 linked records (`income` + `expense`),
+  - violations raise `DomainError`.
+- Added logging for:
+  - transfer record creation,
+  - transfer deletion,
+  - wallet creation,
+  - wallet soft delete.
+
+Transfer integrity rule:
+`Transfer exists if and only if exactly two related records exist.`
+
+Domain model snippet:
+
+```text
+Transfer
+ ├── Record (expense)
+ └── Record (income)
+```
+
 ### Deleting an entry
 
 1. Open the `Operations` tab.
@@ -304,7 +336,7 @@ Format:
       "currency": "USD",
       "rate_at_operation": 500.0,
       "amount_kzt": 350000.0,
-      "category": "Salary"
+      "category": "Зарплата"
     },
     {
       "type": "expense",
@@ -313,7 +345,7 @@ Format:
       "currency": "KZT",
       "rate_at_operation": 1.0,
       "amount_kzt": 25000.0,
-      "category": "Products"
+      "category": "Продукты"
     },
     {
       "type": "mandatory_expense",
@@ -325,6 +357,28 @@ Format:
       "category": "Mandatory",
       "description": "Monthly rent",
       "period": "monthly"
+    },
+    {
+      "type": "expense",
+      "date": "2026-02-20",
+      "wallet_id": 1,
+      "transfer_id": 1,
+      "amount_original": 5000.0,
+      "currency": "KZT",
+      "rate_at_operation": 1.0,
+      "amount_kzt": 5000.0,
+      "category": "Transfer"
+    },
+    {
+      "type": "income",
+      "date": "2026-02-20",
+      "wallet_id": 2,
+      "transfer_id": 1,
+      "amount_original": 5000.0,
+      "currency": "KZT",
+      "rate_at_operation": 1.0,
+      "amount_kzt": 5000.0,
+      "category": "Transfer"
     }
   ],
   "mandatory_expenses": [
@@ -337,6 +391,19 @@ Format:
       "category": "Mandatory",
       "description": "Monthly rent",
       "period": "monthly"
+    }
+  ],
+  "transfers": [
+    {
+      "id": 1,
+      "from_wallet_id": 1,
+      "to_wallet_id": 2,
+      "date": "2026-02-20",
+      "amount_original": 5000.0,
+      "currency": "KZT",
+      "rate_at_operation": 1.0,
+      "amount_kzt": 5000.0,
+      "description": ""
     }
   ]
 }
@@ -378,6 +445,7 @@ Domain relationships:
 
 - `Record` belongs to `Wallet` through `record.wallet_id`.
 - `Transfer` links two records (`expense`/`income`) through `transfer_id`.
+- Transfer commission is stored as a separate `Expense` (`Commission` category) and is not part of the linked transfer record pair.
 
 ---
 
@@ -391,19 +459,20 @@ Below are the key classes and functions synchronized with the actual code.
 
 - `CurrencyService` — conversion of currencies to base (`KZT`).
 
+`domain/errors.py`
+
+- `DomainError` — ошибка домена (выбрасывается при нарушении доменных инвариантов).
+
 `domain/import_policy.py`
 
 - `ImportPolicy` — import policy (enum).
 
 `domain/records.py`
 
-- `Record` — base record (abstract class).
-- `Record` includes mandatory `wallet_id` and optional `transfer_id`.
+- `Record` — base record (abstract class). It includes mandatory `wallet_id` and optional `transfer_id`.
 - `IncomeRecord` — income.
 - `ExpenseRecord` — expense.
 - `MandatoryExpenseRecord` — mandatory expense with `description` and `period`.
-- `Wallet` — wallet (`allow_negative`, `is_active`).
-- `Transfer` — wallet-to-wallet transfer aggregate.
 
 `domain/reports.py`
 
@@ -417,10 +486,20 @@ Below are the key classes and functions synchronized with the actual code.
 - `filter_by_period_range(start_prefix, end_prefix)` — filtering by date range.
 - `filter_by_category(category)` — filtering by category.
 - `grouped_by_category()` — grouping by categories.
+- `sorted_by_date()` — sorting by date.
+- `net_profit_fixed()` — net profit at fixed exchange rates.
 - `monthly_income_expense_rows(year=None, up_to_month=None)` — monthly aggregates.
 - `monthly_income_expense_table(year=None, up_to_month=None)` — table by month.
 - `as_table(summary_mode="full"|"total_only")` — tabular output.
 - `to_csv(filepath)` and `from_csv(filepath)` — report export and backward-compatible import.
+
+`domain/wallets.py`
+
+- `Wallet` — wallet (`allow_negative`, `is_active`).
+
+`domain/transfers.py`
+
+- `Transfer` — wallet-to-wallet transfer aggregate.
 
 `domain/validation.py`
 
@@ -441,9 +520,16 @@ Below are the key classes and functions synchronized with the actual code.
 
 - `CreateIncome.execute(date, wallet_id, amount, currency, category)`.
 - `CreateExpense.execute(date, wallet_id, amount, currency, category)`.
-- `GenerateReport.execute()` → `Report` taking into account the initial balance.
+- `GenerateReport.execute(wallet_id=None)` → `Report` taking into account the initial balance.
+- `CreateWallet.execute(name, currency, initial_balance, allow_negative=False)` — creating a new wallet.
+- `GetWallets.execute()` — all wallets.
 - `GetActiveWallets.execute()` — active wallets only.
 - `SoftDeleteWallet.execute(wallet_id)` — safe wallet soft delete.
+- `CalculateWalletBalance.execute(wallet_id)` — calculating wallet balance.
+- `CalculateNetWorth.execute_fixed()` — calculating net worth at fixed exchange rates.
+- `CalculateNetWorth.execute_current()` — calculating net worth at current exchange rates.
+- `CreateTransfer.execute(from_wallet_id, to_wallet_id, transfer_date, amount_original, currency, description, comission_amount, comission_currency)` — creating a transfer between wallets.
+- `DeleteTransfer.execute(transfer_id)` — atomic cascade deletion of a transfer aggregate.
 - `DeleteRecord.execute(index)`.
 - `DeleteAllRecords.execute()`.
 - `ImportFromCSV.execute(filepath)` — import and complete replacement of records (CSV, `ImportPolicy.FULL_BACKUP`).
@@ -462,6 +548,14 @@ Below are the key classes and functions synchronized with the actual code.
 
 Methods:
 
+- `load_wallets()`.
+- `load_active_wallets()`.
+- `create_wallet(name, currency, initial_balance, allow_negative=False)`.
+- `save_wallet(wallet)`.
+- `soft_delete_wallet(wallet_id)`.
+- `get_system_wallet()`.
+- `save_transfer(transfer)`.
+- `load_transfers()`.
 - `save(record)`.
 - `load_all()`.
 - `delete_by_index(index)`.
@@ -472,17 +566,24 @@ Methods:
 - `load_mandatory_expenses()`.
 - `delete_mandatory_expense_by_index(index)`.
 - `delete_all_mandatory_expenses()`.
+- `replace_records(records, initial_balance)`
+- `replace_mandatory_expenses(expenses)`
+- `replace_records_and_transfers(records, transfers)`
+- `replace_all_data(initial_balance, records, mandatory_expenses)`
 
 ### GUI
 
 `gui/tkinter_gui.py`
 
 - `FinancialApp` is the main application class with Tkinter.
+- The `Infographics` tab displays charts and summaries of financial data.
+- The `Operations` tab supports adding and deleting records. Also supports creating transfers and importing/exporting records.
 - The `Reports` tab supports 2 summary modes:
   - `According to the course of the operation`
   - `At the current rate`
 - The exchange rate difference is displayed as a separate line (`FX Difference`).
 - Monthly aggregates and charts are always calculated in fixed mode (`amount_kzt`).
+- The `Settings` tab allows managing wallets and mandatory expenses.
 
 Methods:
 
@@ -491,7 +592,7 @@ Methods:
   - `save_record()`.
   - `delete_selected()`.
   - `delete_all()`.
-  - `import_records()`.
+  - `create_transfer()`.
   - `import_records_data()`.
   - `export_records_data()`.
 - `reports_tab(parent)`.
@@ -499,6 +600,9 @@ Methods:
   - `export_any()`.
 - `settings_tab(parent)`.
   - `save_balance()`.
+  - `create_wallet()`.
+  - `refresh_wallets()`.
+  - `delete_wallet()`.
   - `refresh_mandatory()`.
   - `add_mandatory_inline()`.
   - `add_to_report_inline()`.
@@ -565,11 +669,19 @@ Methods:
 - `extract_years(records)`.
 - `extract_months(records)`.
 
+`utils/import_core.py`
+
+- `norm_key(value)`.
+- `as_float(value, default=None)`.
+- `safe_type(value)`.
+- `record_type_name(record)`.
+- `parse_import_row(row, row_label, policy, get_rate, mandatory_only)`.
+
 ---
 
 ## 📁 File structure
 
-```
+```text
 project/
 │
 ├── main.py                     # Application entry point
@@ -595,7 +707,9 @@ project/
 │   ├── currency.py             # Domain CurrencyService
 │   ├── wallets.py              # Wallets
 │   ├── transfers.py            # Transfers
-│   └── validation.py           # Validation of dates and periods
+│   ├── validation.py           # Validation of dates and periods
+│   ├── errors.py               # Application errors 
+│   └── import_policy.py        # Import policies
 │
 ├── infrastructure/             # Infrastructure layer
 │   └── repositories.py         # JSON repository
@@ -618,7 +732,6 @@ project/
 │   └── exporters.py            # Export reports, mandatory expenses and backup
 │
 ├── web/                        # Web application
-│   ├── __init__.py
 │   ├── index.html
 │   ├── styles.css
 │   └── app.js
@@ -638,6 +751,7 @@ project/
     ├── test_services.py
     ├── test_use_cases.py
     ├── test_validation.py
+    ├── test_transfer_integrity.py
     ├── test_wallet_phase1.py
     ├── test_wallet_phase2.py
     └── test_wallet_phase3.py

@@ -16,6 +16,7 @@ class Record(ABC):
     rate_at_operation: float = 1.0
     amount_kzt: float | None = None
     category: str = "General"
+    description: str = ""
     _amount_init: InitVar[float | None] = None
 
     def __post_init__(self, amount: float | None) -> None:

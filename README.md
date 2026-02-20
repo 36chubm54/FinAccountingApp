@@ -175,6 +175,38 @@ python main.py
   оба значения должны быть корректными датами в формате `YYYY`, `YYYY-MM` или `YYYY-MM-DD`, не в будущем, и `end >= start`.
 - Это критично для финансовой корректности: итог периода считается от реального баланса на начало периода, а не от начала всей истории.
 
+### Transfer Aggregate Integrity and Cascade Delete (Phase 3.1)
+
+- `Transfer` рассматривается как агрегат и существует только вместе с двумя связанными записями:
+  - `Record (expense)` в source wallet
+  - `Record (income)` в target wallet
+- Частичное удаление transfer-записей запрещено:
+  - при удалении записи с `transfer_id` выполняется каскадное удаление всего `Transfer`.
+- Добавлен use-case `delete_transfer(transfer_id)` с атомарным удалением:
+  - удаляются обе transfer-записи,
+  - удаляется сам transfer,
+  - если у transfer есть комиссия, связанная маркером в `description`, она также удаляется.
+- При загрузке JSON выполняется валидация целостности transfer:
+  - висячие `record.transfer_id` запрещены,
+  - для каждого transfer должно быть ровно 2 связанные записи (`income` + `expense`),
+  - при нарушении выбрасывается `DomainError`.
+- Добавлено логирование:
+  - создания transfer-записей,
+  - удаления transfer,
+  - создания кошелька,
+  - soft-delete кошелька.
+
+Transfer integrity rule:
+`Transfer exists if and only if exactly two related records exist.`
+
+Доменная схема:
+
+```text
+Transfer
+ ├── Record (expense)
+ └── Record (income)
+```
+
 ### Удаление записи
 
 1. Откройте вкладку `Operations`.
@@ -325,6 +357,28 @@ Backup восстанавливает:
       "category": "Mandatory",
       "description": "Monthly rent",
       "period": "monthly"
+    },
+    {
+      "type": "expense",
+      "date": "2026-02-20",
+      "wallet_id": 1,
+      "transfer_id": 1,
+      "amount_original": 5000.0,
+      "currency": "KZT",
+      "rate_at_operation": 1.0,
+      "amount_kzt": 5000.0,
+      "category": "Transfer"
+    },
+    {
+      "type": "income",
+      "date": "2026-02-20",
+      "wallet_id": 2,
+      "transfer_id": 1,
+      "amount_original": 5000.0,
+      "currency": "KZT",
+      "rate_at_operation": 1.0,
+      "amount_kzt": 5000.0,
+      "category": "Transfer"
     }
   ],
   "mandatory_expenses": [
@@ -337,6 +391,19 @@ Backup восстанавливает:
       "category": "Mandatory",
       "description": "Monthly rent",
       "period": "monthly"
+    }
+  ],
+  "transfers": [
+    {
+      "id": 1,
+      "from_wallet_id": 1,
+      "to_wallet_id": 2,
+      "date": "2026-02-20",
+      "amount_original": 5000.0,
+      "currency": "KZT",
+      "rate_at_operation": 1.0,
+      "amount_kzt": 5000.0,
+      "description": ""
     }
   ]
 }
@@ -378,6 +445,7 @@ Backup восстанавливает:
 
 - `Record` принадлежит `Wallet` через `record.wallet_id`.
 - `Transfer` связывает две записи (`expense`/`income`) через `transfer_id`.
+- Комиссия transfer хранится отдельной записью `Expense` (категория `Commission`) и не входит в пару связанных transfer-записей.
 
 ---
 
@@ -391,19 +459,20 @@ Backup восстанавливает:
 
 - `CurrencyService` — конвертация валют в базовую (`KZT`).
 
+`domain/errors.py`
+
+- `DomainError` — ошибка домена (выбрасывается при нарушении доменных инвариантов).
+
 `domain/import_policy.py`
 
 - `ImportPolicy` — import policy (enum).
 
 `domain/records.py`
 
-- `Record` — базовая запись (абстрактный класс).
-- `Record` содержит обязательный `wallet_id` и опциональный `transfer_id`.
+- `Record` — базовая запись (абстрактный класс). Cодержит обязательный `wallet_id` и опциональный `transfer_id`.
 - `IncomeRecord` — доход.
 - `ExpenseRecord` — расход.
 - `MandatoryExpenseRecord` — обязательный расход с `description` и `period`.
-- `Wallet` — кошелёк (`allow_negative`, `is_active`).
-- `Transfer` — агрегат перевода между кошельками.
 
 `domain/reports.py`
 
@@ -417,10 +486,20 @@ Backup восстанавливает:
 - `filter_by_period_range(start_prefix, end_prefix)` — фильтрация по диапазону дат.
 - `filter_by_category(category)` — фильтрация по категории.
 - `grouped_by_category()` — группировка по категориям.
+- `sorted_by_date()` — сортировка по дате.
+- `net_profit_fixed()` — чистая прибыль по фиксированным курсам.
 - `monthly_income_expense_rows(year=None, up_to_month=None)` — агрегаты по месяцам.
 - `monthly_income_expense_table(year=None, up_to_month=None)` — таблица по месяцам.
 - `as_table(summary_mode="full"|"total_only")` — табличный вывод.
 - `to_csv(filepath)` и `from_csv(filepath)` — экспорт отчёта и backward-compatible импорт.
+
+`domain/wallets/py`
+
+- `Wallet` — кошелёк (`allow_negative`, `is_active`).
+
+`domain/transfers.py`
+
+- `Transfer` — агрегат перевода между кошельками.
 
 `domain/validation.py`
 
@@ -441,9 +520,16 @@ Backup восстанавливает:
 
 - `CreateIncome.execute(date, wallet_id, amount, currency, category)`.
 - `CreateExpense.execute(date, wallet_id, amount, currency, category)`.
-- `GenerateReport.execute()` → `Report` с учётом начального остатка.
+- `GenerateReport.execute(wallet_id=None)` → `Report` с учётом начального остатка.
+- `CreateWallet.execute(name, currency, initial_balance, allow_negative=False)` — создание нового кошелька.
+- `GetWallets.execute()` — все кошельки.
 - `GetActiveWallets.execute()` — активные кошельки.
 - `SoftDeleteWallet.execute(wallet_id)` — безопасный soft delete.
+- `CalculateWalletBalance.execute(wallet_id)` — вычисление баланса кошелька.
+- `CalculateNetWorth.execute_fixed()` — вычисление чистых активов по фиксированным курсам.
+- `CalculateNetWorth.execute_current()` — вычисление чистых активов по текущим курсам.
+- `CreateTransfer.execute(from_wallet_id, to_wallet_id, transfer_date, amount_original, currency, description, comission_amount, comission_currency)` — создание перевода между кошельками.
+- `DeleteTransfer.execute(transfer_id)` — каскадное удаление transfer-агрегата.
 - `DeleteRecord.execute(index)`.
 - `DeleteAllRecords.execute()`.
 - `ImportFromCSV.execute(filepath)` — импорт и полная замена записей (CSV, `ImportPolicy.FULL_BACKUP`).
@@ -462,6 +548,14 @@ Backup восстанавливает:
 
 Методы:
 
+- `load_wallets()`.
+- `load_active_wallets()`.
+- `create_wallet(name, currency, initial_balance, allow_negative=False)`.
+- `save_wallet(wallet)`.
+- `soft_delete_wallet(wallet_id)`.
+- `get_system_wallet()`.
+- `save_transfer(transfer)`.
+- `load_transfers()`.
 - `save(record)`.
 - `load_all()`.
 - `delete_by_index(index)`.
@@ -472,17 +566,24 @@ Backup восстанавливает:
 - `load_mandatory_expenses()`.
 - `delete_mandatory_expense_by_index(index)`.
 - `delete_all_mandatory_expenses()`.
+- `replace_records(records, initial_balance)`
+- `replace_mandatory_expenses(expenses)`
+- `replace_records_and_transfers(records, transfers)`
+- `replace_all_data(initial_balance, records, mandatory_expenses)`
 
 ### GUI
 
 `gui/tkinter_gui.py`
 
 - `FinancialApp` — основной класс приложения с Tkinter.
+- Вкладка `Infographics` отображает диаграммы и сводки по финансовым данным.
+- Вкладка `Operations` поддерживает добавление и удаление записей. Также поддерживает создание переводов и импорт/экспорт записей.
 - Вкладка `Reports` поддерживает 2 режима итогов:
   - `По курсу операции`
   - `По текущему курсу`
 - Курсовая разница выводится отдельной строкой (`FX Difference`).
 - Месячные агрегаты и графики всегда считаются в фиксированном режиме (`amount_kzt`).
+- Вкладка `Settings` позволяет управлять кошельками и обязательными расходами.
 
 Методы:
 
@@ -491,7 +592,7 @@ Backup восстанавливает:
   - `save_record()`.
   - `delete_selected()`.
   - `delete_all()`.
-  - `import_records()`.
+  - `create_transfer()`.
   - `import_records_data()`.
   - `export_records_data()`.
 - `reports_tab(parent)`.
@@ -499,6 +600,9 @@ Backup восстанавливает:
   - `export_any()`.
 - `settings_tab(parent)`.
   - `save_balance()`.
+  - `create_wallet()`.
+  - `refresh_wallets()`.
+  - `delete_wallet()`.
   - `refresh_mandatory()`.
   - `add_mandatory_inline()`.
   - `add_to_report_inline()`.
@@ -565,11 +669,19 @@ Backup восстанавливает:
 - `extract_years(records)`.
 - `extract_months(records)`.
 
+`utils/import_core.py`
+
+- `norm_key(value)`.
+- `as_float(value, default=None)`.
+- `safe_type(value)`.
+- `record_type_name(record)`.
+- `parse_import_row(row, row_label, policy, get_rate, mandatory_only)`.
+
 ---
 
 ## 📁 Файловая структура
 
-```
+```text
 project/
 │
 ├── main.py                     # Точка входа приложения
@@ -596,6 +708,7 @@ project/
 │   ├── wallets.py              # Кошельки
 │   ├── transfers.py            # Переводы
 │   ├── validation.py           # Валидация дат и периодов
+│   ├── errors.py               # Ошибки приложения
 │   └── import_policy.py        # Политики импорта
 │
 ├── infrastructure/             # Infrastructure layer
@@ -638,6 +751,7 @@ project/
     ├── test_services.py
     ├── test_use_cases.py
     ├── test_validation.py
+    ├── test_transfer_integrity.py
     ├── test_wallet_phase1.py
     ├── test_wallet_phase2.py
     └── test_wallet_phase3.py

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Transfer Aggregate Integrity and Cascade Delete (Phase 3.1):
+  - Added `DomainError` for domain invariant violations.
+  - Added `DeleteTransfer` use-case and controller method with atomic cascade delete.
+  - Added protection from partial deletion: deleting transfer-linked record now deletes whole transfer.
+  - Added repository-level transfer integrity validation on load/save:
+    - each transfer must have exactly two linked records (`expense` + `income`),
+    - dangling transfer-linked records are rejected.
+  - Added migration for legacy commission transfer links to non-linked commission records.
+  - Added logging for transfer creation/deletion and wallet creation/soft-delete.
+  - Added unit tests for transfer integrity, cascade delete, and corruption detection.
 - Wallet Operations Binding and Safe Delete (Phase 3):
   - Added mandatory `wallet_id` flow for income/expense creation.
   - Added `is_active` for wallets and safe soft delete for zero-balance wallets.
@@ -55,6 +65,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated transfer commission linkage:
+  - transfer aggregate now keeps exactly two linked records via `transfer_id`,
+  - commission remains a separate expense and is associated for cascade delete via description marker.
 - Updated global report arithmetic to exclude transfer-linked records from net profit while keeping commission as expense.
 - Updated controller record-list rendering to display transfer-linked records as one logical operation.
 - Updated report/domain logic to use normalized `datetime.date` in records and opening-balance computations.

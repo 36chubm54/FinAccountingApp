@@ -256,9 +256,7 @@ class FinancialApp(tk.Tk):
         left_frame = tk.Frame(parent)
         left_frame.grid(row=0, column=0, sticky="nsw", padx=10, pady=10)
 
-        # -------------------------
-        # Add operation
-        # -------------------------
+        # Left: Add operation
         form_frame = ttk.LabelFrame(left_frame, text="Add operation")
         form_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         form_frame.grid_columnconfigure(1, weight=1)
@@ -313,6 +311,19 @@ class FinancialApp(tk.Tk):
                 operation_wallet_var.set(labels[0])
 
         _refresh_operation_wallet_menu()
+
+        # Right: Records list
+        list_frame = ttk.LabelFrame(parent, text="List of operations")
+        list_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        list_frame.grid_rowconfigure(0, weight=1)
+        list_frame.grid_columnconfigure(0, weight=1)
+
+        self.records_listbox = Listbox(list_frame)
+        self.records_listbox.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
+
+        scrollbar = ttk.Scrollbar(list_frame, orient=VERTICAL, command=self.records_listbox.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns", pady=6)
+        self.records_listbox.config(yscrollcommand=scrollbar.set)
 
         def save_record():
             date_str = date_entry.get().strip()
@@ -380,9 +391,71 @@ class FinancialApp(tk.Tk):
             row=6, column=0, columnspan=2, pady=8
         )
 
-        # -------------------------
-        # Transfer (now separate)
-        # -------------------------
+        def delete_selected():
+            if not hasattr(self, "records_listbox"):
+                messagebox.showerror("Error", "Records list is not available.")
+                return
+            selection = self.records_listbox.curselection()
+            if not selection:
+                messagebox.showerror("Error", "Please select a record to delete.")
+                return
+            list_index = selection[0]
+            record_id = self._list_index_to_record_id.get(list_index)
+            repository_index = self._record_id_to_repo_index.get(record_id) if record_id else None
+            if repository_index is None:
+                messagebox.showerror("Error", "Selected record is no longer available.")
+                self._refresh_list()
+                return
+            try:
+                transfer_id = self.controller.transfer_id_by_repository_index(repository_index)
+                if transfer_id is not None:
+                    self.controller.delete_transfer(transfer_id)
+                    messagebox.showinfo("Success", f"Deleted transfer #{transfer_id}.")
+                elif self.controller.delete_record(repository_index):
+                    messagebox.showinfo("Success", f"Deleted record at index {repository_index}.")
+                else:
+                    messagebox.showerror("Error", "Failed to delete record.")
+                    return
+                self._refresh_list()
+                self._refresh_charts()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to delete: {str(e)}")
+
+        def delete_all():
+            confirm = messagebox.askyesno(
+                "Confirm Delete All",
+                "Are you sure you want to delete ALL records? This action cannot be undone.",
+            )
+            if confirm:
+                self.controller.delete_all_records()
+                messagebox.showinfo("Success", "All records have been deleted.")
+                self._refresh_list()
+                self._refresh_charts()
+
+        wallet_id_map: dict[str, int] = {}
+
+        def _refresh_transfer_wallet_menus() -> None:
+            nonlocal wallet_id_map
+            wallets = self.controller.load_active_wallets()
+            wallet_id_map = {
+                f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id for wallet in wallets
+            }
+            labels = list(wallet_id_map.keys()) or [""]
+
+            for menu_widget, var in (
+                (transfer_from_menu, transfer_from_var),
+                (transfer_to_menu, transfer_to_var),
+            ):
+                menu = menu_widget["menu"]
+                menu.delete(0, "end")
+                for label in labels:
+                    menu.add_command(label=label, command=lambda value=label, v=var: v.set(value))
+                if not var.get() or var.get() not in wallet_id_map:
+                    var.set(labels[0])
+            if len(labels) > 1 and transfer_to_var.get() == transfer_from_var.get():
+                transfer_to_var.set(labels[1])
+
+        # Left: Transfer
         transfer_frame = ttk.LabelFrame(left_frame, text="Transfer")
         transfer_frame.grid(row=1, column=0, sticky="ew")
         transfer_frame.grid_columnconfigure(1, weight=1)
@@ -436,29 +509,6 @@ class FinancialApp(tk.Tk):
         )
         transfer_description_entry = ttk.Entry(transfer_frame)
         transfer_description_entry.grid(row=7, column=1, sticky="ew", padx=4, pady=2)
-
-        wallet_id_map: dict[str, int] = {}
-
-        def _refresh_transfer_wallet_menus() -> None:
-            nonlocal wallet_id_map
-            wallets = self.controller.load_active_wallets()
-            wallet_id_map = {
-                f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id for wallet in wallets
-            }
-            labels = list(wallet_id_map.keys()) or [""]
-
-            for menu_widget, var in (
-                (transfer_from_menu, transfer_from_var),
-                (transfer_to_menu, transfer_to_var),
-            ):
-                menu = menu_widget["menu"]
-                menu.delete(0, "end")
-                for label in labels:
-                    menu.add_command(label=label, command=lambda value=label, v=var: v.set(value))
-                if not var.get() or var.get() not in wallet_id_map:
-                    var.set(labels[0])
-            if len(labels) > 1 and transfer_to_var.get() == transfer_from_var.get():
-                transfer_to_var.set(labels[1])
 
         def create_transfer() -> None:
             from_label = transfer_from_var.get()
@@ -518,52 +568,10 @@ class FinancialApp(tk.Tk):
         ttk.Button(transfer_frame, text="Create transfer", command=create_transfer).grid(
             row=8, column=0, columnspan=2, pady=6
         )
+
         self._refresh_transfer_wallet_menus = _refresh_transfer_wallet_menus
         self._refresh_operation_wallet_menu = _refresh_operation_wallet_menu
         _refresh_transfer_wallet_menus()
-
-        # Right: Records list
-        list_frame = ttk.LabelFrame(parent, text="List of operations")
-        list_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
-        list_frame.grid_rowconfigure(0, weight=1)
-        list_frame.grid_columnconfigure(0, weight=1)
-
-        self.records_listbox = Listbox(list_frame)
-        self.records_listbox.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
-
-        scrollbar = ttk.Scrollbar(list_frame, orient=VERTICAL, command=self.records_listbox.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns", pady=6)
-        self.records_listbox.config(yscrollcommand=scrollbar.set)
-
-        def delete_selected():
-            selection = self.records_listbox.curselection()
-            if not selection:
-                messagebox.showerror("Error", "Please select a record to delete.")
-                return
-            list_index = selection[0]
-            record_id = self._list_index_to_record_id.get(list_index)
-            repository_index = self._record_id_to_repo_index.get(record_id) if record_id else None
-            if repository_index is None:
-                messagebox.showerror("Error", "Selected record is no longer available.")
-                self._refresh_list()
-                return
-            if self.controller.delete_record(repository_index):
-                messagebox.showinfo("Success", f"Deleted record at index {repository_index}.")
-                self._refresh_list()
-                self._refresh_charts()
-            else:
-                messagebox.showerror("Error", "Failed to delete record.")
-
-        def delete_all():
-            confirm = messagebox.askyesno(
-                "Confirm Delete All",
-                "Are you sure you want to delete ALL records? This action cannot be undone.",
-            )
-            if confirm:
-                self.controller.delete_all_records()
-                messagebox.showinfo("Success", "All records have been deleted.")
-                self._refresh_list()
-                self._refresh_charts()
 
         def import_records_data():
             mode_label = import_mode_var.get()
@@ -1291,15 +1299,6 @@ class FinancialApp(tk.Tk):
 
         refresh_mandatory()
 
-        # =========================================================
-        # BACKUP
-        # =========================================================
-        backup_frame = ttk.LabelFrame(left_panel, text="Backup (JSON)")
-        backup_frame.grid(row=2, column=0, sticky="ew")
-
-        backup_frame.grid_columnconfigure(0, weight=1)
-        backup_frame.grid_columnconfigure(1, weight=1)
-
         def import_mand():
             fmt = format_var.get()
             cfg = IMPORT_FORMATS.get(fmt)
@@ -1387,6 +1386,15 @@ class FinancialApp(tk.Tk):
 
         ttk.Button(btns, text="Import", command=import_mand).grid(row=0, column=6)
         ttk.Button(btns, text="Export", command=export_mand).grid(row=0, column=7)
+
+        # =========================================================
+        # BACKUP
+        # =========================================================
+        backup_frame = ttk.LabelFrame(left_panel, text="Backup (JSON)")
+        backup_frame.grid(row=2, column=0, sticky="ew")
+
+        backup_frame.grid_columnconfigure(0, weight=1)
+        backup_frame.grid_columnconfigure(1, weight=1)
 
         def import_backup():
             filepath = filedialog.askopenfilename(

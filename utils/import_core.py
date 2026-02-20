@@ -155,6 +155,7 @@ def parse_import_row(
         "rate_at_operation": float(rate_at_operation),
         "amount_kzt": float(amount_kzt),
         "category": category,
+        "description": description,
     }
     if row_lc.get("transfer_id") not in (None, ""):
         transfer_id = int(as_float(row_lc.get("transfer_id"), 0.0) or 0)
@@ -178,7 +179,6 @@ def parse_import_row(
     return (
         MandatoryExpenseRecord(
             **common,
-            description=description,
             period=period,  # type: ignore[arg-type]
         ),
         None,

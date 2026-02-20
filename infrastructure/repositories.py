@@ -6,6 +6,7 @@ import threading
 from abc import ABC, abstractmethod
 from datetime import date as dt_date
 
+from domain.errors import DomainError
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 from domain.transfers import Transfer
 from domain.wallets import Wallet
@@ -61,6 +62,13 @@ class RecordRepository(ABC):
     @abstractmethod
     def load_transfers(self) -> list[Transfer]:
         """Load transfers."""
+        pass
+
+    @abstractmethod
+    def replace_records_and_transfers(
+        self, records: list[Record], transfers: list[Transfer]
+    ) -> None:
+        """Atomically replace records and transfers only."""
         pass
 
     @abstractmethod
@@ -180,6 +188,51 @@ class JsonFileRecordRepository(RecordRepository):
                     return currency
         return "KZT"
 
+    @staticmethod
+    def _is_transfer_commission(item: dict) -> bool:
+        return str(item.get("category", "") or "").strip().lower() == "commission"
+
+    def _validate_transfer_integrity(self, data: dict) -> None:
+        records = [item for item in data.get("records", []) if isinstance(item, dict)]
+        transfers = [item for item in data.get("transfers", []) if isinstance(item, dict)]
+
+        records_by_transfer: dict[int, list[dict]] = {}
+        for record in records:
+            transfer_raw = record.get("transfer_id")
+            if transfer_raw in (None, ""):
+                continue
+            transfer_id = int(self._as_float(transfer_raw, 0.0))
+            if transfer_id <= 0:
+                raise DomainError(f"Invalid transfer_id in record: {transfer_raw}")
+            records_by_transfer.setdefault(transfer_id, []).append(record)
+
+        transfer_ids = {
+            int(self._as_float(transfer.get("id"), 0.0))
+            for transfer in transfers
+            if int(self._as_float(transfer.get("id"), 0.0)) > 0
+        }
+
+        # Records referencing missing transfers are forbidden.
+        for transfer_id in records_by_transfer:
+            if transfer_id not in transfer_ids:
+                raise DomainError(f"Dangling records detected for missing transfer #{transfer_id}")
+
+        # Each transfer must have exactly 2 linked records: one expense and one income.
+        for transfer in transfers:
+            transfer_id = int(self._as_float(transfer.get("id"), 0.0))
+            linked = records_by_transfer.get(transfer_id, [])
+            if len(linked) != 2:
+                raise DomainError(
+                    f"Transfer integrity violated for #{transfer_id}:"
+                    f"expected 2 linked records, got {len(linked)}"
+                )
+            record_types = {str(item.get("type", "") or "").lower() for item in linked}
+            if record_types != {"expense", "income"}:
+                raise DomainError(
+                    f"Transfer integrity violated for #{transfer_id}:"
+                    f"requires one income and one expense"
+                )
+
     def _load_data(self) -> dict:
         with self._lock:
             try:
@@ -288,6 +341,21 @@ class JsonFileRecordRepository(RecordRepository):
             if isinstance(item, dict) and "transfer_id" not in item:
                 item["transfer_id"] = None
                 migrated = True
+            if (
+                isinstance(item, dict)
+                and item.get("transfer_id") not in (None, "")
+                and self._is_transfer_commission(item)
+            ):
+                transfer_id = int(self._as_float(item.get("transfer_id"), 0.0))
+                if transfer_id > 0:
+                    description = str(item.get("description", "") or "")
+                    marker = f"[transfer:{transfer_id}]"
+                    if marker not in description:
+                        item["description"] = f"{description} {marker}".strip()
+                    item["transfer_id"] = None
+                    migrated = True
+
+        self._validate_transfer_integrity(data)
 
         if migrated:
             try:
@@ -330,9 +398,9 @@ class JsonFileRecordRepository(RecordRepository):
             "rate_at_operation": record.rate_at_operation,
             "amount_kzt": record.amount_kzt,
             "category": record.category,
+            "description": str(getattr(record, "description", "") or ""),
         }
         if isinstance(record, MandatoryExpenseRecord):
-            payload["description"] = record.description
             payload["period"] = record.period
         return payload
 
@@ -363,6 +431,7 @@ class JsonFileRecordRepository(RecordRepository):
             "rate_at_operation": rate_at_operation,
             "amount_kzt": amount_kzt,
             "category": str(item.get("category", "General") or "General"),
+            "description": str(item.get("description", "") or ""),
         }
 
     def load_wallets(self) -> list[Wallet]:
@@ -549,11 +618,9 @@ class JsonFileRecordRepository(RecordRepository):
                 elif typ == "expense":
                     record = ExpenseRecord(**common)
                 elif typ == "mandatory_expense":
-                    description = str(item.get("description", "") or "")
                     period = str(item.get("period", "monthly") or "monthly")
                     record = MandatoryExpenseRecord(
                         **common,
-                        description=description,
                         period=period,  # type: ignore[arg-type]
                     )
                 else:
@@ -627,7 +694,6 @@ class JsonFileRecordRepository(RecordRepository):
             common = self._parse_record_common(item)
             expense = MandatoryExpenseRecord(
                 **common,
-                description=str(item.get("description", "") or ""),
                 period=str(item.get("period", "monthly") or "monthly"),  # type: ignore[arg-type]
             )
             expenses.append(expense)
@@ -683,6 +749,22 @@ class JsonFileRecordRepository(RecordRepository):
                 payload = self._record_to_dict(expense, "mandatory_expense")
                 payload.pop("type", None)
                 data["mandatory_expenses"].append(payload)
+            self._save_data(data)
+
+    def replace_records_and_transfers(
+        self, records: list[Record], transfers: list[Transfer]
+    ) -> None:
+        with self._lock:
+            data = self._load_data()
+            data["records"] = []
+            for record in records:
+                if isinstance(record, MandatoryExpenseRecord):
+                    data["records"].append(self._record_to_dict(record, "mandatory_expense"))
+                else:
+                    record_type = "income" if isinstance(record, IncomeRecord) else "expense"
+                    data["records"].append(self._record_to_dict(record, record_type))
+            data["transfers"] = [self._transfer_to_dict(transfer) for transfer in transfers]
+            self._validate_transfer_integrity(data)
             self._save_data(data)
 
     def replace_all_data(

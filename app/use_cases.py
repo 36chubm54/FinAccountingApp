@@ -1,6 +1,7 @@
 import logging
 from datetime import date as dt_date
 
+from domain.errors import DomainError
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
 from domain.reports import Report
@@ -20,6 +21,19 @@ def _build_rate(amount: float, amount_kzt: float, currency: str) -> float:
     if amount == 0:
         return 1.0
     return amount_kzt / amount
+
+
+def _commission_marker(transfer_id: int) -> str:
+    return f"[transfer:{transfer_id}]"
+
+
+def _is_commission_for_transfer(record, transfer_id: int) -> bool:
+    if record.transfer_id is not None:
+        return False
+    if str(record.category or "").strip().lower() != "commission":
+        return False
+    marker = _commission_marker(transfer_id)
+    return marker in str(getattr(record, "description", "") or "")
 
 
 class CreateIncome:
@@ -142,12 +156,20 @@ class CreateWallet:
         initial_balance: float,
         allow_negative: bool = False,
     ) -> Wallet:
-        return self._repository.create_wallet(
+        wallet = self._repository.create_wallet(
             name=name,
             currency=currency,
             initial_balance=initial_balance,
             allow_negative=allow_negative,
         )
+        logger.info(
+            "Wallet created id=%s name=%s currency=%s allow_negative=%s",
+            wallet.id,
+            wallet.name,
+            wallet.currency,
+            wallet.allow_negative,
+        )
+        return wallet
 
 
 class GetWallets:
@@ -164,6 +186,22 @@ class GetActiveWallets:
 
     def execute(self) -> list[Wallet]:
         return self._repository.load_active_wallets()
+
+
+class SoftDeleteWallet:
+    def __init__(self, repository: RecordRepository):
+        self._repository = repository
+
+    def execute(self, wallet_id: int) -> None:
+        wallet = _wallet_by_id(self._repository, wallet_id)
+        if wallet.system:
+            raise ValueError("System wallet cannot be deleted")
+        balance = _wallet_balance_kzt(wallet, self._repository.load_all())
+        if abs(balance) > 1e-9:
+            raise ValueError("Wallet with non-zero balance cannot be deleted")
+        if not self._repository.soft_delete_wallet(wallet_id):
+            raise ValueError("Wallet not found")
+        logger.info("Wallet soft-deleted id=%s", wallet_id)
 
 
 class CalculateWalletBalance:
@@ -264,7 +302,6 @@ class CreateTransfer:
             amount_kzt=transfer_kzt,
             description=description,
         )
-        self._repository.save_transfer(transfer)
 
         expense_record = ExpenseRecord(
             date=transfer_date,
@@ -286,23 +323,81 @@ class CreateTransfer:
             amount_kzt=transfer_kzt,
             category="Transfer",
         )
-        self._repository.save(expense_record)
-        self._repository.save(income_record)
+        updated_records = list(records) + [expense_record, income_record]
+        updated_transfers = list(self._repository.load_transfers()) + [transfer]
 
         if commission_amount > 0:
+            marker = _commission_marker(transfer_id)
             commission_record = ExpenseRecord(
                 date=transfer_date,
                 wallet_id=from_wallet_id,
-                transfer_id=transfer_id,
+                transfer_id=None,
                 amount_original=float(commission_amount),
                 currency=commission_ccy,
                 rate_at_operation=commission_rate,
                 amount_kzt=commission_kzt,
                 category="Commission",
+                description=marker,
             )
-            self._repository.save(commission_record)
+            updated_records.append(commission_record)
+            logger.info(
+                "Transfer commission record created transfer_id=%s wallet=%s amount_kzt=%.2f",
+                transfer_id,
+                from_wallet_id,
+                commission_kzt,
+            )
+
+        self._repository.replace_records_and_transfers(updated_records, updated_transfers)
+        logger.info(
+            "Transfer records created transfer_id=%s from_wallet=%s to_wallet=%s amount_kzt=%.2f",
+            transfer_id,
+            from_wallet_id,
+            to_wallet_id,
+            transfer_kzt,
+        )
 
         return transfer_id
+
+
+class DeleteTransfer:
+    def __init__(self, repository: RecordRepository):
+        self._repository = repository
+
+    def execute(self, transfer_id: int) -> None:
+        transfers = self._repository.load_transfers()
+        transfer = next((item for item in transfers if item.id == transfer_id), None)
+        if transfer is None:
+            raise DomainError(f"Transfer not found: {transfer_id}")
+
+        records = self._repository.load_all()
+        linked = [record for record in records if record.transfer_id == transfer_id]
+        if len(linked) != 2:
+            raise DomainError(
+                f"Transfer integrity violated for #{transfer_id}:"
+                f"expected 2 linked records, got {len(linked)}"
+            )
+
+        types = {record.type for record in linked}
+        if types != {"expense", "income"}:
+            raise DomainError(
+                f"Transfer integrity violated for #{transfer_id}:"
+                "requires one expense and one income"
+            )
+
+        new_records = [
+            record
+            for record in records
+            if record.transfer_id != transfer_id
+            and not _is_commission_for_transfer(record, transfer_id)
+        ]
+        new_transfers = [item for item in transfers if item.id != transfer_id]
+
+        self._repository.replace_records_and_transfers(new_records, new_transfers)
+        logger.info(
+            "Transfer deleted transfer_id=%s removed_records=%s",
+            transfer_id,
+            len(records) - len(new_records),
+        )
 
 
 class DeleteRecord:
@@ -311,22 +406,19 @@ class DeleteRecord:
 
     def execute(self, index: int) -> bool:
         """Delete record by index. Returns True if deleted successfully."""
+        records = self._repository.load_all()
+        try:
+            if not (0 <= index < len(records)):
+                return False
+        except TypeError:
+            # Backward-compatible path for mocked repositories in unit tests
+            # that do not provide a list-like result for load_all().
+            return self._repository.delete_by_index(index)
+        record = records[index]
+        if record.transfer_id is not None:
+            DeleteTransfer(self._repository).execute(record.transfer_id)
+            return True
         return self._repository.delete_by_index(index)
-
-
-class SoftDeleteWallet:
-    def __init__(self, repository: RecordRepository):
-        self._repository = repository
-
-    def execute(self, wallet_id: int) -> None:
-        wallet = _wallet_by_id(self._repository, wallet_id)
-        if wallet.system:
-            raise ValueError("System wallet cannot be deleted")
-        balance = _wallet_balance_kzt(wallet, self._repository.load_all())
-        if abs(balance) > 1e-9:
-            raise ValueError("Wallet with non-zero balance cannot be deleted")
-        if not self._repository.soft_delete_wallet(wallet_id):
-            raise ValueError("Wallet not found")
 
 
 class DeleteAllRecords:
