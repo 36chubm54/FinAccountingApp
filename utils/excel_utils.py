@@ -8,16 +8,37 @@ from openpyxl import Workbook, load_workbook
 from domain.import_policy import ImportPolicy
 from domain.records import MandatoryExpenseRecord, Record
 from domain.reports import Report
+from utils.csv_utils import (
+    _parse_transfer_row,
+    _restore_missing_transfers,
+    _validate_transfer_integrity,
+)
 from utils.import_core import (
     ImportSummary,
     norm_key,
     parse_import_row,
     record_type_name,
+    safe_type,
 )
 
 logger = logging.getLogger(__name__)
 
 DATA_HEADERS = [
+    "date",
+    "type",
+    "wallet_id",
+    "category",
+    "amount_original",
+    "currency",
+    "rate_at_operation",
+    "amount_kzt",
+    "description",
+    "period",
+    "transfer_id",
+    "from_wallet_id",
+    "to_wallet_id",
+]
+MANDATORY_HEADERS = [
     "date",
     "type",
     "category",
@@ -137,44 +158,65 @@ def report_from_xlsx(filepath: str) -> Report:
 
 
 def export_records_to_xlsx(
-    records: list[Record], filepath: str, initial_balance: float = 0.0
+    records: list[Record],
+    filepath: str,
+    initial_balance: float = 0.0,
+    *,
+    transfers=None,
 ) -> None:
+    del initial_balance  # legacy argument, kept for compatibility
+
+    transfer_map = {transfer.id: transfer for transfer in (transfers or [])}
+
     wb = Workbook()
     ws = wb.active
     if ws is not None:
         ws.title = "Data"
         ws.append(DATA_HEADERS)
-        ws.append(
-            [
-                "",
-                "initial_balance",
-                "",
-                initial_balance,
-                "KZT",
-                1.0,
-                initial_balance,
-                "",
-                "",
-            ]
-        )
 
     for record in records:
+        if record.transfer_id is not None:
+            continue
         payload = [
             record.date.isoformat() if isinstance(record.date, dt_date) else record.date,
             record_type_name(record),
+            int(getattr(record, "wallet_id", 1)),
             record.category,
             record.amount_original,
             record.currency,
             record.rate_at_operation,
             record.amount_kzt,
+            str(getattr(record, "description", "") or ""),
+            getattr(record, "period", "") if isinstance(record, MandatoryExpenseRecord) else "",
+            "",
             "",
             "",
         ]
-        if isinstance(record, MandatoryExpenseRecord):
-            payload[7] = record.description
-            payload[8] = record.period
         if ws is not None:
             ws.append(payload)
+
+    for transfer_id in sorted(transfer_map):
+        transfer = transfer_map[transfer_id]
+        if ws is not None:
+            ws.append(
+                [
+                    transfer.date.isoformat()
+                    if isinstance(transfer.date, dt_date)
+                    else transfer.date,
+                    "transfer",
+                    "",
+                    "Transfer",
+                    transfer.amount_original,
+                    transfer.currency,
+                    transfer.rate_at_operation,
+                    transfer.amount_kzt,
+                    transfer.description,
+                    "",
+                    transfer.id,
+                    transfer.from_wallet_id,
+                    transfer.to_wallet_id,
+                ]
+            )
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     wb.save(filepath)
@@ -189,6 +231,7 @@ def import_records_from_xlsx(
     filepath: str,
     policy: ImportPolicy = ImportPolicy.FULL_BACKUP,
     currency_service=None,
+    wallet_ids: set[int] | None = None,
 ) -> tuple[list[Record], float, ImportSummary]:
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"XLSX file not found: {filepath}")
@@ -217,6 +260,9 @@ def import_records_from_xlsx(
         skipped = 0
         imported = 0
 
+        transfers = {}
+        next_transfer_id = 1
+
         is_report_xlsx = {"date", "type", "category", "amount_(kzt)"}.issubset(set(headers))
         get_rate = None
         if policy == ImportPolicy.CURRENT_RATE:
@@ -242,6 +288,32 @@ def import_records_from_xlsx(
                 else:
                     raw["amount"] = raw.get("amount_(kzt)")
 
+            row_type = safe_type(_safe_str(raw.get("type", "")).lower())
+            if row_type == "transfer":
+                row_lc = {norm_key(str(k)): str(v) if v is not None else "" for k, v in raw.items()}
+                parsed_records, transfer, next_transfer_id, error = _parse_transfer_row(
+                    row_lc=row_lc,
+                    row_label=f"row {idx}",
+                    policy=policy,
+                    get_rate=get_rate,
+                    next_transfer_id=next_transfer_id,
+                    wallet_ids=wallet_ids,
+                )
+                if error:
+                    skipped += 1
+                    errors.append(error)
+                    logger.warning("XLSX import skipped %s", error)
+                    continue
+                if transfer is not None and parsed_records is not None:
+                    if transfer.id in transfers:
+                        skipped += 1
+                        errors.append(f"row {idx}: duplicate transfer_id #{transfer.id}")
+                        continue
+                    transfers[transfer.id] = transfer
+                    records.extend(parsed_records)
+                    imported += 1
+                continue
+
             record, parsed_balance, error = parse_import_row(
                 raw,
                 row_label=f"row {idx}",
@@ -259,8 +331,20 @@ def import_records_from_xlsx(
                 continue
             if record is None:
                 continue
+            if wallet_ids is not None and record.wallet_id not in wallet_ids:
+                skipped += 1
+                errors.append(f"row {idx}: wallet not found ({record.wallet_id})")
+                continue
             imported += 1
             records.append(record)
+            if record.transfer_id is not None:
+                next_transfer_id = max(next_transfer_id, int(record.transfer_id) + 1)
+
+        _restore_missing_transfers(records, transfers)
+        integrity_errors = _validate_transfer_integrity(records, transfers, wallet_ids)
+        if integrity_errors:
+            skipped += len(integrity_errors)
+            errors.extend(integrity_errors)
 
         logger.info(
             "XLSX import completed: imported=%s skipped=%s file=%s",
@@ -284,7 +368,7 @@ def export_mandatory_expenses_to_xlsx(
     ws = wb.active
     if ws is not None:
         ws.title = "Mandatory"
-        ws.append(DATA_HEADERS)
+        ws.append(MANDATORY_HEADERS)
 
     for e in expenses:
         if ws is not None:

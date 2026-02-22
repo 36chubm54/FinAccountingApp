@@ -233,7 +233,7 @@ class TestImportFromCSV:
 
             # Assert
             mock_import.assert_called_once_with("test.csv", policy=ImportPolicy.FULL_BACKUP)
-            mock_repo.replace_records.assert_called_once_with(test_records, 0.0)
+            mock_repo.replace_records_and_transfers.assert_called_once_with(test_records, [])
             assert result == 3
 
     def test_execute_saves_initial_balance(self):
@@ -244,7 +244,7 @@ class TestImportFromCSV:
             use_case = ImportFromCSV(repository=mock_repo)
             use_case.execute("test.csv")
 
-            mock_repo.replace_records.assert_called_once_with([], 123.45)
+            mock_repo.replace_records_and_transfers.assert_called_once_with([], [])
 
     def test_execute_does_not_modify_repository_on_import_error(self):
         mock_repo = Mock(spec=RecordRepository)
@@ -252,7 +252,7 @@ class TestImportFromCSV:
             mock_import.side_effect = ValueError("invalid csv")
             use_case = ImportFromCSV(repository=mock_repo)
 
-            with patch.object(mock_repo, "replace_records") as replace_records:
+            with patch.object(mock_repo, "replace_records_and_transfers") as replace_records:
                 with patch.object(mock_repo, "delete_all") as delete_all:
                     with patch.object(mock_repo, "save") as save_record:
                         with patch.object(mock_repo, "save_initial_balance") as save_balance:

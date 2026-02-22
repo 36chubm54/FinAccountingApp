@@ -52,18 +52,21 @@ def export_records(
     filepath: str,
     fmt: str,
     initial_balance: float = 0.0,
+    *,
+    transfers: Iterable | None = None,
 ) -> None:
+    del initial_balance  # legacy argument
     fmt = (fmt or "csv").lower()
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     try:
         if fmt == "csv":
             from utils.csv_utils import export_records_to_csv
 
-            export_records_to_csv(list(records), filepath, initial_balance)
+            export_records_to_csv(list(records), filepath, transfers=list(transfers or []))
         elif fmt in ("xlsx", "xls"):
             from utils.excel_utils import export_records_to_xlsx
 
-            export_records_to_xlsx(list(records), filepath, initial_balance)
+            export_records_to_xlsx(list(records), filepath, transfers=list(transfers or []))
         else:
             raise ValueError(f"Unsupported export format: {fmt}")
     except Exception:
@@ -74,19 +77,23 @@ def export_records(
 def export_full_backup(
     filepath: str,
     *,
-    initial_balance: float,
+    wallets=None,
     records,
     mandatory_expenses,
+    transfers=None,
+    initial_balance: float = 0.0,
 ) -> None:
+    del initial_balance  # legacy argument
     os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
     try:
         from utils.backup_utils import export_full_backup_to_json
 
         export_full_backup_to_json(
             filepath,
-            initial_balance=initial_balance,
+            wallets=list(wallets or []),
             records=list(records),
             mandatory_expenses=list(mandatory_expenses),
+            transfers=list(transfers or []),
         )
     except Exception:
         logger.exception("Failed to export full backup to %s", filepath)

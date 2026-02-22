@@ -4,19 +4,37 @@ import os
 from datetime import date as dt_date
 
 from domain.import_policy import ImportPolicy
-from domain.records import MandatoryExpenseRecord, Record
+from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 from domain.reports import Report
+from domain.transfers import Transfer
 from utils.import_core import (
     ImportSummary,
+    as_float,
     norm_key,
     parse_import_row,
     record_type_name,
+    safe_type,
 )
 
 logger = logging.getLogger(__name__)
 
 REPORT_HEADERS = ["Date", "Type", "Category", "Amount (KZT)"]
 DATA_HEADERS = [
+    "date",
+    "type",
+    "wallet_id",
+    "category",
+    "amount_original",
+    "currency",
+    "rate_at_operation",
+    "amount_kzt",
+    "description",
+    "period",
+    "transfer_id",
+    "from_wallet_id",
+    "to_wallet_id",
+]
+MANDATORY_HEADERS = [
     "date",
     "type",
     "category",
@@ -35,6 +53,217 @@ def _resolve_get_rate(currency_service):
 
         currency_service = CurrencyService()
     return currency_service.get_rate
+
+
+def _parse_transfer_row(
+    row_lc: dict[str, str],
+    *,
+    row_label: str,
+    policy: ImportPolicy,
+    get_rate,
+    next_transfer_id: int,
+    wallet_ids: set[int] | None,
+) -> tuple[list[Record] | None, Transfer | None, int, str | None]:
+    date_value = str(row_lc.get("date", "") or "").strip()
+    if not date_value:
+        return None, None, next_transfer_id, f"{row_label}: missing required field 'date'"
+
+    from_wallet_id = int(as_float(row_lc.get("from_wallet_id"), 0.0) or 0)
+    to_wallet_id = int(as_float(row_lc.get("to_wallet_id"), 0.0) or 0)
+    if from_wallet_id <= 0 or to_wallet_id <= 0:
+        return (
+            None,
+            None,
+            next_transfer_id,
+            f"{row_label}: invalid transfer wallets (from_wallet_id/to_wallet_id)",
+        )
+    if from_wallet_id == to_wallet_id:
+        return None, None, next_transfer_id, f"{row_label}: transfer wallets must be different"
+
+    if wallet_ids is not None:
+        if from_wallet_id not in wallet_ids:
+            return None, None, next_transfer_id, f"{row_label}: wallet not found ({from_wallet_id})"
+        if to_wallet_id not in wallet_ids:
+            return None, None, next_transfer_id, f"{row_label}: wallet not found ({to_wallet_id})"
+
+    if policy == ImportPolicy.LEGACY:
+        amount_original = as_float(row_lc.get("amount"), None)
+        if amount_original is None:
+            return None, None, next_transfer_id, f"{row_label}: invalid amount"
+        currency = "KZT"
+        rate_at_operation = 1.0
+        amount_kzt = float(abs(amount_original))
+        amount_original = float(abs(amount_original))
+    else:
+        amount_original = as_float(row_lc.get("amount_original"), None)
+        if amount_original is None:
+            return None, None, next_transfer_id, f"{row_label}: invalid amount_original"
+        amount_original = abs(float(amount_original))
+
+        currency = str(row_lc.get("currency", "KZT") or "KZT").strip().upper()
+        rate_at_operation = as_float(row_lc.get("rate_at_operation"), None)
+        amount_kzt = as_float(row_lc.get("amount_kzt"), None)
+
+        if policy == ImportPolicy.CURRENT_RATE:
+            if get_rate is None:
+                return (
+                    None,
+                    None,
+                    next_transfer_id,
+                    f"{row_label}: current-rate policy requires currency service",
+                )
+            try:
+                rate_at_operation = float(get_rate(currency))
+                amount_kzt = float(amount_original * rate_at_operation)
+            except Exception as exc:
+                return (
+                    None,
+                    None,
+                    next_transfer_id,
+                    f"{row_label}: failed to get current rate for {currency} ({exc})",
+                )
+
+        if rate_at_operation is None:
+            return (
+                None,
+                None,
+                next_transfer_id,
+                f"{row_label}: missing required field 'rate_at_operation'",
+            )
+        if amount_kzt is None:
+            return None, None, next_transfer_id, f"{row_label}: missing required field 'amount_kzt'"
+
+    transfer_id = int(as_float(row_lc.get("transfer_id"), 0.0) or 0)
+    if transfer_id <= 0:
+        transfer_id = next_transfer_id
+        next_transfer_id += 1
+
+    description = str(row_lc.get("description", "") or "")
+    category = str(row_lc.get("category", "Transfer") or "Transfer").strip() or "Transfer"
+
+    try:
+        transfer = Transfer(
+            id=transfer_id,
+            from_wallet_id=from_wallet_id,
+            to_wallet_id=to_wallet_id,
+            date=date_value,
+            amount_original=amount_original,
+            currency=currency,
+            rate_at_operation=float(rate_at_operation),
+            amount_kzt=float(amount_kzt),
+            description=description,
+        )
+    except Exception as exc:
+        return None, None, next_transfer_id, f"{row_label}: invalid transfer ({exc})"
+
+    expense_record = ExpenseRecord(
+        date=date_value,
+        wallet_id=from_wallet_id,
+        transfer_id=transfer.id,
+        amount_original=amount_original,
+        currency=currency,
+        rate_at_operation=float(rate_at_operation),
+        amount_kzt=float(amount_kzt),
+        category=category,
+        description=description,
+    )
+    income_record = IncomeRecord(
+        date=date_value,
+        wallet_id=to_wallet_id,
+        transfer_id=transfer.id,
+        amount_original=amount_original,
+        currency=currency,
+        rate_at_operation=float(rate_at_operation),
+        amount_kzt=float(amount_kzt),
+        category=category,
+        description=description,
+    )
+    return [expense_record, income_record], transfer, next_transfer_id, None
+
+
+def _restore_missing_transfers(records: list[Record], transfers: dict[int, Transfer]) -> None:
+    by_transfer: dict[int, list[Record]] = {}
+    for record in records:
+        if record.transfer_id is not None:
+            by_transfer.setdefault(record.transfer_id, []).append(record)
+
+    for transfer_id, linked in by_transfer.items():
+        if transfer_id in transfers:
+            continue
+        expense_record = next(
+            (record for record in linked if isinstance(record, ExpenseRecord)), None
+        )
+        income_record = next(
+            (record for record in linked if isinstance(record, IncomeRecord)), None
+        )
+        if expense_record is None or income_record is None:
+            continue
+        transfers[transfer_id] = Transfer(
+            id=transfer_id,
+            from_wallet_id=expense_record.wallet_id,
+            to_wallet_id=income_record.wallet_id,
+            date=expense_record.date,
+            amount_original=float(expense_record.amount_original or 0.0),
+            currency=str(expense_record.currency or "KZT").upper(),
+            rate_at_operation=float(expense_record.rate_at_operation),
+            amount_kzt=float(expense_record.amount_kzt or 0.0),
+            description=str(expense_record.description or ""),
+        )
+
+
+def _validate_transfer_integrity(
+    records: list[Record], transfers: dict[int, Transfer], wallet_ids: set[int] | None
+) -> list[str]:
+    errors: list[str] = []
+    by_transfer: dict[int, list[Record]] = {}
+    for record in records:
+        if record.transfer_id is not None:
+            by_transfer.setdefault(record.transfer_id, []).append(record)
+
+    for transfer_id in sorted(by_transfer):
+        if transfer_id not in transfers:
+            errors.append(f"Transfer #{transfer_id}: missing transfer aggregate")
+
+    for transfer_id, transfer in sorted(transfers.items()):
+        linked = by_transfer.get(transfer_id, [])
+        if len(linked) != 2:
+            errors.append(
+                f"Transfer integrity violated for #{transfer_id}: "
+                f"expected 2 linked records, got {len(linked)}"
+            )
+            continue
+        types = {record.type for record in linked}
+        if types != {"expense", "income"}:
+            errors.append(
+                f"Transfer integrity violated for #{transfer_id}: "
+                "requires one expense and one income"
+            )
+            continue
+        expense_record = next(
+            (record for record in linked if isinstance(record, ExpenseRecord)), None
+        )
+        income_record = next(
+            (record for record in linked if isinstance(record, IncomeRecord)), None
+        )
+        if expense_record is None or income_record is None:
+            errors.append(f"Transfer #{transfer_id}: cannot resolve linked records")
+            continue
+        if expense_record.wallet_id != transfer.from_wallet_id:
+            errors.append(f"Transfer #{transfer_id}: from_wallet_id mismatch")
+        if income_record.wallet_id != transfer.to_wallet_id:
+            errors.append(f"Transfer #{transfer_id}: to_wallet_id mismatch")
+
+        if wallet_ids is not None:
+            if transfer.from_wallet_id not in wallet_ids:
+                errors.append(
+                    f"Transfer #{transfer_id}: wallet not found ({transfer.from_wallet_id})"
+                )
+            if transfer.to_wallet_id not in wallet_ids:
+                errors.append(
+                    f"Transfer #{transfer_id}: wallet not found ({transfer.to_wallet_id})"
+                )
+
+    return errors
 
 
 def report_to_csv(report: Report, filepath: str) -> None:
@@ -83,52 +312,79 @@ def report_from_csv(filepath: str) -> Report:
 
 
 def export_records_to_csv(
-    records: list[Record], filepath: str, initial_balance: float = 0.0
+    records: list[Record],
+    filepath: str,
+    initial_balance: float = 0.0,
+    *,
+    transfers: list[Transfer] | None = None,
 ) -> None:
-    """Export full data model to CSV for backup/restore."""
-    with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=DATA_HEADERS)
-        writer.writeheader()
-        writer.writerow(
-            {
-                "date": "",
-                "type": "initial_balance",
-                "category": "",
-                "amount_original": initial_balance,
-                "currency": "KZT",
-                "rate_at_operation": 1.0,
-                "amount_kzt": initial_balance,
-                "description": "",
-                "period": "",
-            }
-        )
+    """Export full operation dataset (wallet-based model) to CSV."""
+    del initial_balance  # legacy argument, kept for compatibility
 
-        for record in records:
-            payload = {
+    transfer_map = {transfer.id: transfer for transfer in (transfers or [])}
+    rows: list[dict] = []
+
+    for record in records:
+        if record.transfer_id is not None:
+            continue
+        rows.append(
+            {
                 "date": record.date.isoformat()
                 if isinstance(record.date, dt_date)
                 else record.date,
                 "type": record_type_name(record),
+                "wallet_id": int(getattr(record, "wallet_id", 1)),
                 "category": record.category,
                 "amount_original": record.amount_original,
                 "currency": record.currency,
                 "rate_at_operation": record.rate_at_operation,
                 "amount_kzt": record.amount_kzt,
-                "description": "",
-                "period": "",
+                "description": str(getattr(record, "description", "") or ""),
+                "period": getattr(record, "period", "")
+                if isinstance(record, MandatoryExpenseRecord)
+                else "",
+                "transfer_id": "",
+                "from_wallet_id": "",
+                "to_wallet_id": "",
             }
-            if isinstance(record, MandatoryExpenseRecord):
-                payload["description"] = record.description
-                payload["period"] = record.period
-            writer.writerow(payload)
+        )
+
+    for transfer_id in sorted(transfer_map):
+        transfer = transfer_map[transfer_id]
+        rows.append(
+            {
+                "date": transfer.date.isoformat()
+                if isinstance(transfer.date, dt_date)
+                else transfer.date,
+                "type": "transfer",
+                "wallet_id": "",
+                "category": "Transfer",
+                "amount_original": transfer.amount_original,
+                "currency": transfer.currency,
+                "rate_at_operation": transfer.rate_at_operation,
+                "amount_kzt": transfer.amount_kzt,
+                "description": transfer.description,
+                "period": "",
+                "transfer_id": transfer.id,
+                "from_wallet_id": transfer.from_wallet_id,
+                "to_wallet_id": transfer.to_wallet_id,
+            }
+        )
+
+    with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=DATA_HEADERS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
 
 
 def import_records_from_csv(
     filepath: str,
     policy: ImportPolicy = ImportPolicy.FULL_BACKUP,
     currency_service=None,
+    wallet_ids: set[int] | None = None,
 ) -> tuple[list[Record], float, ImportSummary]:
-    """Import full data model from CSV with validation and per-row error report."""
+    """Import operation dataset from CSV with per-row validation."""
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"CSV file not found: {filepath}")
 
@@ -137,6 +393,9 @@ def import_records_from_csv(
     errors: list[str] = []
     skipped = 0
     imported = 0
+
+    transfers: dict[int, Transfer] = {}
+    next_transfer_id = 1
 
     get_rate = None
     if policy == ImportPolicy.CURRENT_RATE:
@@ -176,6 +435,31 @@ def import_records_from_csv(
                 else:
                     row_lc["amount"] = row_lc.get("amount_(kzt)")
 
+            row_type = safe_type(str(row_lc.get("type", "") or "").lower())
+            if row_type == "transfer":
+                parsed_records, transfer, next_transfer_id, error = _parse_transfer_row(
+                    row_lc,
+                    row_label=f"row {idx}",
+                    policy=policy,
+                    get_rate=get_rate,
+                    next_transfer_id=next_transfer_id,
+                    wallet_ids=wallet_ids,
+                )
+                if error:
+                    skipped += 1
+                    errors.append(error)
+                    logger.warning("CSV import skipped %s", error)
+                    continue
+                if transfer is not None and parsed_records is not None:
+                    if transfer.id in transfers:
+                        skipped += 1
+                        errors.append(f"row {idx}: duplicate transfer_id #{transfer.id}")
+                        continue
+                    transfers[transfer.id] = transfer
+                    records.extend(parsed_records)
+                    imported += 1
+                continue
+
             record, parsed_balance, error = parse_import_row(
                 row_lc,
                 row_label=f"row {idx}",
@@ -193,8 +477,23 @@ def import_records_from_csv(
                 continue
             if record is None:
                 continue
+            if wallet_ids is not None and record.wallet_id not in wallet_ids:
+                skipped += 1
+                errors.append(f"row {idx}: wallet not found ({record.wallet_id})")
+                logger.warning(
+                    "CSV import skipped row %s due to missing wallet %s", idx, record.wallet_id
+                )
+                continue
             imported += 1
             records.append(record)
+            if record.transfer_id is not None:
+                next_transfer_id = max(next_transfer_id, int(record.transfer_id) + 1)
+
+    _restore_missing_transfers(records, transfers)
+    integrity_errors = _validate_transfer_integrity(records, transfers, wallet_ids)
+    if integrity_errors:
+        skipped += len(integrity_errors)
+        errors.extend(integrity_errors)
 
     logger.info(
         "CSV import completed: imported=%s skipped=%s file=%s",
@@ -207,7 +506,7 @@ def import_records_from_csv(
 
 def export_mandatory_expenses_to_csv(expenses: list[MandatoryExpenseRecord], filepath: str) -> None:
     with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=DATA_HEADERS)
+        writer = csv.DictWriter(csvfile, fieldnames=MANDATORY_HEADERS)
         writer.writeheader()
         for expense in expenses:
             writer.writerow(

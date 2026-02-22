@@ -104,14 +104,14 @@ def test_import_records_from_csv_xlsx_roundtrip():
         export_records_to_xlsx(report.records(), str(xlsx_path), report.initial_balance)
         records_xlsx, initial_balance_xlsx, _ = importers.import_records_from_xlsx(str(xlsx_path))
         assert len(records_xlsx) == len(report.records())
-        assert initial_balance_xlsx == report.initial_balance
+        assert initial_balance_xlsx == 0.0
 
         from utils.csv_utils import export_records_to_csv
 
         export_records_to_csv(report.records(), str(csv_path), report.initial_balance)
         records_csv, initial_balance_csv, _ = importers.import_records_from_csv(str(csv_path))
         assert len(records_csv) == len(report.records())
-        assert initial_balance_csv == report.initial_balance
+        assert initial_balance_csv == 0.0
     finally:
         for p in (csv_path, xlsx_path):
             if p.exists():

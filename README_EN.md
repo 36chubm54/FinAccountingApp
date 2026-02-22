@@ -63,9 +63,9 @@ After running `python main.py`, a window will open with control tabs and an info
 Tabs and actions:
 
 - `Infographics` — displays infographics (pie charts, histograms) with the ability to filter by month/year.
-- `Operations` — adding/deleting records, setting the initial balance.
+- `Operations` — management of records and transfers (adding, deleting, importing/exporting).
 - `Reports` — report generation, export.
-- `Settings` — management of mandatory expenses.
+- `Settings` — management of mandatory expenses and wallets.
 
 Infographics:
 
@@ -87,6 +87,15 @@ Income is displayed in green, expenses in red. For a pie chart, small categories
 
 The amount is converted into the base currency `KZT` at the current rates of the currency service. Once an entry is added, the list is automatically updated.
 
+### Adding a translation
+
+1. Open the `Operations` tab.
+2. In the `Add transfer` block, select the transfer type (`Transfer`).
+3. Enter the date in the format `YYYY-MM-DD` (the date cannot be in the future).
+4. Enter the amount.
+5. Specify the source and recipient of the wallets.
+6. Click `Save`.
+
 ### Report generation
 
 1. Open the `Reports` tab.
@@ -94,10 +103,11 @@ The amount is converted into the base currency `KZT` at the current rates of the
     - `Period` — period start (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`).
     - `Period end` — period end (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`).
     - `Category` — filter by category.
-3. Enable options:
+3. Choose one wallet for generating the report on it or all wallets.
+4. Enable options:
     - `Group by category` — grouping by category.
     - `Display as table` — table format.
-4. Click `Generate`.
+5. Click `Generate`.
 
 At the bottom, an additional table “Monthly Income/Expense Summary” is displayed for the selected year and months.
 
@@ -119,113 +129,17 @@ Export report:
 - For `YYYY-MM-DD`, period start is the provided date.
 - The period filter cannot point to a future date (for all supported formats).
 
-### Wallet Support (Phase 1)
-
-- Added `Wallet` domain entity (`id`, `name`, `currency`, `initial_balance`, `system`).
-- Added a system wallet for compatibility:
-  `id=1`, `name="Main wallet"`, `system=True`.
-- Legacy migration rules:
-  move `global initial_balance` into `wallet.initial_balance`,
-  assign `wallet_id=1` to existing records,
-  set root JSON `initial_balance` to `0`.
-- Transfer is intentionally not implemented in this phase.
-- User behavior remains unchanged:
-  no wallet selector in the UI yet, and new records are auto-assigned to `wallet_id=1`.
-
-### Wallets, Transfers and Commissions (Phase 2)
-
-- Added `allow_negative` to `Wallet`.
-- Added `Transfer` aggregate (stored separately from `Record`).
-- Implemented transfer as a double-entry operation:
-  - `Expense` in `from_wallet`
-  - `Income` in `to_wallet`
-  - both records linked by the same `transfer_id`.
-- Implemented transfer commission as a separate expense:
-  - category `Commission`
-  - `wallet_id = from_wallet`
-  - reduces net worth and is included in expenses.
-- Added dynamic `net worth` calculation:
-  - supports both `fixed` and `current` modes.
-- Financial invariants:
-  - transfer without commission keeps total wallet value unchanged;
-  - commission reduces total value exactly by commission amount;
-  - global report excludes transfers from net profit while commission remains an expense.
-
-### Wallet Operations Binding and Safe Delete (Phase 3)
-
-- Income and expense operations now require `wallet_id`.
-- Expense creation enforces `allow_negative`:
-  - with `allow_negative=False`, expenses that make balance negative are rejected,
-  - with `allow_negative=True`, negative balances are allowed.
-- Legacy data migration:
-  - records without `wallet_id` are assigned `wallet_id=1` (Main wallet),
-  - migration is idempotent and safe for repeated runs.
-- Wallet soft delete:
-  - introduced `is_active`,
-  - deletion is allowed only when wallet balance is zero,
-  - inactive wallets are hidden from GUI selection lists,
-  - historical records stay intact.
-- Net worth is computed as the sum of active wallet balances.
-- Formula:
-  `opening_balance = initial_balance + sum(signed_amount for date < start_date)`.
-- Filtered reports use `opening balance` and the row label `Opening balance`.
-- Unfiltered reports use `initial balance` and the row label `Initial balance`.
-- `CSV/XLSX/PDF` exports follow the same rule and display the correct balance label.
-- Period validation is applied to both start and end values:
-  both must match `YYYY`, `YYYY-MM`, or `YYYY-MM-DD`, must not be in the future, and `end >= start`.
-- This is required for financial correctness: period totals must start from the real balance at the beginning of that period.
-
-### Transfer Aggregate Integrity and Cascade Delete (Phase 3.1)
-
-- `Transfer` is treated as an aggregate and exists only with exactly two linked records:
-  - `Record (expense)` in source wallet
-  - `Record (income)` in target wallet
-- Partial deletion of transfer-linked records is forbidden:
-  - deleting a record with `transfer_id` triggers cascade transfer deletion.
-- Added atomic `delete_transfer(transfer_id)` use case:
-  - removes both transfer records,
-  - removes transfer entity,
-  - also removes related commission record when it is linked by transfer marker in `description`.
-- JSON load now validates transfer integrity:
-  - dangling `record.transfer_id` is forbidden,
-  - each transfer must have exactly 2 linked records (`income` + `expense`),
-  - violations raise `DomainError`.
-- Added logging for:
-  - transfer record creation,
-  - transfer deletion,
-  - wallet creation,
-  - wallet soft delete.
-
-Transfer integrity rule:
-`Transfer exists if and only if exactly two related records exist.`
-
-Domain model snippet:
-
-```text
-Transfer
- ├── Record (expense)
- └── Record (income)
-```
-
 ### Deleting an entry
 
 1. Open the `Operations` tab.
 2. Select an entry from the list.
-3. Click `Delete Selected`. A deletion message appears with the index of the entry.
+3. Click `Delete Selected`. A deletion message appears with the index of the entry or ID of the transfer.
 
 ### Delete all entries
 
 1. Open the `Operations` tab.
 2. In the `List of operations` block, select an entry from the list.
 3. Click `Delete All Records` and confirm the deletion. The entries will be permanently deleted and the list of entries will be updated.
-
-### Setting the initial balance
-
-1. Open the `Settings` tab.
-2. Enter the amount (can be negative).
-3. Confirm by clicking `Save`.
-
-The opening balance is taken into account in the final balance sheet.
 
 ### Managing mandatory expenses
 
@@ -234,7 +148,7 @@ In the `Settings` tab, in the `Mandatory Expenses` block, the following operatio
 - `Add` — add a mandatory expense.
 - `Delete` — delete the selected one.
 - `Delete All` — delete everything.
-- `Add to Report` — add the selected expense to the report with the specified date.
+- `Add to Records` — add the selected expense to records with the specified date.
 - File format selector for import/export.
 - `Import` — import of mandatory expenses.
 - `Export` — export of mandatory expenses.
@@ -254,13 +168,17 @@ Import is performed via `Import` in the `Operations` tab.
 
 Formats:
 
-- `CSV`, `XLSX`, `JSON` (for Full Backup).
+- `CSV`, `XLSX`.
 - All existing entries are replaced with data from the file.
 
 Data format:
 
 - **CSV/XLSX data (import/export):**  
-  `date,type,category,amount_original,currency,rate_at_operation,amount_kzt,description,period`
+  `date,type,wallet_id,category,amount_original,currency,rate_at_operation,amount_kzt,description,period,transfer_id,from_wallet_id,to_wallet_id`.
+- `wallet_id` — identifier of the wallet in which the operation was made.
+- `transfer_id` — identifier of the transfer between wallets.
+- `from_wallet_id` — identifier of the source wallet in a transfer.
+- `to_wallet_id` — identifier of the target wallet in a transfer.
 - Legacy import is supported (old files with the `amount` field or the `Amount (KZT)` column).
 - All existing entries are replaced with data from the file.
 
@@ -275,10 +193,10 @@ There are 3 modes available for importing records:
 
 - `Full Backup` (`ImportPolicy.FULL_BACKUP`)  
   Used for full import with a fixed transaction rate. Expected string format:
-  `date,type,category,amount_original,currency,rate_at_operation,amount_kzt,description,period`.
-- `Import Records (Current Rate)` (`ImportPolicy.CURRENT_RATE`)  
+  `date,type,wallet_id,category,amount_original,currency,rate_at_operation,amount_kzt,description,period,transfer_id,from_wallet_id,to_wallet_id`.
+- `Current Rate` (`ImportPolicy.CURRENT_RATE`)  
   For each imported line, the rate is taken at the time of import through `CurrencyService.get_rate(currency)`, and `rate_at_operation` and `amount_kzt` are recalculated and fixed again.
-- `Legacy Import` (`ImportPolicy.LEGACY`)  
+- `Legacy Import` (`ImportPolicy.LEGACY`)
   The old `date,type,category,amount` format is automatically migrated to the new one:
   `currency="KZT"`, `rate_at_operation=1.0`, `amount_kzt=amount`.
 
@@ -289,21 +207,24 @@ All modes perform line-by-line validation and generate a report:
 
 Full backup is implemented in `JSON` format:
 
-- Fields: `initial_balance`, `records`, `mandatory_expenses`.
+- Fields: `wallets`, `records`, `mandatory_expenses` and `transfers`.
 - The `Settings` tab contains the following buttons:
   - `Export Full Backup`
   - `Import Full Backup`
 
 Backup restores:
 
-- initial balance;
-- all records with fields `amount_original/currency/rate_at_operation/amount_kzt`;
-- all mandatory expenses with `description/period`.
+- wallets with fields `id/name/currency/balance`;
+- all records with fields `type/date/wallet_id/transfer_id/category/amount_original/currency/rate_at_operation/amount_kzt/category/description`;
+- all mandatory expenses with `description/period`;
+- all transfers between wallets.
 
 ### FX Revaluation
 
 `Report` supports:
 
+- `net_worth_fixed()` — net asset value at the time of recording;
+- `net_worth_current()` — net asset value at the current rate;
 - `total_fixed()` — accounting total at the exchange rate on the transaction date;
 - `total_current(currency_service)` — total at the current rate;
 - `fx_difference(currency_service)` — revaluation (`current - fixed`);
@@ -327,7 +248,6 @@ Format:
 
 ```json
 {
-  "initial_balance": 50000.0,
   "records": [
     {
       "type": "income",
@@ -336,7 +256,7 @@ Format:
       "currency": "USD",
       "rate_at_operation": 500.0,
       "amount_kzt": 350000.0,
-      "category": "Зарплата"
+      "category": "Salary"
     },
     {
       "type": "expense",
@@ -345,7 +265,7 @@ Format:
       "currency": "KZT",
       "rate_at_operation": 1.0,
       "amount_kzt": 25000.0,
-      "category": "Продукты"
+      "category": "Products"
     },
     {
       "type": "mandatory_expense",
@@ -461,7 +381,7 @@ Below are the key classes and functions synchronized with the actual code.
 
 `domain/errors.py`
 
-- `DomainError` — ошибка домена (выбрасывается при нарушении доменных инвариантов).
+- `DomainError` — domain error (thrown when domain invariants are violated).
 
 `domain/import_policy.py`
 
@@ -546,31 +466,6 @@ Below are the key classes and functions synchronized with the actual code.
 - `RecordRepository` — repository interface.
 - `JsonFileRecordRepository(file_path="records.json")` — JSON storage.
 
-Methods:
-
-- `load_wallets()`.
-- `load_active_wallets()`.
-- `create_wallet(name, currency, initial_balance, allow_negative=False)`.
-- `save_wallet(wallet)`.
-- `soft_delete_wallet(wallet_id)`.
-- `get_system_wallet()`.
-- `save_transfer(transfer)`.
-- `load_transfers()`.
-- `save(record)`.
-- `load_all()`.
-- `delete_by_index(index)`.
-- `delete_all()`.
-- `save_initial_balance(balance)`.
-- `load_initial_balance()`.
-- `save_mandatory_expense(expense)`.
-- `load_mandatory_expenses()`.
-- `delete_mandatory_expense_by_index(index)`.
-- `delete_all_mandatory_expenses()`.
-- `replace_records(records, initial_balance)`
-- `replace_mandatory_expenses(expenses)`
-- `replace_records_and_transfers(records, transfers)`
-- `replace_all_data(initial_balance, records, mandatory_expenses)`
-
 ### GUI
 
 `gui/tkinter_gui.py`
@@ -585,48 +480,24 @@ Methods:
 - Monthly aggregates and charts are always calculated in fixed mode (`amount_kzt`).
 - The `Settings` tab allows managing wallets and mandatory expenses.
 
-Methods:
+`gui/controllers`
 
-- `infographics_tab(parent)`.
-- `operations_tab(parent)`:
-  - `save_record()`.
-  - `delete_selected()`.
-  - `delete_all()`.
-  - `create_transfer()`.
-  - `import_records_data()`.
-  - `export_records_data()`.
-- `reports_tab(parent)`.
-  - `generate()`.
-  - `export_any()`.
-- `settings_tab(parent)`.
-  - `save_balance()`.
-  - `create_wallet()`.
-  - `refresh_wallets()`.
-  - `delete_wallet()`.
-  - `refresh_mandatory()`.
-  - `add_mandatory_inline()`.
-  - `add_to_report_inline()`.
-  - `delete_mandatory()`.
-  - `delete_all_mandatory()`.
-  - `import_mand()`.
-  - `export_mand()`.
-  - `import_backup()`.
-  - `export_backup()`.
+- `FinanceController` — class for managing the business logic of the application.
 
 `gui/exporters.py`
 
 - `export_report(report, filepath, fmt)`.
 - `export_mandatory_expenses(expenses, filepath, fmt)`.
-- `export_records(records, filepath, fmt, initial_balance)`.
-- `export_full_backup(filepath, initial_balance, records, mandatory_expenses)`.
+- `export_records(records, filepath, fmt, initial_balance=0.0, transfers=None)`.
+- `export_full_backup(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0)`.
 
 `gui/importers.py`
 
-- `import_records_from_csv(filepath, policy, currency_service)` -> `(records, initial_balance, (imported, skipped, errors))`.
-- `import_records_from_xlsx(filepath, policy, currency_service)` -> `(records, initial_balance, (imported, skipped, errors))`.
+- `import_records_from_csv(filepath, policy, currency_service, wallet_ids)` -> `(records, initial_balance, (imported, skipped, errors))`.
+- `import_records_from_xlsx(filepath, policy, currency_service, wallet_ids)` -> `(records, initial_balance, (imported, skipped, errors))`.
 - `import_mandatory_expenses_from_csv(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`.
 - `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`.
-- `import_full_backup(filepath)` -> `(initial_balance, records, mandatory_expenses, (imported, skipped, errors))`.
+- `import_full_backup(filepath)` -> `(wallets, records, mandatory_expenses, transfers, (imported, skipped, errors))`.
 
 `gui/helpers.py`
 
@@ -636,15 +507,15 @@ Methods:
 
 `utils/backup.py`
 
-- `create_full_backup(filepath, initial_balance, records, mandatory_expenses)`.
-- `load_full_backup(filepath)`.
+- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0)`.
+- `import_full_backup_from_json(filepath)`.
 
 `utils/csv_utils.py`
 
 - `report_to_csv(report, filepath)`.
 - `report_from_csv(filepath)`.
-- `export_records_to_csv(records, filepath, initial_balance)`.
-- `import_records_from_csv(filepath, policy, currency_service)`.
+- `export_records_to_csv(records, filepath, initial_balance=0.0, transfers=None)`.
+- `import_records_from_csv(filepath, policy, currency_service, wallet_ids=None)`.
 - `export_mandatory_expenses_to_csv(expenses, filepath)`.
 - `import_mandatory_expenses_from_csv(filepath, policy, currency_service)`.
 
@@ -652,8 +523,8 @@ Methods:
 
 - `report_to_xlsx(report, filepath)`.
 - `report_from_xlsx(filepath)`.
-- `export_records_to_xlsx(records, filepath, initial_balance)`.
-- `import_records_from_xlsx(filepath, policy, currency_service)`.
+- `export_records_to_xlsx(records, filepath, initial_balance=0.0, transfers=None)`.
+- `import_records_from_xlsx(filepath, policy, currency_service, wallet_ids=None)`.
 - `export_mandatory_expenses_to_xlsx(expenses, filepath)`.
 - `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)`.
 
@@ -754,7 +625,8 @@ project/
     ├── test_transfer_integrity.py
     ├── test_wallet_phase1.py
     ├── test_wallet_phase2.py
-    └── test_wallet_phase3.py
+    ├── test_wallet_phase3.py
+    └── test_phase4_import_export.py
 ```
 
 ---

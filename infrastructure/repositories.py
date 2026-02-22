@@ -121,7 +121,7 @@ class RecordRepository(ABC):
 
     @abstractmethod
     def replace_records(self, records: list[Record], initial_balance: float) -> None:
-        """Atomically replace all records and initial balance."""
+        """Atomically replace all records and (legacy) system-wallet balance."""
         pass
 
     @abstractmethod
@@ -133,9 +133,11 @@ class RecordRepository(ABC):
     def replace_all_data(
         self,
         *,
-        initial_balance: float,
+        initial_balance: float = 0.0,
+        wallets: list[Wallet] | None = None,
         records: list[Record],
         mandatory_expenses: list[MandatoryExpenseRecord],
+        transfers: list[Transfer] | None = None,
     ) -> None:
         """Atomically replace full repository dataset."""
         pass
@@ -244,7 +246,6 @@ class JsonFileRecordRepository(RecordRepository):
                     self._file_path,
                 )
                 return {
-                    "initial_balance": 0.0,
                     "wallets": [self._build_system_wallet("KZT", 0.0)],
                     "records": [],
                     "mandatory_expenses": [],
@@ -253,11 +254,10 @@ class JsonFileRecordRepository(RecordRepository):
         if isinstance(data, list):
             # Migrate old format
             logger.info("Migrating JSON repository format: list -> object")
-            data = {"initial_balance": 0.0, "records": data}
+            data = {"records": data}
         if not isinstance(data, dict):
             logger.info("Migrating JSON repository format: invalid root -> default object")
             data = {
-                "initial_balance": 0.0,
                 "wallets": [self._build_system_wallet("KZT", 0.0)],
                 "records": [],
                 "mandatory_expenses": [],
@@ -265,11 +265,6 @@ class JsonFileRecordRepository(RecordRepository):
             }
 
         migrated = False
-        if "initial_balance" not in data or not isinstance(
-            data.get("initial_balance"), (int, float)
-        ):
-            data["initial_balance"] = 0.0
-            migrated = True
         if "records" not in data or not isinstance(data.get("records"), list):
             data["records"] = []
             migrated = True
@@ -280,7 +275,7 @@ class JsonFileRecordRepository(RecordRepository):
             data["transfers"] = []
             migrated = True
 
-        legacy_initial_balance = float(data.get("initial_balance", 0.0))
+        legacy_initial_balance = float(self._as_float(data.get("initial_balance"), 0.0))
         wallets = data.get("wallets")
         if not isinstance(wallets, list):
             wallets = []
@@ -290,7 +285,6 @@ class JsonFileRecordRepository(RecordRepository):
             base_currency = self._resolve_base_currency(data["records"])
             wallets = [self._build_system_wallet(base_currency, legacy_initial_balance)]
             data["wallets"] = wallets
-            data["initial_balance"] = 0.0
             migrated = True
         else:
             normalized_wallets: list[dict] = []
@@ -332,7 +326,10 @@ class JsonFileRecordRepository(RecordRepository):
                         break
                 migrated = True
             data["wallets"] = wallets
-            data["initial_balance"] = 0.0
+
+        if "initial_balance" in data:
+            data.pop("initial_balance", None)
+            migrated = True
 
         for item in data["records"]:
             if isinstance(item, dict) and "wallet_id" not in item:
@@ -365,12 +362,14 @@ class JsonFileRecordRepository(RecordRepository):
         return data
 
     def _save_data(self, data: dict) -> None:
+        payload = dict(data)
+        payload.pop("initial_balance", None)
         with self._lock:
             directory = os.path.dirname(self._file_path) or "."
             fd, tmp_path = tempfile.mkstemp(prefix=".records_", suffix=".json", dir=directory)
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2, ensure_ascii=False)
+                    json.dump(payload, f, indent=2, ensure_ascii=False)
                 os.replace(tmp_path, self._file_path)
             finally:
                 try:
@@ -665,7 +664,6 @@ class JsonFileRecordRepository(RecordRepository):
                 base_currency = self._resolve_base_currency(data.get("records", []))
                 wallets.insert(0, self._build_system_wallet(base_currency, float(balance)))
             data["wallets"] = wallets
-            data["initial_balance"] = 0.0
             self._save_data(data)
 
     def load_initial_balance(self) -> float:
@@ -731,7 +729,6 @@ class JsonFileRecordRepository(RecordRepository):
                 base_currency = self._resolve_base_currency(data.get("records", []))
                 wallets.insert(0, self._build_system_wallet(base_currency, float(initial_balance)))
             data["wallets"] = wallets
-            data["initial_balance"] = 0.0
             data["records"] = []
             for record in records:
                 if isinstance(record, MandatoryExpenseRecord):
@@ -770,23 +767,37 @@ class JsonFileRecordRepository(RecordRepository):
     def replace_all_data(
         self,
         *,
-        initial_balance: float,
+        initial_balance: float = 0.0,
+        wallets: list[Wallet] | None = None,
         records: list[Record],
         mandatory_expenses: list[MandatoryExpenseRecord],
+        transfers: list[Transfer] | None = None,
     ) -> None:
         with self._lock:
-            base_currency = "KZT"
-            for record in records:
-                currency = str(getattr(record, "currency", "") or "").upper()
-                if currency:
-                    base_currency = currency
-                    break
+            normalized_wallets = list(wallets or [])
+            if not normalized_wallets:
+                base_currency = "KZT"
+                for record in records:
+                    currency = str(getattr(record, "currency", "") or "").upper()
+                    if currency:
+                        base_currency = currency
+                        break
+                normalized_wallets = [
+                    Wallet(
+                        id=SYSTEM_WALLET_ID,
+                        name="Main wallet",
+                        currency=base_currency,
+                        initial_balance=float(initial_balance),
+                        system=True,
+                        allow_negative=False,
+                        is_active=True,
+                    )
+                ]
             data = {
-                "initial_balance": 0.0,
-                "wallets": [self._build_system_wallet(base_currency, float(initial_balance))],
+                "wallets": [self._wallet_to_dict(wallet) for wallet in normalized_wallets],
                 "records": [],
                 "mandatory_expenses": [],
-                "transfers": [],
+                "transfers": [self._transfer_to_dict(transfer) for transfer in (transfers or [])],
             }
             for record in records:
                 if isinstance(record, MandatoryExpenseRecord):
@@ -798,4 +809,5 @@ class JsonFileRecordRepository(RecordRepository):
                 payload = self._record_to_dict(expense, "mandatory_expense")
                 payload.pop("type", None)
                 data["mandatory_expenses"].append(payload)
+            self._validate_transfer_integrity(data)
             self._save_data(data)

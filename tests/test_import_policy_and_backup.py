@@ -3,6 +3,7 @@ import tempfile
 
 from domain.import_policy import ImportPolicy
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
+from domain.wallets import Wallet
 from utils.backup_utils import export_full_backup_to_json, import_full_backup_from_json
 from utils.csv_utils import import_records_from_csv
 
@@ -131,16 +132,25 @@ def test_full_backup_roundtrip():
     try:
         export_full_backup_to_json(
             path,
-            initial_balance=123.0,
+            wallets=[
+                Wallet(
+                    id=1,
+                    name="Main wallet",
+                    currency="KZT",
+                    initial_balance=123.0,
+                    system=True,
+                )
+            ],
             records=records,
             mandatory_expenses=mandatory,
         )
-        initial_balance, imported_records, imported_mandatory, summary = (
+        wallets, imported_records, imported_mandatory, transfers, summary = (
             import_full_backup_from_json(path)
         )
-        assert initial_balance == 123.0
+        assert wallets[0].initial_balance == 123.0
         assert len(imported_records) == 1
         assert len(imported_mandatory) == 1
+        assert transfers == []
         assert summary[1] == 0
     finally:
         os.unlink(path)

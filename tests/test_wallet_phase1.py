@@ -32,7 +32,7 @@ def test_wallet_migration_preserves_balance():
 
     with open(path, encoding="utf-8") as fp:
         migrated = json.load(fp)
-    assert migrated["initial_balance"] == 0.0
+    assert "initial_balance" not in migrated
     assert migrated["wallets"][0]["id"] == 1
     assert migrated["wallets"][0]["initial_balance"] == 120.0
     assert all(item.get("wallet_id") == 1 for item in migrated["records"])

@@ -63,9 +63,9 @@ python main.py
 Вкладки и действия:
 
 - `Infographics` — отображение инфографики (круговая диаграмма, гистограммы) с возможностью фильтрации по месяцу/году.
-- `Operations` — добавление/удаление записей, установка начального остатка.
+- `Operations` — управление записями и переводами (добавление, удаление, импорт/экспорт).
 - `Reports` — генерация отчётов, экспорт.
-- `Settings` — управление обязательными расходами.
+- `Settings` — управление обязательными расходами и кошельками.
 
 Инфографика:
 
@@ -87,6 +87,15 @@ python main.py
 
 Сумма конвертируется в базовую валюту `KZT` по текущим курсам сервиса валют. После добавления записи список автоматически обновляется.
 
+### Добавление перевода
+
+1. Откройте вкладку `Operations`.
+2. В блоке `Add transfer` выберите тип перевода (`Transfer`).
+3. Укажите дату в формате `YYYY-MM-DD` (дата не может быть в будущем).
+4. Введите сумму.
+5. Укажите источник и получатель кошельков.
+6. Нажмите `Save`.
+
 ### Генерация отчёта
 
 1. Откройте вкладку `Reports`.
@@ -94,10 +103,11 @@ python main.py
     - `Period` — начало периода (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`).
     - `Period end` — конец периода (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`).
     - `Category` — фильтр по категории.
-3. Включите опции:
+3. Выберите один кошелёк для генерации отчёта по нему или все кошельки.
+4. Включите опции:
     - `Group by category` — группировка по категориям.
     - `Display as table` — табличный формат.
-4. Нажмите `Generate`.
+5. Нажмите `Generate`.
 
 Внизу отображается дополнительная таблица «Monthly Income/Expense Summary» для выбранного года и месяцев.
 
@@ -119,113 +129,17 @@ python main.py
 - Для фильтра `YYYY-MM-DD` старт периода: указанная дата.
 - Фильтр периода не может указывать на будущую дату (для всех форматов).
 
-### Wallet Support (Phase 1)
-
-- В домен добавлена сущность `Wallet` (`id`, `name`, `currency`, `initial_balance`, `system`).
-- Для совместимости создан системный кошелёк:
-  `id=1`, `name="Main wallet"`, `system=True`.
-- При миграции старых данных:
-  `global initial_balance` переносится в `wallet.initial_balance`,
-  всем существующим записям назначается `wallet_id=1`,
-  поле `initial_balance` в корне JSON устанавливается в `0`.
-- Transfer на этом этапе не реализован.
-- Поведение интерфейса для пользователя не изменилось:
-  выбор кошелька в форме не добавлялся, новые записи автоматически относятся к `wallet_id=1`.
-
-### Wallets, Transfers and Commissions (Phase 2)
-
-- Добавлено поле `allow_negative` в `Wallet`.
-- Добавлена сущность `Transfer` (aggregate), которая хранится отдельно от `Record`.
-- Transfer реализован как двойная запись:
-  - `Expense` в `from_wallet`
-  - `Income` в `to_wallet`
-  - обе записи связаны через `transfer_id`.
-- Комиссия transfer реализована как отдельный расход:
-  - категория `Commission`
-  - `wallet_id = from_wallet`
-  - уменьшает net worth и учитывается в расходах.
-- Введён расчёт `net worth` (динамический, без хранения):
-  - `fixed` и `current` режимы.
-- Финансовые инварианты:
-  - transfer без комиссии не меняет суммарную стоимость по кошелькам;
-  - комиссия уменьшает суммарную стоимость ровно на свою сумму;
-  - в глобальном отчёте transfer исключается из net profit, комиссия остаётся расходом.
-
-### Wallet Operations Binding and Safe Delete (Phase 3)
-
-- Доходы и расходы теперь создаются с обязательным `wallet_id`.
-- Для расходов соблюдается `allow_negative`:
-  - при `allow_negative=False` расход с уходом в минус отклоняется,
-  - при `allow_negative=True` разрешается отрицательный баланс.
-- Миграция старых данных:
-  - записи без `wallet_id` получают `wallet_id=1` (Main wallet),
-  - миграция идемпотентна и безопасна при повторном запуске.
-- Soft delete кошельков:
-  - добавлен флаг `is_active`,
-  - удаление возможно только при нулевом балансе,
-  - неактивные кошельки скрываются из списков выбора в GUI,
-  - исторические записи сохраняются.
-- Net worth считается как сумма балансов активных кошельков.
-- Формула:
-  `opening_balance = initial_balance + sum(signed_amount for date < start_date)`.
-- В отчётах с фильтром используется `opening_balance` и подпись `Opening balance`.
-- В отчётах без фильтра используется `initial balance` и подпись `Initial balance`.
-- Экспорт `CSV/XLSX/PDF` отражает ту же логику: корректный стартовый баланс и правильная подпись в строке баланса.
-- Валидация фильтра периода применяется и к началу, и к концу периода:
-  оба значения должны быть корректными датами в формате `YYYY`, `YYYY-MM` или `YYYY-MM-DD`, не в будущем, и `end >= start`.
-- Это критично для финансовой корректности: итог периода считается от реального баланса на начало периода, а не от начала всей истории.
-
-### Transfer Aggregate Integrity and Cascade Delete (Phase 3.1)
-
-- `Transfer` рассматривается как агрегат и существует только вместе с двумя связанными записями:
-  - `Record (expense)` в source wallet
-  - `Record (income)` в target wallet
-- Частичное удаление transfer-записей запрещено:
-  - при удалении записи с `transfer_id` выполняется каскадное удаление всего `Transfer`.
-- Добавлен use-case `delete_transfer(transfer_id)` с атомарным удалением:
-  - удаляются обе transfer-записи,
-  - удаляется сам transfer,
-  - если у transfer есть комиссия, связанная маркером в `description`, она также удаляется.
-- При загрузке JSON выполняется валидация целостности transfer:
-  - висячие `record.transfer_id` запрещены,
-  - для каждого transfer должно быть ровно 2 связанные записи (`income` + `expense`),
-  - при нарушении выбрасывается `DomainError`.
-- Добавлено логирование:
-  - создания transfer-записей,
-  - удаления transfer,
-  - создания кошелька,
-  - soft-delete кошелька.
-
-Transfer integrity rule:
-`Transfer exists if and only if exactly two related records exist.`
-
-Доменная схема:
-
-```text
-Transfer
- ├── Record (expense)
- └── Record (income)
-```
-
 ### Удаление записи
 
 1. Откройте вкладку `Operations`.
 2. Выберите запись из списка.
-3. Нажмите `Delete Selected`. Появится сообщение об удалении с индексом записи.
+3. Нажмите `Delete Selected`. Появится сообщение об удалении с индексом записи или ID перевода.
 
 ### Удаление всех записей
 
 1. Откройте вкладку `Operations`.
 2. В блоке `List of operations` выберите запись из списка.
 3. Нажмите `Delete All Records` и подтвердите удаление. Записи будут удалены без возможности восстановления, а список записей обновится.
-
-### Установка начального остатка
-
-1. Откройте вкладку `Settings`.
-2. Введите сумму (может быть отрицательной).
-3. Подтвердите, нажав `Save`.
-
-Начальный остаток учитывается в итоговом балансе отчётов.
 
 ### Управление обязательными расходами
 
@@ -234,7 +148,7 @@ Transfer
 - `Add` — добавить обязательный расход.
 - `Delete` — удалить выбранный.
 - `Delete All` — удалить все.
-- `Add to Report` — добавить выбранный расход в отчёт с указанной датой.
+- `Add to Records` — добавить выбранный расход в записи с указанной датой.
 - Селектор формата файла для импорта/экспорта.
 - `Import` — импорт обязательных расходов.
 - `Export` — экспорт обязательных расходов.
@@ -254,13 +168,17 @@ Transfer
 
 Форматы:
 
-- `CSV`, `XLSX`, `JSON` (для Full Backup).
+- `CSV`, `XLSX`.
 - Все существующие записи заменяются данными из файла.
 
 Формат данных:
 
 - **CSV/XLSX данных (import/export):**  
-  `date,type,category,amount_original,currency,rate_at_operation,amount_kzt,description,period`
+  `date,type,wallet_id,category,amount_original,currency,rate_at_operation,amount_kzt,description,period,transfer_id,from_wallet_id,to_wallet_id`.
+- `wallet_id` — идентификатор кошелька, в котором была совершена операция.
+- `transfer_id` — идентификатор перевода между кошельками.
+- `from_wallet_id` — идентификатор исходного кошелька при переводе.
+- `to_wallet_id` — идентификатор целевого кошелька при переводе.
 - Поддерживается legacy-импорт (старые файлы с полем `amount` или с колонкой `Amount (KZT)`).
 - Все существующие записи заменяются данными из файла.
 
@@ -275,8 +193,8 @@ Transfer
 
 - `Full Backup` (`ImportPolicy.FULL_BACKUP`)  
   Используется для полного импорта с фиксированным курсом операции. Ожидаемый формат строк:
-  `date,type,category,amount_original,currency,rate_at_operation,amount_kzt,description,period`.
-- `Import Records (Current Rate)` (`ImportPolicy.CURRENT_RATE`)  
+  `date,type,wallet_id,category,amount_original,currency,rate_at_operation,amount_kzt,description,period,transfer_id,from_wallet_id,to_wallet_id`.
+- `Current Rate` (`ImportPolicy.CURRENT_RATE`)
   Для каждой импортируемой строки курс берётся на момент импорта через `CurrencyService.get_rate(currency)`, а `rate_at_operation` и `amount_kzt` пересчитываются и фиксируются заново.
 - `Legacy Import` (`ImportPolicy.LEGACY`)  
   Старый формат `date,type,category,amount` автоматически мигрируется в новый:
@@ -289,21 +207,24 @@ Transfer
 
 Полный backup реализован в формате `JSON`:
 
-- Поля: `initial_balance`, `records`, `mandatory_expenses`.
+- Поля: `wallets`, `records`, `mandatory_expenses` и `transfers`.
 - Вкладка `Settings` содержит кнопки:
   - `Export Full Backup`
   - `Import Full Backup`
 
 Backup восстанавливает:
 
-- начальный баланс;
-- все записи с полями `amount_original/currency/rate_at_operation/amount_kzt`;
-- все обязательные расходы с `description/period`.
+- кошельки с полями `id/name/currency/balance`;
+- все записи с полями `type/date/wallet_id/transfer_id/category/amount_original/currency/rate_at_operation/amount_kzt/category/description`;
+- все обязательные расходы с `description/period`;
+- все переводы между кошельками.
 
 ### FX Revaluation
 
 `Report` поддерживает:
 
+- `net_worth_fixed()` — чистая стоимость активов на момент записи;
+- `net_worth_current()` — чистая стоимость активов по текущему курсу;
 - `total_fixed()` — бухгалтерский итог по курсу на дату операции;
 - `total_current(currency_service)` — итог по текущему курсу;
 - `fx_difference(currency_service)` — переоценка (`current - fixed`);
@@ -327,7 +248,6 @@ Backup восстанавливает:
 
 ```json
 {
-  "initial_balance": 50000.0,
   "records": [
     {
       "type": "income",
@@ -435,7 +355,7 @@ Backup восстанавливает:
 - `infrastructure/` — хранилище данных (JSON‑репозиторий).
 - `utils/` — импорт/экспорт и подготовка данных для графиков.
 - `gui/` — GUI слой (Tkinter).
-- `web/` — автономное веб‑приложение.
+- `web/` — автономное веб-приложение.
 
 Поток данных для GUI:
 
@@ -546,31 +466,6 @@ Backup восстанавливает:
 - `RecordRepository` — интерфейс репозитория.
 - `JsonFileRecordRepository(file_path="records.json")` — JSON‑хранилище.
 
-Методы:
-
-- `load_wallets()`.
-- `load_active_wallets()`.
-- `create_wallet(name, currency, initial_balance, allow_negative=False)`.
-- `save_wallet(wallet)`.
-- `soft_delete_wallet(wallet_id)`.
-- `get_system_wallet()`.
-- `save_transfer(transfer)`.
-- `load_transfers()`.
-- `save(record)`.
-- `load_all()`.
-- `delete_by_index(index)`.
-- `delete_all()`.
-- `save_initial_balance(balance)`.
-- `load_initial_balance()`.
-- `save_mandatory_expense(expense)`.
-- `load_mandatory_expenses()`.
-- `delete_mandatory_expense_by_index(index)`.
-- `delete_all_mandatory_expenses()`.
-- `replace_records(records, initial_balance)`
-- `replace_mandatory_expenses(expenses)`
-- `replace_records_and_transfers(records, transfers)`
-- `replace_all_data(initial_balance, records, mandatory_expenses)`
-
 ### GUI
 
 `gui/tkinter_gui.py`
@@ -585,48 +480,24 @@ Backup восстанавливает:
 - Месячные агрегаты и графики всегда считаются в фиксированном режиме (`amount_kzt`).
 - Вкладка `Settings` позволяет управлять кошельками и обязательными расходами.
 
-Методы:
+`gui/controllers`
 
-- `infographics_tab(parent)`.
-- `operations_tab(parent)`:
-  - `save_record()`.
-  - `delete_selected()`.
-  - `delete_all()`.
-  - `create_transfer()`.
-  - `import_records_data()`.
-  - `export_records_data()`.
-- `reports_tab(parent)`.
-  - `generate()`.
-  - `export_any()`.
-- `settings_tab(parent)`.
-  - `save_balance()`.
-  - `create_wallet()`.
-  - `refresh_wallets()`.
-  - `delete_wallet()`.
-  - `refresh_mandatory()`.
-  - `add_mandatory_inline()`.
-  - `add_to_report_inline()`.
-  - `delete_mandatory()`.
-  - `delete_all_mandatory()`.
-  - `import_mand()`.
-  - `export_mand()`.
-  - `import_backup()`.
-  - `export_backup()`.
+- `FinanceController` — класс управления бизнес-логикой приложения.
 
 `gui/exporters.py`
 
 - `export_report(report, filepath, fmt)`.
 - `export_mandatory_expenses(expenses, filepath, fmt)`.
-- `export_records(records, filepath, fmt, initial_balance)`.
-- `export_full_backup(filepath, initial_balance, records, mandatory_expenses)`.
+- `export_records(records, filepath, fmt, initial_balance=0.0, transfers=None)`.
+- `export_full_backup(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0)`.
 
 `gui/importers.py`
 
-- `import_records_from_csv(filepath, policy, currency_service)` -> `(records, initial_balance, (imported, skipped, errors))`.
-- `import_records_from_xlsx(filepath, policy, currency_service)` -> `(records, initial_balance, (imported, skipped, errors))`.
+- `import_records_from_csv(filepath, policy, currency_service, wallet_ids)` -> `(records, initial_balance, (imported, skipped, errors))`.
+- `import_records_from_xlsx(filepath, policy, currency_service, wallet_ids)` -> `(records, initial_balance, (imported, skipped, errors))`.
 - `import_mandatory_expenses_from_csv(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`.
 - `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)` -> `(expenses, (imported, skipped, errors))`.
-- `import_full_backup(filepath)` -> `(initial_balance, records, mandatory_expenses, (imported, skipped, errors))`.
+- `import_full_backup(filepath)` -> `(wallets, records, mandatory_expenses, transfers, (imported, skipped, errors))`.
 
 `gui/helpers.py`
 
@@ -634,17 +505,17 @@ Backup восстанавливает:
 
 ### Utils
 
-`utils/backup.py`
+`utils/backup_utils.py`
 
-- `create_full_backup(filepath, initial_balance, records, mandatory_expenses)`.
-- `load_full_backup(filepath)`.
+- `export_full_backup_to_json(filepath, wallets, records, mandatory_expenses, transfers, initial_balance=0.0)`.
+- `import_full_backup_from_json(filepath)`.
 
 `utils/csv_utils.py`
 
 - `report_to_csv(report, filepath)`.
 - `report_from_csv(filepath)`.
-- `export_records_to_csv(records, filepath, initial_balance)`.
-- `import_records_from_csv(filepath, policy, currency_service)`.
+- `export_records_to_csv(records, filepath, initial_balance=0.0, transfers=None)`.
+- `import_records_from_csv(filepath, policy, currency_service, wallet_ids=None)`.
 - `export_mandatory_expenses_to_csv(expenses, filepath)`.
 - `import_mandatory_expenses_from_csv(filepath, policy, currency_service)`.
 
@@ -652,8 +523,8 @@ Backup восстанавливает:
 
 - `report_to_xlsx(report, filepath)`.
 - `report_from_xlsx(filepath)`.
-- `export_records_to_xlsx(records, filepath, initial_balance)`.
-- `import_records_from_xlsx(filepath, policy, currency_service)`.
+- `export_records_to_xlsx(records, filepath, initial_balance=0.0, transfers=None)`.
+- `import_records_from_xlsx(filepath, policy, currency_service, wallet_ids=None)`.
 - `export_mandatory_expenses_to_xlsx(expenses, filepath)`.
 - `import_mandatory_expenses_from_xlsx(filepath, policy, currency_service)`.
 
@@ -754,7 +625,8 @@ project/
     ├── test_transfer_integrity.py
     ├── test_wallet_phase1.py
     ├── test_wallet_phase2.py
-    └── test_wallet_phase3.py
+    ├── test_wallet_phase3.py
+    └── test_phase4_import_export.py
 ```
 
 ---

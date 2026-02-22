@@ -441,12 +441,37 @@ class ImportFromCSV:
         records, initial_balance, summary = import_records_from_csv(
             filepath, policy=ImportPolicy.FULL_BACKUP
         )
+        del initial_balance
         imported_count, skipped_count, _ = summary
         logger.info("CSV import parsed: imported=%s skipped=%s", imported_count, skipped_count)
         if skipped_count > 0:
             logger.warning("CSV import aborted due to validation errors: skipped=%s", skipped_count)
             raise ValueError("Import aborted: CSV contains invalid rows")
-        self._repository.replace_records(records, initial_balance)
+        transfers = []
+        grouped: dict[int, list] = {}
+        for record in records:
+            transfer_id = getattr(record, "transfer_id", None)
+            if isinstance(transfer_id, int) and transfer_id > 0:
+                grouped.setdefault(transfer_id, []).append(record)
+        for transfer_id, linked in grouped.items():
+            source = next((item for item in linked if isinstance(item, ExpenseRecord)), None)
+            target = next((item for item in linked if isinstance(item, IncomeRecord)), None)
+            if source is None or target is None or len(linked) != 2:
+                raise ValueError(f"Transfer integrity violated for #{transfer_id}")
+            transfers.append(
+                Transfer(
+                    id=transfer_id,
+                    from_wallet_id=source.wallet_id,
+                    to_wallet_id=target.wallet_id,
+                    date=source.date,
+                    amount_original=float(source.amount_original or 0.0),
+                    currency=str(source.currency or "KZT").upper(),
+                    rate_at_operation=float(source.rate_at_operation),
+                    amount_kzt=float(source.amount_kzt or 0.0),
+                    description=str(source.description or ""),
+                )
+            )
+        self._repository.replace_records_and_transfers(records, transfers)
         return imported_count
 
 
@@ -515,7 +540,7 @@ class AddMandatoryExpenseToReport:
     def __init__(self, repository: RecordRepository):
         self._repository = repository
 
-    def execute(self, index: int, date: str) -> bool:
+    def execute(self, index: int, date: str, wallet_id: int) -> bool:
         """Add selected mandatory expense to records with provided date."""
         mandatory_expenses = self._repository.load_mandatory_expenses()
         if 0 <= index < len(mandatory_expenses):
@@ -523,7 +548,7 @@ class AddMandatoryExpenseToReport:
             # Create a new record with the specified date
             record = MandatoryExpenseRecord(
                 date=date,
-                wallet_id=SYSTEM_WALLET_ID,
+                wallet_id=int(wallet_id),
                 amount_original=expense.amount_original,
                 currency=expense.currency,
                 rate_at_operation=expense.rate_at_operation,

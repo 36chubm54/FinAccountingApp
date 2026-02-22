@@ -81,9 +81,9 @@ class TestJsonFileRecordRepository:
             data = json.load(f)
 
         assert isinstance(data, dict)
-        assert "initial_balance" in data
+        assert "wallets" in data
         assert "records" in data
-        assert data["initial_balance"] == 0.0
+        assert data["wallets"][0]["initial_balance"] == 0.0
         assert len(data["records"]) == 1
         assert data["records"][0]["type"] == "income"
         assert data["records"][0]["date"] == "2025-01-01"
@@ -219,7 +219,7 @@ class TestJsonFileRecordRepository:
         with open(self.temp_file.name, encoding="utf-8") as f:
             data = json.load(f)
         assert data["records"] == []
-        assert data["initial_balance"] == 0.0
+        assert "initial_balance" not in data
 
     def test_save_and_load_initial_balance(self):
         # Test saving and loading initial balance
@@ -230,7 +230,7 @@ class TestJsonFileRecordRepository:
         # Verify JSON file
         with open(self.temp_file.name, encoding="utf-8") as f:
             data = json.load(f)
-        assert data["initial_balance"] == 0.0
+        assert "initial_balance" not in data
         assert "wallets" in data
         assert data["wallets"][0]["id"] == 1
         assert data["wallets"][0]["initial_balance"] == 100.0
@@ -263,7 +263,7 @@ class TestJsonFileRecordRepository:
         # Verify JSON file
         with open(self.temp_file.name, encoding="utf-8") as f:
             data = json.load(f)
-        assert data["initial_balance"] == 0.0
+        assert "initial_balance" not in data
         assert data["wallets"][0]["initial_balance"] == 200.0
         assert len(data["records"]) == 1
 

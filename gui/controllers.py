@@ -16,9 +16,9 @@ from app.use_cases import (
     CreateWallet,
     DeleteAllMandatoryExpenses,
     DeleteAllRecords,
-    DeleteTransfer,
     DeleteMandatoryExpense,
     DeleteRecord,
+    DeleteTransfer,
     GenerateReport,
     GetActiveWallets,
     GetMandatoryExpenses,
@@ -28,6 +28,7 @@ from app.use_cases import (
 from domain.import_policy import ImportPolicy
 from domain.records import IncomeRecord, MandatoryExpenseRecord, Record
 from domain.reports import Report
+from domain.transfers import Transfer
 from domain.validation import parse_ymd
 from infrastructure.repositories import RecordRepository
 
@@ -180,8 +181,12 @@ class FinancialController:
             commission_currency=(commission_currency or currency).strip().upper(),
         )
 
-    def add_mandatory_to_report(self, mandatory_index: int, record_date: str) -> bool:
-        return AddMandatoryExpenseToReport(self._repository).execute(mandatory_index, record_date)
+    def add_mandatory_to_report(
+        self, mandatory_index: int, record_date: str, wallet_id: int
+    ) -> bool:
+        return AddMandatoryExpenseToReport(self._repository).execute(
+            mandatory_index, record_date, wallet_id
+        )
 
     def delete_mandatory_expense(self, index: int) -> bool:
         return DeleteMandatoryExpense(self._repository).execute(index)
@@ -196,31 +201,42 @@ class FinancialController:
             from gui.importers import import_records_from_csv
 
             records, initial_balance, summary = import_records_from_csv(
-                filepath, policy=policy, currency_service=self._currency
+                filepath,
+                policy=policy,
+                currency_service=self._currency,
+                wallet_ids={wallet.id for wallet in self._repository.load_wallets()},
             )
+            del initial_balance
             self._ensure_import_valid(summary)
-            self._repository.replace_records(records, initial_balance)
+            transfers = self._rebuild_transfers(records)
+            self._repository.replace_records_and_transfers(records, transfers)
             return summary
 
         if fmt == "XLSX":
             from gui.importers import import_records_from_xlsx
 
             records, initial_balance, summary = import_records_from_xlsx(
-                filepath, policy=policy, currency_service=self._currency
+                filepath,
+                policy=policy,
+                currency_service=self._currency,
+                wallet_ids={wallet.id for wallet in self._repository.load_wallets()},
             )
+            del initial_balance
             self._ensure_import_valid(summary)
-            self._repository.replace_records(records, initial_balance)
+            transfers = self._rebuild_transfers(records)
+            self._repository.replace_records_and_transfers(records, transfers)
             return summary
 
         if fmt == "JSON":
             from gui.importers import import_full_backup
 
-            initial_balance, records, mandatory_expenses, summary = import_full_backup(filepath)
+            wallets, records, mandatory_expenses, transfers, summary = import_full_backup(filepath)
             self._ensure_import_valid(summary)
             self._repository.replace_all_data(
-                initial_balance=initial_balance,
+                wallets=wallets,
                 records=records,
                 mandatory_expenses=mandatory_expenses,
+                transfers=transfers,
             )
             return summary
 
@@ -266,6 +282,41 @@ class FinancialController:
         if skipped > 0:
             details = "; ".join(errors[:3]) if errors else "invalid rows"
             raise ValueError(f"Import aborted: {skipped} invalid rows ({details})")
+
+    @staticmethod
+    def _rebuild_transfers(records: Iterable[Record]) -> list[Transfer]:
+        grouped: dict[int, list[Record]] = {}
+        for record in records:
+            if record.transfer_id is not None:
+                grouped.setdefault(record.transfer_id, []).append(record)
+
+        transfers: list[Transfer] = []
+        for transfer_id, linked in sorted(grouped.items()):
+            if len(linked) != 2:
+                raise ValueError(
+                    f"Transfer integrity violated for #{transfer_id}: expected 2 linked records"
+                )
+            source = next((item for item in linked if not isinstance(item, IncomeRecord)), None)
+            target = next((item for item in linked if isinstance(item, IncomeRecord)), None)
+            if source is None or target is None:
+                raise ValueError(
+                    f"Transfer integrity violated for #{transfer_id}: "
+                    "requires one expense and one income"
+                )
+            transfers.append(
+                Transfer(
+                    id=transfer_id,
+                    from_wallet_id=source.wallet_id,
+                    to_wallet_id=target.wallet_id,
+                    date=source.date,
+                    amount_original=float(source.amount_original or 0.0),
+                    currency=str(source.currency or "KZT").upper(),
+                    rate_at_operation=float(source.rate_at_operation),
+                    amount_kzt=float(source.amount_kzt or 0.0),
+                    description=str(source.description or ""),
+                )
+            )
+        return transfers
 
     @staticmethod
     def _build_list_items(records: Iterable[Record]) -> list[RecordListItem]:

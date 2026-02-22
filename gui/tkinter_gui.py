@@ -653,7 +653,7 @@ class FinancialApp(tk.Tk):
             if not filepath:
                 return
             records = self.repository.load_all()
-            initial_balance = self.repository.load_initial_balance()
+            transfers = self.repository.load_transfers()
 
             def _task() -> None:
                 from gui.exporters import export_records
@@ -662,7 +662,7 @@ class FinancialApp(tk.Tk):
                     records,
                     filepath,
                     fmt.lower(),
-                    initial_balance=initial_balance,
+                    transfers=transfers,
                 )
 
             def _on_success(_: Any) -> None:
@@ -685,13 +685,13 @@ class FinancialApp(tk.Tk):
         ttk.Button(btn_frame, text="Refresh", command=self._refresh_list).pack(side=tk.LEFT, padx=6)
 
         # Import controls (reuse existing import handler)
-        import_mode_var = tk.StringVar(value="Import Records (Current Rate)")
+        import_mode_var = tk.StringVar(value="Full Backup")
         ttk.OptionMenu(
             btn_frame,
             import_mode_var,
             "Full Backup",
             "Full Backup",
-            "Import Records (Current Rate)",
+            "Current Rate",
             "Legacy Import",
         ).pack(side=tk.LEFT, padx=6)
         import_format_var = tk.StringVar(value="CSV")
@@ -935,40 +935,10 @@ class FinancialApp(tk.Tk):
         right_panel.grid_columnconfigure(0, weight=1)
 
         # =========================================================
-        # INITIAL BALANCE
-        # =========================================================
-        balance_frame = ttk.LabelFrame(left_panel, text="Initial balance")
-        balance_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-
-        current_balance = self.controller.get_system_initial_balance()
-
-        ttk.Label(balance_frame, text=f"Current: {current_balance:.2f} KZT").grid(
-            row=0, column=0, sticky="w", padx=PAD_X, pady=PAD_Y
-        )
-
-        balance_entry = ttk.Entry(balance_frame)
-        balance_entry.insert(0, str(current_balance))
-        balance_entry.grid(row=1, column=0, sticky="ew", padx=PAD_X, pady=PAD_Y)
-
-        def save_balance():
-            try:
-                balance = float(balance_entry.get())
-            except ValueError:
-                messagebox.showerror("Error", "Invalid balance amount.")
-                return
-            self.controller.set_system_initial_balance(balance)
-            messagebox.showinfo("Success", f"Initial balance set to {balance:.2f} KZT.")
-            self._refresh_charts()
-
-        ttk.Button(balance_frame, text="Save", command=save_balance).grid(
-            row=2, column=0, columnspan=2, sticky="ew", padx=PAD_X, pady=PAD_Y
-        )
-
-        # =========================================================
         # WALLETS
         # =========================================================
         wallets_frame = ttk.LabelFrame(left_panel, text="Wallets")
-        wallets_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
+        wallets_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
         wallets_frame.grid_columnconfigure(0, weight=1)
         wallets_frame.grid_rowconfigure(1, weight=1)
 
@@ -1197,7 +1167,7 @@ class FinancialApp(tk.Tk):
             ttk.Button(add_panel, text="Save", command=save).grid(row=5, column=0, padx=6)
             ttk.Button(add_panel, text="Cancel", command=cancel).grid(row=5, column=1, padx=6)
 
-        def add_to_report_inline():
+        def add_to_records_inline():
             # Close the previous panel if it is open
             if current_panel["add"] is not None:
                 try:
@@ -1220,6 +1190,26 @@ class FinancialApp(tk.Tk):
             date_entry = ttk.Entry(add_to_report_panel)
             date_entry.grid(row=0, column=1)
 
+            ttk.Label(add_to_report_panel, text="Wallet:").grid(row=1, column=0, sticky="w")
+            mandatory_wallet_var = tk.StringVar(value="")
+            mandatory_wallet_menu = ttk.OptionMenu(add_to_report_panel, mandatory_wallet_var, "")
+            mandatory_wallet_menu.grid(row=1, column=1, sticky="ew")
+            mandatory_wallet_map: dict[str, int] = {}
+
+            wallets = self.controller.load_active_wallets()
+            mandatory_wallet_map = {
+                f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id for wallet in wallets
+            }
+            wallet_labels = list(mandatory_wallet_map.keys()) or [""]
+            wallet_menu = mandatory_wallet_menu["menu"]
+            wallet_menu.delete(0, "end")
+            for label in wallet_labels:
+                wallet_menu.add_command(
+                    label=label,
+                    command=lambda value=label: mandatory_wallet_var.set(value),
+                )
+            mandatory_wallet_var.set(wallet_labels[0])
+
             selection = mand_listbox.curselection()
             index = selection[0] if selection else -1
 
@@ -1230,22 +1220,27 @@ class FinancialApp(tk.Tk):
                     date = date_entry.get()
                     entered_date = parse_ymd(date)
                     ensure_not_future(entered_date)
+                    wallet_id = mandatory_wallet_map.get(mandatory_wallet_var.get())
+                    if wallet_id is None:
+                        messagebox.showerror("Error", "Wallet is required.")
+                        return
 
-                    if self.controller.add_mandatory_to_report(index, date):
+                    if self.controller.add_mandatory_to_report(index, date, wallet_id):
                         messagebox.showinfo(
                             "Success", f"Mandatory expense added to report for {date}."
                         )
                         add_to_report_panel.destroy()
                         current_panel["report"] = None
                         refresh_mandatory()
+                        refresh_wallets()
                         self._refresh_list()
                         self._refresh_charts()
 
                     else:
                         messagebox.showerror(
                             "Error",
-                            "Please select a mandatory expense to add to report."
-                            "\nThen click 'Add to Report' and try again.",
+                            "Please select a mandatory expense to add to records."
+                            "\nThen click 'Add to Records' and try again.",
                         )
                 except ValueError as e:
                     messagebox.showerror("Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD.")
@@ -1257,9 +1252,9 @@ class FinancialApp(tk.Tk):
                 except Exception:
                     pass
 
-            ttk.Button(add_to_report_panel, text="Save", command=save).grid(row=1, column=0, padx=6)
+            ttk.Button(add_to_report_panel, text="Save", command=save).grid(row=2, column=0, padx=6)
             ttk.Button(add_to_report_panel, text="Cancel", command=cancel).grid(
-                row=1, column=1, padx=6
+                row=2, column=1, padx=6
             )
 
         def delete_mandatory():
@@ -1292,7 +1287,7 @@ class FinancialApp(tk.Tk):
         ttk.Button(btns, text="Add", command=add_mandatory_inline).grid(row=0, column=0)
         ttk.Button(btns, text="Delete", command=delete_mandatory).grid(row=0, column=1)
         ttk.Button(btns, text="Delete All", command=delete_all_mandatory).grid(row=0, column=2)
-        ttk.Button(btns, text="Add to Report", command=add_to_report_inline).grid(row=0, column=3)
+        ttk.Button(btns, text="Add to Records", command=add_to_records_inline).grid(row=0, column=3)
         ttk.Button(btns, text="Refresh", command=refresh_mandatory).grid(row=0, column=4)
         format_var = tk.StringVar(value="CSV")
         ttk.OptionMenu(btns, format_var, "CSV", "CSV", "XLSX").grid(row=0, column=5)
@@ -1406,7 +1401,8 @@ class FinancialApp(tk.Tk):
                 return
             if not messagebox.askyesno(
                 "Confirm Backup Import",
-                "This will replace all records, mandatory expenses and initial balance. Continue?",
+                "This will replace all wallets, records, transfers and mandatory expenses. "
+                "Continue?",
             ):
                 return
 
@@ -1422,8 +1418,6 @@ class FinancialApp(tk.Tk):
                     "Success",
                     f"Backup imported. Imported entities: {imported}.{details}",
                 )
-                balance_entry.delete(0, tk.END)
-                balance_entry.insert(0, str(current_balance))
                 refresh_mandatory()
                 self._refresh_list()
                 self._refresh_charts()
@@ -1442,18 +1436,20 @@ class FinancialApp(tk.Tk):
             )
             if not filepath:
                 return
-            initial_balance = self.repository.load_initial_balance()
+            wallets = self.repository.load_wallets()
             records = self.repository.load_all()
             mandatory_expenses = self.repository.load_mandatory_expenses()
+            transfers = self.repository.load_transfers()
 
             def _task() -> None:
                 from gui.exporters import export_full_backup
 
                 export_full_backup(
                     filepath,
-                    initial_balance=initial_balance,
+                    wallets=wallets,
                     records=records,
                     mandatory_expenses=mandatory_expenses,
+                    transfers=transfers,
                 )
 
             def _on_success(_: Any) -> None:
