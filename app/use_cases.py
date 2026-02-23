@@ -65,6 +65,13 @@ class CreateIncome:
             category=category,
         )
         self._repository.save(record)
+        logger.info(
+            "Income record created date=%s wallet_id=%s amount_kzt=%s category=%s",
+            date,
+            wallet_id,
+            amount_kzt,
+            category,
+        )
 
 
 class CreateExpense:
@@ -100,6 +107,13 @@ class CreateExpense:
             category=category,
         )
         self._repository.save(record)
+        logger.info(
+            "Expense record created date=%s wallet_id=%s amount_kzt=%s category=%s",
+            date,
+            wallet_id,
+            amount_kzt,
+            category,
+        )
 
 
 class GenerateReport:
@@ -507,6 +521,13 @@ class CreateMandatoryExpense:
             period=period,  # type: ignore
         )
         self._repository.save_mandatory_expense(expense)
+        logger.info(
+            "Mandatory expense created amount=%s category=%s description=%s period=%s",
+            amount,
+            currency,
+            description,
+            period,
+        )
 
 
 class GetMandatoryExpenses:
@@ -558,5 +579,12 @@ class AddMandatoryExpenseToReport:
                 period=expense.period,
             )
             self._repository.save(record)
+            logging.info(
+                "Mandatory expense added to report date=%s wallet_id=%s amount_kzt=%s category=%s",
+                date,
+                wallet_id,
+                record.amount_kzt,
+                record.category,
+            )
             return True
         return False
