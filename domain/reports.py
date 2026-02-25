@@ -97,7 +97,7 @@ class Report:
         filtered = [r for r in self._records if r.category == category]
         return Report(
             filtered,
-            self._initial_balance,
+            0.0,
             wallet_id=self._wallet_id,
             balance_label=self._balance_label,
             opening_start_date=self._opening_start_date,

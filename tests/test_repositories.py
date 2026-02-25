@@ -141,6 +141,41 @@ class TestJsonFileRecordRepository:
         expenses = self.repo.load_mandatory_expenses()
         assert expenses == []
 
+    def test_load_mandatory_expenses_skips_invalid_row(self):
+        json_data = {
+            "wallets": [
+                {
+                    "id": 1,
+                    "name": "Main wallet",
+                    "currency": "KZT",
+                    "initial_balance": 0.0,
+                    "system": True,
+                    "allow_negative": False,
+                    "is_active": True,
+                }
+            ],
+            "records": [],
+            "mandatory_expenses": [
+                {
+                    "date": "",
+                    "wallet_id": 1,
+                    "amount_original": 10.0,
+                    "currency": "KZT",
+                    "rate_at_operation": 1.0,
+                    "amount_kzt": 10.0,
+                    "category": "Mandatory",
+                    "period": "monthly",
+                },
+                {"date": "", "wallet_id": "bad", "amount_original": "bad"},
+            ],
+            "transfers": [],
+        }
+        with open(self.temp_file.name, "w", encoding="utf-8") as f:
+            json.dump(json_data, f)
+
+        expenses = self.repo.load_mandatory_expenses()
+        assert len(expenses) == 2
+
     def test_delete_by_index_success(self):
         # Setup: add some records
         income1 = IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary")

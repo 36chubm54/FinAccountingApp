@@ -455,7 +455,6 @@ class ImportFromCSV:
         records, initial_balance, summary = import_records_from_csv(
             filepath, policy=ImportPolicy.FULL_BACKUP
         )
-        del initial_balance
         imported_count, skipped_count, _ = summary
         logger.info("CSV import parsed: imported=%s skipped=%s", imported_count, skipped_count)
         if skipped_count > 0:
@@ -486,6 +485,7 @@ class ImportFromCSV:
                 )
             )
         self._repository.replace_records_and_transfers(records, transfers)
+        self._repository.save_initial_balance(float(initial_balance))
         return imported_count
 
 

@@ -235,6 +235,19 @@ def test_filter_by_period_raises_for_invalid_format():
         report.filter_by_period("2025/03")
 
 
+def test_filter_by_category_does_not_carry_initial_balance() -> None:
+    report = Report(
+        [
+            IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"),
+            ExpenseRecord(date="2025-01-02", _amount_init=50.0, category="Food"),
+        ],
+        initial_balance=1000.0,
+    )
+    filtered = report.filter_by_category("Salary")
+    assert filtered.initial_balance == 0.0
+    assert filtered.total_fixed() == 100.0
+
+
 def test_filter_by_period_raises_for_future_date():
     report = _build_opening_balance_test_report()
     with pytest.raises(ValueError):

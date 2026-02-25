@@ -689,12 +689,18 @@ class JsonFileRecordRepository(RecordRepository):
             if not isinstance(item, dict):
                 logger.warning("Skipping non-dict mandatory expense at index %s", index)
                 continue
-            common = self._parse_record_common(item)
-            expense = MandatoryExpenseRecord(
-                **common,
-                period=str(item.get("period", "monthly") or "monthly"),  # type: ignore[arg-type]
-            )
-            expenses.append(expense)
+            try:
+                common = self._parse_record_common(item)
+                expense = MandatoryExpenseRecord(
+                    **common,
+                    period=str(item.get("period", "monthly") or "monthly"),  # type: ignore[arg-type]
+                )
+                expenses.append(expense)
+            except Exception:
+                logger.exception(
+                    "Skipping invalid mandatory expense at index %s",
+                    index,
+                )
         return expenses
 
     def delete_mandatory_expense_by_index(self, index: int) -> bool:

@@ -245,6 +245,7 @@ class TestImportFromCSV:
             use_case.execute("test.csv")
 
             mock_repo.replace_records_and_transfers.assert_called_once_with([], [])
+            mock_repo.save_initial_balance.assert_called_once_with(123.45)
 
     def test_execute_does_not_modify_repository_on_import_error(self):
         mock_repo = Mock(spec=RecordRepository)

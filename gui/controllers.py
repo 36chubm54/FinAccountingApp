@@ -206,10 +206,10 @@ class FinancialController:
                 currency_service=self._currency,
                 wallet_ids={wallet.id for wallet in self._repository.load_wallets()},
             )
-            del initial_balance
             self._ensure_import_valid(summary)
             transfers = self._rebuild_transfers(records)
             self._repository.replace_records_and_transfers(records, transfers)
+            self._repository.save_initial_balance(float(initial_balance))
             return summary
 
         if fmt == "XLSX":
@@ -221,10 +221,10 @@ class FinancialController:
                 currency_service=self._currency,
                 wallet_ids={wallet.id for wallet in self._repository.load_wallets()},
             )
-            del initial_balance
             self._ensure_import_valid(summary)
             transfers = self._rebuild_transfers(records)
             self._repository.replace_records_and_transfers(records, transfers)
+            self._repository.save_initial_balance(float(initial_balance))
             return summary
 
         if fmt == "JSON":
