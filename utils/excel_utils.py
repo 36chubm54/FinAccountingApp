@@ -22,6 +22,8 @@ from utils.import_core import (
 )
 
 logger = logging.getLogger(__name__)
+MAX_IMPORT_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+MAX_IMPORT_ROWS = 200_000
 
 DATA_HEADERS = [
     "date",
@@ -232,30 +234,35 @@ def import_records_from_xlsx(
     policy: ImportPolicy = ImportPolicy.FULL_BACKUP,
     currency_service=None,
     wallet_ids: set[int] | None = None,
+    existing_initial_balance: float = 0.0,
 ) -> tuple[list[Record], float, ImportSummary]:
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"XLSX file not found: {filepath}")
+    if os.path.getsize(filepath) > MAX_IMPORT_FILE_SIZE:
+        raise ValueError(f"XLSX file is too large: {os.path.getsize(filepath)} bytes")
 
-    wb = load_workbook(filepath, data_only=True)
+    wb = load_workbook(filepath, data_only=True, read_only=True)
     try:
         if not wb.worksheets:
             return [], 0.0, (0, 0, [])
 
         ws = wb.worksheets[0]
-        rows = list(ws.iter_rows(values_only=True))
-        if not rows:
+        rows_iter = ws.iter_rows(values_only=True)
+        first_row = next(rows_iter, None)
+        if first_row is None:
             return [], 0.0, (0, 0, [])
 
-        header_row_index = 0
-        first_row = rows[0] if rows else ()
+        header_offset = 0
+        header_row = first_row
         if first_row and _safe_str(first_row[0]).strip().startswith("Transaction statement"):
-            header_row_index = 1
-        if len(rows) <= header_row_index:
+            header_row = next(rows_iter, None)
+            header_offset = 1
+        if header_row is None:
             return [], 0.0, (0, 0, [])
 
-        headers = [norm_key(_safe_str(h)) for h in rows[header_row_index]]
+        headers = [norm_key(_safe_str(h)) for h in header_row]
         records: list[Record] = []
-        initial_balance = 0.0
+        initial_balance = float(existing_initial_balance)
         errors: list[str] = []
         skipped = 0
         imported = 0
@@ -267,9 +274,13 @@ def import_records_from_xlsx(
         get_rate = None
         if policy == ImportPolicy.CURRENT_RATE:
             get_rate = _resolve_get_rate(currency_service)
+        seen_rows = 0
+        seen_initial_balance = False
 
-        data_rows = rows[header_row_index + 1 :]
-        for idx, row in enumerate(data_rows, start=header_row_index + 2):
+        for idx, row in enumerate(rows_iter, start=header_offset + 2):
+            seen_rows += 1
+            if seen_rows > MAX_IMPORT_ROWS:
+                raise ValueError(f"XLSX import exceeded row limit ({MAX_IMPORT_ROWS})")
             if not row or all(cell is None for cell in row):
                 continue
 
@@ -327,6 +338,12 @@ def import_records_from_xlsx(
                 logger.warning("XLSX import skipped %s", error)
                 continue
             if parsed_balance is not None:
+                if seen_initial_balance:
+                    skipped += 1
+                    errors.append(f"row {idx}: duplicate initial_balance row")
+                    logger.warning("XLSX import skipped row %s: duplicate initial_balance row", idx)
+                    continue
+                seen_initial_balance = True
                 initial_balance = parsed_balance
                 continue
             if record is None:
@@ -402,18 +419,21 @@ def import_mandatory_expenses_from_xlsx(
 ) -> tuple[list[MandatoryExpenseRecord], ImportSummary]:
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"XLSX file not found: {filepath}")
+    if os.path.getsize(filepath) > MAX_IMPORT_FILE_SIZE:
+        raise ValueError(f"XLSX file is too large: {os.path.getsize(filepath)} bytes")
 
-    wb = load_workbook(filepath, data_only=True)
+    wb = load_workbook(filepath, data_only=True, read_only=True)
     try:
         if not wb.worksheets:
             return [], (0, 0, [])
 
         ws = wb.worksheets[0]
-        rows = list(ws.iter_rows(values_only=True))
-        if not rows:
+        rows_iter = ws.iter_rows(values_only=True)
+        header_row = next(rows_iter, None)
+        if header_row is None:
             return [], (0, 0, [])
 
-        headers = [norm_key(_safe_str(h)) for h in rows[0]]
+        headers = [norm_key(_safe_str(h)) for h in header_row]
         expenses: list[MandatoryExpenseRecord] = []
         errors: list[str] = []
         skipped = 0
@@ -422,8 +442,12 @@ def import_mandatory_expenses_from_xlsx(
         get_rate = None
         if policy == ImportPolicy.CURRENT_RATE:
             get_rate = _resolve_get_rate(currency_service)
+        seen_rows = 0
 
-        for idx, row in enumerate(rows[1:], start=2):
+        for idx, row in enumerate(rows_iter, start=2):
+            seen_rows += 1
+            if seen_rows > MAX_IMPORT_ROWS:
+                raise ValueError(f"XLSX import exceeded row limit ({MAX_IMPORT_ROWS})")
             if not row or all(cell is None for cell in row):
                 continue
             raw = {headers[i]: row[i] for i in range(min(len(headers), len(row)))}

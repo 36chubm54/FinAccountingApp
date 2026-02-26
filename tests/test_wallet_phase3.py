@@ -108,7 +108,7 @@ def test_migration_assigns_wallet_id_one_and_is_idempotent():
     assert second[0].wallet_id == 1
 
 
-def test_import_without_wallet_id_defaults_to_one():
+def test_import_without_wallet_id_requires_explicit_wallet_for_full_backup():
     row = {
         "date": "2025-01-01",
         "type": "income",
@@ -123,9 +123,9 @@ def test_import_without_wallet_id_defaults_to_one():
         row_label="row 1",
         policy=ImportPolicy.FULL_BACKUP,
     )
-    assert error is None
-    assert record is not None
-    assert record.wallet_id == 1
+    assert record is None
+    assert error is not None
+    assert "wallet_id" in error
 
 
 def test_net_worth_is_sum_of_active_wallet_balances_and_recalculates():

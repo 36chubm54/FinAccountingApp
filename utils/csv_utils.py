@@ -1,6 +1,7 @@
 import csv
 import logging
 import os
+import re
 from datetime import date as dt_date
 
 from domain.import_policy import ImportPolicy
@@ -17,6 +18,9 @@ from utils.import_core import (
 )
 
 logger = logging.getLogger(__name__)
+MAX_IMPORT_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+MAX_IMPORT_ROWS = 200_000
+MAX_CSV_FIELD_SIZE = 1_000_000
 
 REPORT_HEADERS = ["Date", "Type", "Category", "Amount (KZT)"]
 DATA_HEADERS = [
@@ -53,6 +57,10 @@ def _resolve_get_rate(currency_service):
 
         currency_service = CurrencyService()
     return currency_service.get_rate
+
+
+def _validate_currency(currency: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z]{3}", currency or ""))
 
 
 def _parse_transfer_row(
@@ -101,6 +109,8 @@ def _parse_transfer_row(
         amount_original = abs(float(amount_original))
 
         currency = str(row_lc.get("currency", "KZT") or "KZT").strip().upper()
+        if not _validate_currency(currency):
+            return None, None, next_transfer_id, f"{row_label}: invalid currency '{currency}'"
         rate_at_operation = as_float(row_lc.get("rate_at_operation"), None)
         amount_kzt = as_float(row_lc.get("amount_kzt"), None)
 
@@ -252,6 +262,41 @@ def _validate_transfer_integrity(
             errors.append(f"Transfer #{transfer_id}: from_wallet_id mismatch")
         if income_record.wallet_id != transfer.to_wallet_id:
             errors.append(f"Transfer #{transfer_id}: to_wallet_id mismatch")
+        if str(expense_record.date) != str(income_record.date):
+            errors.append(f"Transfer #{transfer_id}: linked records date mismatch")
+        if str(expense_record.date) != str(transfer.date):
+            errors.append(f"Transfer #{transfer_id}: transfer date mismatch")
+        if str(expense_record.currency).upper() != str(income_record.currency).upper():
+            errors.append(f"Transfer #{transfer_id}: linked records currency mismatch")
+        if str(expense_record.currency).upper() != str(transfer.currency).upper():
+            errors.append(f"Transfer #{transfer_id}: transfer currency mismatch")
+        if (
+            abs(
+                float(expense_record.amount_original or 0.0)
+                - float(income_record.amount_original or 0.0)
+            )
+            > 1e-9
+        ):
+            errors.append(f"Transfer #{transfer_id}: linked records amount_original mismatch")
+        if (
+            abs(float(expense_record.amount_original or 0.0) - float(transfer.amount_original))
+            > 1e-9
+        ):
+            errors.append(f"Transfer #{transfer_id}: transfer amount_original mismatch")
+        if (
+            abs(float(expense_record.amount_kzt or 0.0) - float(income_record.amount_kzt or 0.0))
+            > 1e-9
+        ):
+            errors.append(f"Transfer #{transfer_id}: linked records amount_kzt mismatch")
+        if abs(float(expense_record.amount_kzt or 0.0) - float(transfer.amount_kzt)) > 1e-9:
+            errors.append(f"Transfer #{transfer_id}: transfer amount_kzt mismatch")
+        if (
+            abs(float(expense_record.rate_at_operation) - float(income_record.rate_at_operation))
+            > 1e-9
+        ):
+            errors.append(f"Transfer #{transfer_id}: linked records rate mismatch")
+        if abs(float(expense_record.rate_at_operation) - float(transfer.rate_at_operation)) > 1e-9:
+            errors.append(f"Transfer #{transfer_id}: transfer rate mismatch")
 
         if wallet_ids is not None:
             if transfer.from_wallet_id not in wallet_ids:
@@ -383,13 +428,16 @@ def import_records_from_csv(
     policy: ImportPolicy = ImportPolicy.FULL_BACKUP,
     currency_service=None,
     wallet_ids: set[int] | None = None,
+    existing_initial_balance: float = 0.0,
 ) -> tuple[list[Record], float, ImportSummary]:
     """Import operation dataset from CSV with per-row validation."""
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"CSV file not found: {filepath}")
+    if os.path.getsize(filepath) > MAX_IMPORT_FILE_SIZE:
+        raise ValueError(f"CSV file is too large: {os.path.getsize(filepath)} bytes")
 
     records: list[Record] = []
-    initial_balance = 0.0
+    initial_balance = float(existing_initial_balance)
     errors: list[str] = []
     skipped = 0
     imported = 0
@@ -400,14 +448,26 @@ def import_records_from_csv(
     get_rate = None
     if policy == ImportPolicy.CURRENT_RATE:
         get_rate = _resolve_get_rate(currency_service)
+    csv.field_size_limit(MAX_CSV_FIELD_SIZE)
+    seen_rows = 0
+    seen_initial_balance = False
 
     with open(filepath, newline="", encoding="utf-8") as csvfile:
-        preview_reader = csv.reader(csvfile)
-        first_row = next(preview_reader, [])
-        if first_row and str(first_row[0]).strip().startswith("Transaction statement"):
-            pass
-        else:
-            csvfile.seek(0)
+        first_data_pos = csvfile.tell()
+        first_data_line = ""
+        while True:
+            pos = csvfile.tell()
+            line = csvfile.readline()
+            if line == "":
+                break
+            if line.strip():
+                first_data_pos = pos
+                first_data_line = line
+                break
+
+        normalized_first_line = first_data_line.lstrip("\ufeff").strip()
+        if not normalized_first_line.startswith("Transaction statement"):
+            csvfile.seek(first_data_pos)
         reader = csv.DictReader(csvfile)
         if not reader.fieldnames:
             return records, initial_balance, (0, 0, [])
@@ -418,6 +478,9 @@ def import_records_from_csv(
         ) and "amount_original" not in normalized_headers
 
         for idx, row in enumerate(reader, start=2):
+            seen_rows += 1
+            if seen_rows > MAX_IMPORT_ROWS:
+                raise ValueError(f"CSV import exceeded row limit ({MAX_IMPORT_ROWS})")
             row_lc = {norm_key(str(k)): v for k, v in row.items()}
             if not any(str(v or "").strip() for v in row_lc.values()):
                 continue
@@ -473,6 +536,12 @@ def import_records_from_csv(
                 logger.warning("CSV import skipped %s", error)
                 continue
             if parsed_balance is not None:
+                if seen_initial_balance:
+                    skipped += 1
+                    errors.append(f"row {idx}: duplicate initial_balance row")
+                    logger.warning("CSV import skipped row %s: duplicate initial_balance row", idx)
+                    continue
+                seen_initial_balance = True
                 initial_balance = parsed_balance
                 continue
             if record is None:
@@ -544,6 +613,14 @@ def import_mandatory_expenses_from_csv(
         get_rate = _resolve_get_rate(currency_service)
 
     with open(filepath, newline="", encoding="utf-8") as csvfile:
+        while True:
+            pos = csvfile.tell()
+            line = csvfile.readline()
+            if line == "":
+                break
+            if line.strip():
+                csvfile.seek(pos)
+                break
         reader = csv.DictReader(csvfile)
         if not reader.fieldnames:
             return expenses, (0, 0, [])

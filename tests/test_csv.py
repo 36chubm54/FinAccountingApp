@@ -170,10 +170,11 @@ def test_import_records_from_csv_with_partial_errors_keeps_valid_rows():
     from domain.import_policy import ImportPolicy
     from utils.csv_utils import import_records_from_csv
 
-    csv_content = """date,type,category,amount_original,currency,rate_at_operation,amount_kzt
-2025-01-01,income,Salary,10,USD,500,5000
-2025-13-01,expense,Food,2,KZT,1,2
-2025-01-03,expense,Food,3,KZT,1,3
+    csv_content = """
+date,type,wallet_id,category,amount_original,currency,rate_at_operation,amount_kzt
+2025-01-01,income,1,Salary,10,USD,500,5000
+2025-13-01,expense,1,Food,2,KZT,1,2
+2025-01-03,expense,1,Food,3,KZT,1,3
 """
     with tempfile.NamedTemporaryFile(
         mode="w", delete=False, suffix=".csv", newline="", encoding="utf-8"

@@ -670,7 +670,10 @@ project/
     ├── test_currency.py
     ├── test_excel.py
     ├── test_gui_exporters_importers.py
+    ├── test_import_balance_contract.py
+    ├── test_import_core.py
     ├── test_import_policy_and_backup.py
+    ├── test_import_security.py
     ├── test_pdf.py
     ├── test_records.py
     ├── test_reports.py

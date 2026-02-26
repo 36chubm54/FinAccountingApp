@@ -15,8 +15,9 @@ class DummyCurrency:
 
 
 def test_current_rate_policy_fills_missing_fx_fields():
-    csv_content = """date,type,category,amount_original,currency
-2025-01-01,income,Salary,100,USD
+    csv_content = """
+date,type,wallet_id,category,amount_original,currency
+2025-01-01,income,1,Salary,100,USD
 """
     with tempfile.NamedTemporaryFile(
         mode="w", delete=False, suffix=".csv", encoding="utf-8"
@@ -40,8 +41,9 @@ def test_current_rate_policy_fills_missing_fx_fields():
 
 
 def test_current_rate_policy_overrides_existing_fx_fields():
-    csv_content = """date,type,category,amount_original,currency,rate_at_operation,amount_kzt
-2025-01-01,income,Salary,100,USD,450,45000
+    csv_content = """
+date,type,wallet_id,category,amount_original,currency,rate_at_operation,amount_kzt
+2025-01-01,income,1,Salary,100,USD,450,45000
 """
     with tempfile.NamedTemporaryFile(
         mode="w", delete=False, suffix=".csv", encoding="utf-8"
@@ -82,11 +84,12 @@ def test_legacy_policy_imports_old_amount_column():
 
 
 def test_import_validation_skips_invalid_rows():
-    csv_content = """date,type,category,amount_original,currency,rate_at_operation,amount_kzt
-bad-date,income,Salary,10,USD,500,5000
-2025-01-02,expense,Food,-5,KZT,1,5
-2025-01-03,income,Salary,10,USDX,500,5000
-2025-01-04,income,Salary,10,USD,500,5000
+    csv_content = """
+date,type,wallet_id,category,amount_original,currency,rate_at_operation,amount_kzt
+bad-date,income,1,Salary,10,USD,500,5000
+2025-01-02,expense,1,Food,-5,KZT,1,5
+2025-01-03,income,1,Salary,10,USDX,500,5000
+2025-01-04,income,1,Salary,10,USD,500,5000
 """
     with tempfile.NamedTemporaryFile(
         mode="w", delete=False, suffix=".csv", encoding="utf-8"

@@ -76,6 +76,8 @@ def parse_import_row(
         required_fields.append("amount")
     else:
         required_fields.extend(["amount_original", "currency"])
+        if not mandatory_only:
+            required_fields.append("wallet_id")
 
     for field in required_fields:
         if str(row_lc.get(field, "") or "").strip() == "":
@@ -146,9 +148,21 @@ def parse_import_row(
     if amount_original < 0:
         return None, None, f"{row_label}: amount_original must be >= 0"
 
+    wallet_raw = as_float(row_lc.get("wallet_id"), None)
+    if mandatory_only:
+        wallet_id = int(wallet_raw if wallet_raw is not None else 1.0)
+    elif policy == ImportPolicy.LEGACY:
+        wallet_id = int(wallet_raw if wallet_raw is not None else 1.0)
+    else:
+        if wallet_raw is None:
+            return None, None, f"{row_label}: missing required field 'wallet_id'"
+        wallet_id = int(wallet_raw)
+    if wallet_id <= 0:
+        return None, None, f"{row_label}: invalid wallet_id '{row_lc.get('wallet_id')}'"
+
     common = {
         "date": date_value,
-        "wallet_id": int(as_float(row_lc.get("wallet_id"), 1.0) or 1),
+        "wallet_id": wallet_id,
         "transfer_id": None,
         "amount_original": float(amount_original),
         "currency": currency,

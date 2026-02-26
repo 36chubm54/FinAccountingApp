@@ -221,6 +221,7 @@ class TestImportFromCSV:
     def test_execute_imports_records_from_csv_and_saves_to_repository(self):
         # Arrange
         mock_repo = Mock(spec=RecordRepository)
+        mock_repo.load_initial_balance.return_value = 0.0
 
         with patch("utils.csv_utils.import_records_from_csv") as mock_import:
             test_records = [Mock(spec=Record), Mock(spec=Record), Mock(spec=Record)]
@@ -232,12 +233,17 @@ class TestImportFromCSV:
             result = use_case.execute("test.csv")
 
             # Assert
-            mock_import.assert_called_once_with("test.csv", policy=ImportPolicy.FULL_BACKUP)
+            mock_import.assert_called_once_with(
+                "test.csv",
+                policy=ImportPolicy.FULL_BACKUP,
+                existing_initial_balance=0.0,
+            )
             mock_repo.replace_records_and_transfers.assert_called_once_with(test_records, [])
             assert result == 3
 
     def test_execute_saves_initial_balance(self):
         mock_repo = Mock(spec=RecordRepository)
+        mock_repo.load_initial_balance.return_value = 0.0
         with patch("utils.csv_utils.import_records_from_csv") as mock_import:
             mock_import.return_value = ([], 123.45, (0, 0, []))
 

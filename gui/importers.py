@@ -11,6 +11,7 @@ def import_records_from_csv(
     policy: ImportPolicy = ImportPolicy.FULL_BACKUP,
     currency_service=None,
     wallet_ids: set[int] | None = None,
+    existing_initial_balance: float = 0.0,
 ) -> tuple[list[Record], float, tuple[int, int, list[str]]]:
     try:
         from utils.csv_utils import import_records_from_csv as _import_records_from_csv
@@ -20,6 +21,7 @@ def import_records_from_csv(
             policy=policy,
             currency_service=currency_service,
             wallet_ids=wallet_ids,
+            existing_initial_balance=existing_initial_balance,
         )
     except Exception:
         logger.exception("Failed to import records from csv: %s", filepath)
@@ -31,6 +33,7 @@ def import_records_from_xlsx(
     policy: ImportPolicy = ImportPolicy.FULL_BACKUP,
     currency_service=None,
     wallet_ids: set[int] | None = None,
+    existing_initial_balance: float = 0.0,
 ) -> tuple[list[Record], float, tuple[int, int, list[str]]]:
     try:
         from utils.excel_utils import (
@@ -42,6 +45,7 @@ def import_records_from_xlsx(
             policy=policy,
             currency_service=currency_service,
             wallet_ids=wallet_ids,
+            existing_initial_balance=existing_initial_balance,
         )
     except Exception:
         logger.exception("Failed to import records from xlsx: %s", filepath)

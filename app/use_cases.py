@@ -1,4 +1,5 @@
 import logging
+from dataclasses import replace
 from datetime import date as dt_date
 
 from domain.errors import DomainError
@@ -453,7 +454,9 @@ class ImportFromCSV:
         from utils.csv_utils import import_records_from_csv
 
         records, initial_balance, summary = import_records_from_csv(
-            filepath, policy=ImportPolicy.FULL_BACKUP
+            filepath,
+            policy=ImportPolicy.FULL_BACKUP,
+            existing_initial_balance=self._repository.load_initial_balance(),
         )
         imported_count, skipped_count, _ = summary
         logger.info("CSV import parsed: imported=%s skipped=%s", imported_count, skipped_count)
@@ -484,6 +487,13 @@ class ImportFromCSV:
                     description=str(source.description or ""),
                 )
             )
+        reindexed_records = []
+        for index, record in enumerate(records, start=1):
+            try:
+                reindexed_records.append(replace(record, id=index))
+            except TypeError:
+                reindexed_records.append(record)
+        records = reindexed_records
         self._repository.replace_records_and_transfers(records, transfers)
         self._repository.save_initial_balance(float(initial_balance))
         return imported_count

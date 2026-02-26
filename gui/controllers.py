@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha1
 
 from app.record_service import RecordService
@@ -207,6 +207,7 @@ class FinancialController:
     def import_records(
         self, fmt: str, filepath: str, policy: ImportPolicy
     ) -> tuple[int, int, list[str]]:
+        existing_initial_balance = self._repository.load_initial_balance()
         if fmt == "CSV":
             from gui.importers import import_records_from_csv
 
@@ -215,8 +216,10 @@ class FinancialController:
                 policy=policy,
                 currency_service=self._currency,
                 wallet_ids={wallet.id for wallet in self._repository.load_wallets()},
+                existing_initial_balance=existing_initial_balance,
             )
             self._ensure_import_valid(summary)
+            records = self._reindex_records_for_import(records)
             transfers = self._rebuild_transfers(records)
             self._repository.replace_records_and_transfers(records, transfers)
             self._repository.save_initial_balance(float(initial_balance))
@@ -230,8 +233,10 @@ class FinancialController:
                 policy=policy,
                 currency_service=self._currency,
                 wallet_ids={wallet.id for wallet in self._repository.load_wallets()},
+                existing_initial_balance=existing_initial_balance,
             )
             self._ensure_import_valid(summary)
+            records = self._reindex_records_for_import(records)
             transfers = self._rebuild_transfers(records)
             self._repository.replace_records_and_transfers(records, transfers)
             self._repository.save_initial_balance(float(initial_balance))
@@ -399,3 +404,13 @@ class FinancialController:
 
         items.sort(key=lambda item: item.repository_index)
         return items
+
+    @staticmethod
+    def _reindex_records_for_import(records: Iterable[Record]) -> list[Record]:
+        reindexed: list[Record] = []
+        for index, record in enumerate(records, start=1):
+            try:
+                reindexed.append(replace(record, id=index))
+            except TypeError:
+                reindexed.append(record)
+        return reindexed

@@ -11,6 +11,7 @@ def test_parse_import_row_rejects_malformed_currency_codes() -> None:
             {
                 "date": "2025-01-01",
                 "type": "income",
+                "wallet_id": "1",
                 "category": "Salary",
                 "amount_original": "10",
                 "currency": code,
@@ -33,6 +34,7 @@ def test_parse_import_row_rejects_malformed_date() -> None:
         {
             "date": "2025/01/01",
             "type": "expense",
+            "wallet_id": "1",
             "category": "Food",
             "amount_original": "10",
             "currency": "KZT",
@@ -52,6 +54,7 @@ def test_parse_import_row_current_rate_requires_service() -> None:
         {
             "date": "2025-01-01",
             "type": "income",
+            "wallet_id": "1",
             "category": "Salary",
             "amount_original": "10",
             "currency": "USD",

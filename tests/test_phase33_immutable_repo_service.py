@@ -20,7 +20,7 @@ def test_record_is_immutable():
         category="Salary",
     )
     with pytest.raises(FrozenInstanceError):
-        record.with_updated_amount_kzt(123.0)
+        record.amount_kzt = 123.0 # type: ignore
 
 
 def test_with_updated_amount_kzt_returns_new_object():
