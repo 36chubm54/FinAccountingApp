@@ -2,6 +2,7 @@ import csv
 import json
 import os
 import tempfile
+import time
 
 from openpyxl import load_workbook
 
@@ -258,7 +259,12 @@ def test_export_csv_xlsx_transfer_one_row():
             wb.close()
     finally:
         os.unlink(csv_path)
-        os.unlink(xlsx_path)
+        for _ in range(5):
+            try:
+                os.unlink(xlsx_path)
+                break
+            except PermissionError:
+                time.sleep(0.1)
 
 
 def test_repository_does_not_store_global_initial_balance_key():

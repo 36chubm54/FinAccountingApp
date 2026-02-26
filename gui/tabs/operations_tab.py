@@ -17,6 +17,7 @@ class OperationsTabContext(Protocol):
     repository: Any
     _list_index_to_record_id: dict[int, str]
     _record_id_to_repo_index: dict[str, int]
+    _record_id_to_domain_id: dict[str, int]
 
     def _refresh_list(self) -> None: ...
 
@@ -209,6 +210,75 @@ def build_operations_tab(
             context._refresh_charts()
         except Exception as error:
             messagebox.showerror("Error", f"Failed to delete: {str(error)}")
+
+    edit_panel_state: dict[str, ttk.Frame | None] = {"panel": None}
+
+    def edit_selected_amount_kzt_inline() -> None:
+        selection = records_listbox.curselection()
+        if not selection:
+            messagebox.showerror("Error", "Please select a record to edit.")
+            return
+
+        list_index = selection[0]
+        ui_record_id = context._list_index_to_record_id.get(list_index)
+        if not ui_record_id:
+            messagebox.showerror("Error", "Selected record is no longer available.")
+            return
+        domain_record_id = context._record_id_to_domain_id.get(ui_record_id)
+        if domain_record_id is None:
+            messagebox.showerror("Error", "Selected record cannot be edited.")
+            return
+
+        if edit_panel_state["panel"] is not None:
+            try:
+                edit_panel_state["panel"].destroy()
+            except Exception:
+                pass
+            edit_panel_state["panel"] = None
+
+        edit_panel = ttk.Frame(list_frame)
+        edit_panel.grid(row=2, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 6))
+        edit_panel_state["panel"] = edit_panel
+
+        ttk.Label(edit_panel, text="New amount (KZT):").grid(row=0, column=0, sticky="w", padx=4)
+        amount_entry = ttk.Entry(edit_panel)
+        amount_entry.grid(row=0, column=1, sticky="ew", padx=4)
+        edit_panel.grid_columnconfigure(1, weight=1)
+
+        try:
+            current_amount = context.controller.get_record_amount_kzt(domain_record_id)
+            amount_entry.insert(0, f"{current_amount:.2f}")
+        except Exception:
+            amount_entry.insert(0, "")
+
+        def save_edit() -> None:
+            try:
+                new_amount_kzt = float(amount_entry.get().strip())
+            except ValueError:
+                messagebox.showerror("Error", "Invalid amount.")
+                return
+            try:
+                context.controller.update_record_amount_kzt(domain_record_id, new_amount_kzt)
+                messagebox.showinfo(
+                    "Success",
+                    "Record amount updated. rate_at_operation was recalculated.",
+                )
+                context._refresh_list()
+                context._refresh_charts()
+                cancel_edit()
+            except Exception as error:
+                messagebox.showerror("Error", f"Failed to update record: {str(error)}")
+
+        def cancel_edit() -> None:
+            if edit_panel_state["panel"] is not None:
+                try:
+                    edit_panel_state["panel"].destroy()
+                except Exception:
+                    pass
+                edit_panel_state["panel"] = None
+
+        ttk.Button(edit_panel, text="Save", command=save_edit).grid(row=0, column=2, padx=4)
+        ttk.Button(edit_panel, text="Cancel", command=cancel_edit).grid(row=0, column=3, padx=4)
 
     def delete_all() -> None:
         confirm = messagebox.askyesno(
@@ -446,6 +516,9 @@ def build_operations_tab(
     btn_frame.grid(row=1, column=0, columnspan=2, pady=6)
 
     ttk.Button(btn_frame, text="Delete Selected", command=delete_selected).pack(
+        side=tk.LEFT, padx=6
+    )
+    ttk.Button(btn_frame, text="Edit Amount KZT", command=edit_selected_amount_kzt_inline).pack(
         side=tk.LEFT, padx=6
     )
     ttk.Button(btn_frame, text="Delete All", command=delete_all).pack(side=tk.LEFT, padx=6)

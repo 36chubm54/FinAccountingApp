@@ -1,14 +1,22 @@
 from abc import ABC, abstractmethod
-from dataclasses import InitVar, dataclass
+from dataclasses import InitVar, dataclass, field, replace
 from datetime import date as dt_date
+from itertools import count
 from typing import Literal
 
 from .validation import parse_ymd
+
+_ID_COUNTER = count(start=1)
+
+
+def _next_record_id() -> int:
+    return next(_ID_COUNTER)
 
 
 @dataclass(frozen=True)
 class Record(ABC):
     date: dt_date | str
+    id: int = field(default_factory=_next_record_id, compare=False)
     wallet_id: int = 1
     transfer_id: int | None = None
     amount_original: float | None = None
@@ -20,6 +28,14 @@ class Record(ABC):
     _amount_init: InitVar[float | None] = None
 
     def __post_init__(self, amount: float | None) -> None:
+        try:
+            record_id = int(self.id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("id must be an integer") from exc
+        if record_id <= 0:
+            raise ValueError("id must be a positive integer")
+        object.__setattr__(self, "id", record_id)
+
         date_value: dt_date | None = None
         if isinstance(self.date, dt_date):
             date_value = self.date
@@ -63,6 +79,17 @@ class Record(ABC):
             if transfer_id <= 0:
                 raise ValueError("transfer_id must be a positive integer")
             object.__setattr__(self, "transfer_id", transfer_id)
+
+    def with_updated_amount_kzt(self, new_amount_kzt: float) -> "Record":
+        if float(self.amount_original or 0.0) == 0.0:
+            raise ValueError("Cannot update amount_kzt when amount_original is zero")
+        updated_amount_kzt = round(float(new_amount_kzt), 2)
+        new_rate = round(updated_amount_kzt / float(self.amount_original or 1.0), 6)
+        return replace(
+            self,
+            amount_kzt=updated_amount_kzt,
+            rate_at_operation=new_rate,
+        )
 
     def signed_amount(self) -> float:
         """Backward-compatible alias."""

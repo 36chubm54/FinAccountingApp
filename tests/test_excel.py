@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 
 from openpyxl import load_workbook
 
@@ -71,7 +72,12 @@ def test_report_xlsx_uses_opening_balance_label_for_filtered_report():
         finally:
             wb.close()
     finally:
-        os.unlink(tmp_path)
+        for _ in range(5):
+            try:
+                os.unlink(tmp_path)
+                break
+            except PermissionError:
+                time.sleep(0.1)
 
 
 def test_mandatory_xlsx_roundtrip():

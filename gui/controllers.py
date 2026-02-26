@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from hashlib import sha1
 
+from app.record_service import RecordService
 from app.services import CurrencyService
 from app.use_cases import (
     AddMandatoryExpenseToReport,
@@ -37,6 +38,7 @@ from infrastructure.repositories import RecordRepository
 class RecordListItem:
     record_id: str
     repository_index: int
+    domain_record_id: int | None
     label: str
 
 
@@ -44,6 +46,7 @@ class FinancialController:
     def __init__(self, repository: RecordRepository, currency_service: CurrencyService) -> None:
         self._repository = repository
         self._currency = currency_service
+        self._record_service = RecordService(repository)
 
     def build_record_list_items(self) -> list[RecordListItem]:
         records = self._repository.load_all()
@@ -63,6 +66,13 @@ class FinancialController:
 
     def delete_all_records(self) -> None:
         DeleteAllRecords(self._repository).execute()
+
+    def update_record_amount_kzt(self, record_id: int, new_amount_kzt: float) -> None:
+        self._record_service.update_amount_kzt(record_id, new_amount_kzt)
+
+    def get_record_amount_kzt(self, record_id: int) -> float:
+        record = self._repository.get_by_id(int(record_id))
+        return float(record.amount_kzt or 0.0)
 
     def set_system_initial_balance(self, balance: float) -> None:
         self._repository.save_initial_balance(float(balance))
@@ -352,6 +362,7 @@ class FinancialController:
                 RecordListItem(
                     record_id=record_id,
                     repository_index=repository_index,
+                    domain_record_id=int(getattr(record, "id", 0) or 0),
                     label=label,
                 )
             )
@@ -381,6 +392,7 @@ class FinancialController:
                 RecordListItem(
                     record_id=record_id,
                     repository_index=repository_index,
+                    domain_record_id=int(getattr(source, "id", 0) or 0),
                     label=label,
                 )
             )

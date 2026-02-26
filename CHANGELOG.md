@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Immutable Domain Model and SQL-ready Repository Layer (Phase 3.3):
+  - Added immutable `Record.id` for stable identity of domain records.
+  - Added `Record.with_updated_amount_kzt()` that returns a new instance via copy/replace.
+  - Added repository contract methods `list_all()`, `get_by_id()` and `replace()`.
+  - Added `RecordService.update_amount_kzt()` to centralize edit logic and block transfer-linked edits.
+  - Added inline `Edit Amount KZT` action in `Operations` tab using service-layer update flow.
+  - Added tests for immutable record behavior, service guardrails and repository replace flow.
 - Transfer Aggregate Integrity and Cascade Delete (Phase 3.1):
   - Added `DomainError` for domain invariant violations.
   - Added `DeleteTransfer` use-case and controller method with atomic cascade delete.

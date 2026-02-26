@@ -99,6 +99,27 @@ The amount is converted into the base currency `KZT` at the current rates of the
 5. Specify the source and recipient of the wallets.
 6. Click `Save`.
 
+### Deleting an entry
+
+1. Open the `Operations` tab.
+2. Select an entry from the list.
+3. Click `Delete Selected`. A deletion message appears with the index of the entry or ID of the transfer.
+
+### Delete all entries
+
+1. Open the `Operations` tab.
+2. In the `List of operations` block, select an entry from the list.
+3. Click `Delete All Records` and confirm the deletion. The entries will be permanently deleted and the list of entries will be updated.
+
+### Inline amount_kzt edit
+
+1. Open the `Operations` tab.
+2. Select a record in the list.
+3. Click `Edit Amount KZT`.
+4. Enter a new value and click `Save`.
+
+The update is applied through the immutable domain model: a new record instance is created and `rate_at_operation` is recalculated automatically. Transfer-linked records cannot be edited.
+
 ### Report generation
 
 1. Open the `Reports` tab.
@@ -131,18 +152,6 @@ Export report:
 - For `YYYY-MM`, period start is `YYYY-MM-01`.
 - For `YYYY-MM-DD`, period start is the provided date.
 - The period filter cannot point to a future date (for all supported formats).
-
-### Deleting an entry
-
-1. Open the `Operations` tab.
-2. Select an entry from the list.
-3. Click `Delete Selected`. A deletion message appears with the index of the entry or ID of the transfer.
-
-### Delete all entries
-
-1. Open the `Operations` tab.
-2. In the `List of operations` block, select an entry from the list.
-3. Click `Delete All Records` and confirm the deletion. The entries will be permanently deleted and the list of entries will be updated.
 
 ### Managing mandatory expenses
 
@@ -253,6 +262,7 @@ Format:
 {
   "records": [
     {
+      "id": 1,
       "type": "income",
       "date": "2025-01-15",
       "amount_original": 700.0,
@@ -262,6 +272,7 @@ Format:
       "category": "Salary"
     },
     {
+      "id": 2,
       "type": "expense",
       "date": "2025-01-16",
       "amount_original": 25000.0,
@@ -271,6 +282,7 @@ Format:
       "category": "Products"
     },
     {
+      "id": 3,
       "type": "mandatory_expense",
       "date": "2025-01-20",
       "amount_original": 300.0,
@@ -282,6 +294,7 @@ Format:
       "period": "monthly"
     },
     {
+      "id": 4,
       "type": "expense",
       "date": "2026-02-20",
       "wallet_id": 1,
@@ -293,6 +306,7 @@ Format:
       "category": "Transfer"
     },
     {
+      "id": 5,
       "type": "income",
       "date": "2026-02-20",
       "wallet_id": 2,
@@ -313,7 +327,8 @@ Format:
       "amount_kzt": 150000.0,
       "category": "Mandatory",
       "description": "Monthly rent",
-      "period": "monthly"
+      "period": "monthly",
+      "id": 1
     }
   ],
   "transfers": [
@@ -370,6 +385,13 @@ Domain relationships:
 - `Transfer` links two records (`expense`/`income`) through `transfer_id`.
 - Transfer commission is stored as a separate `Expense` (`Commission` category) and is not part of the linked transfer record pair.
 
+### Immutable Domain Model
+
+- `Record` is immutable (`@dataclass(frozen=True)`), including the `id` field.
+- Any record update creates a new object instead of mutating the existing one.
+- Amount edits use `with_updated_amount_kzt(new_amount_kzt)`.
+- This protects financial data integrity and prepares the architecture for SQLite migration.
+
 ---
 
 ## 📝 Software API
@@ -393,6 +415,8 @@ Below are the key classes and functions synchronized with the actual code.
 `domain/records.py`
 
 - `Record` — base record (abstract class). It includes mandatory `wallet_id` and optional `transfer_id`.
+- `Record.id` — mandatory record identifier.
+- `Record.with_updated_amount_kzt(new_amount_kzt)` — returns a new record instance with recalculated `rate_at_operation`.
 - `IncomeRecord` — income.
 - `ExpenseRecord` — expense.
 - `MandatoryExpenseRecord` — mandatory expense with `description` and `period`.
@@ -462,6 +486,10 @@ Below are the key classes and functions synchronized with the actual code.
 - `DeleteAllMandatoryExpenses.execute()`.
 - `AddMandatoryExpenseToReport.execute(index, date)`.
 
+`app/record_service.py`
+
+- `RecordService.update_amount_kzt(record_id, new_amount_kzt)` — safe amount update via immutable domain objects and repository replace.
+
 ### Infrastructure
 
 `infrastructure/repositories.py`
@@ -474,14 +502,31 @@ Below are the key classes and functions synchronized with the actual code.
 `gui/tkinter_gui.py`
 
 - `FinancialApp` is the main application class with Tkinter.
-- The `Infographics` tab displays charts and summaries of financial data.
-- The `Operations` tab supports adding and deleting records. Also supports creating transfers and importing/exporting records.
-- The `Reports` tab supports 2 summary modes:
+
+`gui/tabs/infographics_tab.py`
+
+- `InfographicsTabBindings` — class for binding events to interface elements of the `Infographics` tab.
+- `build_infographics_tab(parent, on_chart_filter_change, on_refresh_charts, on_legend_mousewheel, bind_all, after, after_cancel)` — method for building the interface of the `Infographics` tab. This tab displays charts and summaries of financial data.
+
+`gui/tabs/operations_tab.py`
+
+- `OperationsTabContext` — the context of the operations tab.
+- `OperationsTabBindings` — class for binding events to interface elements of the `Operations` tab.
+- `build_operations_tab(parent, context, import_formats)` — method for building the interface of the `Operations` tab. This tab supports adding and deleting records, as well as editing currency values ​​with mathematical conversion of the exchange rate. Also supports the creation of translations import/export records.
+
+`gui/tabs/reports_tab.py`
+
+- `ReportTabContext` — report tab context.
+- `build_reports_tab(parent, context)` — method for building the interface of the `Reports` tab. This tab supports 2 summary modes:
   - `According to the course of the operation`
   - `At the current rate`
 - The exchange rate difference is displayed as a separate line (`FX Difference`).
 - Monthly aggregates and charts are always calculated in fixed mode (`amount_kzt`).
-- The `Settings` tab allows managing wallets and mandatory expenses.
+
+`gui/tabs/settings_tab.py`
+
+- `SettingsTabContext` — context of the settings tab.
+- `build_settings_tab(parent, context, import_formats)` — method for building the interface of the `Settings` tab. This tab allows you to manage wallets and mandatory expenses.
 
 `gui/controllers`
 
@@ -572,6 +617,7 @@ project/
 │
 ├── app/                        # Application layer
 │   ├── __init__.py
+│   ├── record_service.py       # Service for records
 │   ├── services.py             # CurrencyService adapter
 │   └── use_cases.py            # Use cases
 │
@@ -599,6 +645,12 @@ project/
 │   └── pdf_utils.py
 │
 ├── gui/                        # GUI layer (Tkinter)
+│   ├── tabs/
+│   │   ├── infographics_tab.py # Tab with infographics
+│   │   ├── operations_tab.py   # Tab with operations and transfers
+│   │   ├── reports_tab.py      # Tab with reports
+│   │   └── settings_tab.py     # Tab with wallets and mandatory expenses
+│   │
 │   ├── __init__.py
 │   ├── tkinter_gui.py          # Main GUI application
 │   ├── helpers.py              # Helpers for GUI
@@ -630,6 +682,7 @@ project/
     ├── test_wallet_phase1.py
     ├── test_wallet_phase2.py
     ├── test_wallet_phase3.py
+    ├── test_phase33_immutable_repo_service.py
     └── test_phase4_import_export.py
 ```
 

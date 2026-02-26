@@ -1,0 +1,101 @@
+import os
+import tempfile
+from dataclasses import FrozenInstanceError
+from unittest.mock import Mock
+
+import pytest
+
+from app.record_service import RecordService
+from domain.records import ExpenseRecord, IncomeRecord
+from infrastructure.repositories import JsonFileRecordRepository, RecordRepository
+
+
+def test_record_is_immutable():
+    record = IncomeRecord(
+        date="2026-01-01",
+        amount_original=100.0,
+        amount_kzt=50000.0,
+        currency="USD",
+        rate_at_operation=500.0,
+        category="Salary",
+    )
+    with pytest.raises(FrozenInstanceError):
+        record.with_updated_amount_kzt(123.0)
+
+
+def test_with_updated_amount_kzt_returns_new_object():
+    record = IncomeRecord(
+        date="2026-01-01",
+        amount_original=100.0,
+        amount_kzt=50000.0,
+        currency="USD",
+        rate_at_operation=500.0,
+        category="Salary",
+    )
+
+    updated = record.with_updated_amount_kzt(51001.987)
+
+    assert updated is not record
+    assert updated.id == record.id
+    assert updated.amount_kzt == 51001.99
+    assert updated.rate_at_operation == 510.0199
+    assert record.amount_kzt == 50000.0
+
+
+def test_repository_replace_updates_record():
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
+    tmp.close()
+    try:
+        repo = JsonFileRecordRepository(tmp.name)
+        record = IncomeRecord(
+            date="2026-01-01",
+            amount_original=100.0,
+            amount_kzt=50000.0,
+            currency="USD",
+            rate_at_operation=500.0,
+            category="Salary",
+        )
+        repo.save(record)
+
+        updated = record.with_updated_amount_kzt(52000.0)
+        repo.replace(updated)
+
+        stored = repo.get_by_id(record.id)
+        assert stored.amount_kzt == 52000.0
+        assert stored.rate_at_operation == 520.0
+    finally:
+        os.unlink(tmp.name)
+
+
+def test_service_blocks_transfer_edit():
+    repo = Mock(spec=RecordRepository)
+    transfer_record = ExpenseRecord(
+        date="2026-01-01",
+        wallet_id=1,
+        transfer_id=11,
+        amount_original=10.0,
+        currency="USD",
+        rate_at_operation=500.0,
+        amount_kzt=5000.0,
+        category="Transfer",
+    )
+    repo.get_by_id.return_value = transfer_record
+
+    service = RecordService(repo)
+    with pytest.raises(ValueError, match="Transfer-linked"):
+        service.update_amount_kzt(transfer_record.id, 6000.0)
+    repo.replace.assert_not_called()
+
+
+def test_domain_invariant_preserved():
+    record = IncomeRecord(
+        date="2026-01-01",
+        amount_original=0.0,
+        amount_kzt=0.0,
+        currency="KZT",
+        rate_at_operation=1.0,
+        category="Salary",
+    )
+
+    with pytest.raises(ValueError, match="amount_original"):
+        record.with_updated_amount_kzt(100.0)

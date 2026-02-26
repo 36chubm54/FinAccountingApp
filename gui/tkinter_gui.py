@@ -45,7 +45,7 @@ class FinancialApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Financial Accounting")
-        self.geometry("1000x800")
+        self.geometry("1100x800")
         self.minsize(900, 600)
 
         self.repository = JsonFileRecordRepository(
@@ -58,6 +58,7 @@ class FinancialApp(tk.Tk):
         self._busy = False
         self._list_index_to_record_id: dict[int, str] = {}
         self._record_id_to_repo_index: dict[str, int] = {}
+        self._record_id_to_domain_id: dict[str, int] = {}
         self._chart_refresh_suspended = False
 
         self.records_listbox: Listbox | None = None
@@ -189,9 +190,12 @@ class FinancialApp(tk.Tk):
         self.records_listbox.delete(0, tk.END)
         self._list_index_to_record_id = {}
         self._record_id_to_repo_index = {}
+        self._record_id_to_domain_id = {}
         for list_index, item in enumerate(self.controller.build_record_list_items()):
             self._list_index_to_record_id[list_index] = item.record_id
             self._record_id_to_repo_index[item.record_id] = item.repository_index
+            if item.domain_record_id is not None:
+                self._record_id_to_domain_id[item.record_id] = item.domain_record_id
             self.records_listbox.insert(tk.END, item.label)
 
     def _refresh_charts(self) -> None:

@@ -4,12 +4,16 @@ import os
 import tempfile
 import threading
 from abc import ABC, abstractmethod
+from dataclasses import replace as dc_replace
 from datetime import date as dt_date
+from typing import TypeVar, cast
 
 from domain.errors import DomainError
 from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord, Record
 from domain.transfers import Transfer
 from domain.wallets import Wallet
+
+T = TypeVar("T", bound=Record)
 
 logger = logging.getLogger(__name__)
 SYSTEM_WALLET_ID = 1
@@ -77,6 +81,21 @@ class RecordRepository(ABC):
 
     @abstractmethod
     def load_all(self) -> list[Record]:
+        pass
+
+    @abstractmethod
+    def list_all(self) -> list[Record]:
+        """List all records (SQL-ready alias)."""
+        pass
+
+    @abstractmethod
+    def get_by_id(self, record_id: int) -> Record:
+        """Return record by id or raise ValueError."""
+        pass
+
+    @abstractmethod
+    def replace(self, record: Record) -> None:
+        """Replace record by id."""
         pass
 
     @abstractmethod
@@ -331,7 +350,16 @@ class JsonFileRecordRepository(RecordRepository):
             data.pop("initial_balance", None)
             migrated = True
 
+        seen_record_ids: set[int] = set()
+        next_record_id = self._next_record_id_from_items(data["records"])
         for item in data["records"]:
+            if isinstance(item, dict):
+                raw_id = self._as_int(item.get("id"), 0)
+                if raw_id <= 0 or raw_id in seen_record_ids:
+                    item["id"] = next_record_id
+                    next_record_id += 1
+                    migrated = True
+                seen_record_ids.add(int(item["id"]))
             if isinstance(item, dict) and "wallet_id" not in item:
                 item["wallet_id"] = SYSTEM_WALLET_ID
                 migrated = True
@@ -351,6 +379,17 @@ class JsonFileRecordRepository(RecordRepository):
                         item["description"] = f"{description} {marker}".strip()
                     item["transfer_id"] = None
                     migrated = True
+
+        seen_mandatory_ids: set[int] = set()
+        for item in data["mandatory_expenses"]:
+            if not isinstance(item, dict):
+                continue
+            raw_id = self._as_int(item.get("id"), 0)
+            if raw_id <= 0 or raw_id in seen_mandatory_ids:
+                item["id"] = next_record_id
+                next_record_id += 1
+                migrated = True
+            seen_mandatory_ids.add(int(item["id"]))
 
         self._validate_transfer_integrity(data)
 
@@ -385,9 +424,40 @@ class JsonFileRecordRepository(RecordRepository):
         except (TypeError, ValueError):
             return default
 
+    @staticmethod
+    def _as_int(value, default: int = 0) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _next_record_id_from_items(items: list[dict]) -> int:
+        max_id = 0
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            max_id = max(max_id, int(JsonFileRecordRepository._as_float(item.get("id"), 0.0)))
+        return max_id + 1
+
+    def _ensure_unique_record_id(self, record: T, data: dict) -> T:
+        existing_ids: set[int] = set()
+        for item in data.get("records", []):
+            if isinstance(item, dict):
+                existing_ids.add(self._as_int(item.get("id"), 0))
+        for item in data.get("mandatory_expenses", []):
+            if isinstance(item, dict):
+                existing_ids.add(self._as_int(item.get("id"), 0))
+        record_id = int(getattr(record, "id", 0) or 0)
+        if record_id > 0 and record_id not in existing_ids:
+            return record
+        next_id = max(existing_ids or {0}) + 1
+        return cast(T, dc_replace(record, id=next_id))
+
     def _record_to_dict(self, record: Record, record_type: str) -> dict:
         record_date = record.date.isoformat() if isinstance(record.date, dt_date) else record.date
         payload = {
+            "id": int(getattr(record, "id", 0) or 0),
             "type": record_type,
             "date": record_date,
             "wallet_id": int(getattr(record, "wallet_id", SYSTEM_WALLET_ID)),
@@ -418,6 +488,7 @@ class JsonFileRecordRepository(RecordRepository):
             rate_at_operation = 1.0
 
         return {
+            "id": int(self._as_float(item.get("id"), 0.0)),
             "date": str(item.get("date", "") or ""),
             "wallet_id": int(self._as_float(item.get("wallet_id"), float(SYSTEM_WALLET_ID))),
             "transfer_id": (
@@ -592,6 +663,7 @@ class JsonFileRecordRepository(RecordRepository):
     def save(self, record: Record) -> None:
         with self._lock:
             data = self._load_data()
+            record = self._ensure_unique_record_id(record, data)
             if isinstance(record, MandatoryExpenseRecord):
                 record_data = self._record_to_dict(record, "mandatory_expense")
             else:
@@ -630,6 +702,37 @@ class JsonFileRecordRepository(RecordRepository):
                 logger.exception("Skipping invalid record at index %s: %s", index, e)
                 continue
         return records
+
+    def list_all(self) -> list[Record]:
+        return self.load_all()
+
+    def get_by_id(self, record_id: int) -> Record:
+        record_id = int(record_id)
+        for record in self.load_all():
+            if int(getattr(record, "id", 0)) == record_id:
+                return record
+        raise ValueError(f"Record not found: {record_id}")
+
+    def replace(self, record: Record) -> None:
+        target_id = int(getattr(record, "id", 0))
+        if target_id <= 0:
+            raise ValueError("Record id must be positive")
+        with self._lock:
+            data = self._load_data()
+            updated = False
+            for index, item in enumerate(data.get("records", [])):
+                if isinstance(item, dict) and self._as_int(item.get("id"), 0) == target_id:
+                    record_type = (
+                        "mandatory_expense"
+                        if isinstance(record, MandatoryExpenseRecord)
+                        else ("income" if isinstance(record, IncomeRecord) else "expense")
+                    )
+                    data["records"][index] = self._record_to_dict(record, record_type)
+                    updated = True
+                    break
+            if not updated:
+                raise ValueError(f"Record not found: {target_id}")
+            self._save_data(data)
 
     def delete_by_index(self, index: int) -> bool:
         """Delete record by index. Returns True if deleted, False if index out of range."""
@@ -674,6 +777,7 @@ class JsonFileRecordRepository(RecordRepository):
         """Save mandatory expense."""
         with self._lock:
             data = self._load_data()
+            expense = self._ensure_unique_record_id(expense, data)
             if "mandatory_expenses" not in data:
                 data["mandatory_expenses"] = []
             expense_data = self._record_to_dict(expense, "mandatory_expense")
