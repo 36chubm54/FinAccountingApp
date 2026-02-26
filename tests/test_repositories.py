@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from domain.records import ExpenseRecord, IncomeRecord
+from domain.records import ExpenseRecord, IncomeRecord, MandatoryExpenseRecord
 from infrastructure.repositories import JsonFileRecordRepository, RecordRepository
 
 
@@ -175,6 +175,77 @@ class TestJsonFileRecordRepository:
 
         expenses = self.repo.load_mandatory_expenses()
         assert len(expenses) == 2
+
+    def test_save_mandatory_expenses_ids_start_from_one(self):
+        self.repo.save(IncomeRecord(date="2025-01-01", _amount_init=100.0, category="Salary"))
+        self.repo.save_mandatory_expense(
+            MandatoryExpenseRecord(
+                date="",
+                _amount_init=10.0,
+                category="Mandatory",
+                description="A",
+                period="monthly",
+            )
+        )
+        self.repo.save_mandatory_expense(
+            MandatoryExpenseRecord(
+                date="",
+                _amount_init=20.0,
+                category="Mandatory",
+                description="B",
+                period="monthly",
+            )
+        )
+        expenses = self.repo.load_mandatory_expenses()
+        assert [expense.id for expense in expenses] == [1, 2]
+
+    def test_load_data_normalizes_mandatory_ids_from_one(self):
+        json_data = {
+            "wallets": [
+                {
+                    "id": 1,
+                    "name": "Main wallet",
+                    "currency": "KZT",
+                    "initial_balance": 0.0,
+                    "system": True,
+                    "allow_negative": False,
+                    "is_active": True,
+                }
+            ],
+            "records": [],
+            "mandatory_expenses": [
+                {
+                    "id": 11,
+                    "date": "",
+                    "wallet_id": 1,
+                    "amount_original": 10.0,
+                    "currency": "KZT",
+                    "rate_at_operation": 1.0,
+                    "amount_kzt": 10.0,
+                    "category": "Mandatory",
+                    "description": "A",
+                    "period": "monthly",
+                },
+                {
+                    "id": 77,
+                    "date": "",
+                    "wallet_id": 1,
+                    "amount_original": 20.0,
+                    "currency": "KZT",
+                    "rate_at_operation": 1.0,
+                    "amount_kzt": 20.0,
+                    "category": "Mandatory",
+                    "description": "B",
+                    "period": "monthly",
+                },
+            ],
+            "transfers": [],
+        }
+        with open(self.temp_file.name, "w", encoding="utf-8") as f:
+            json.dump(json_data, f)
+
+        expenses = self.repo.load_mandatory_expenses()
+        assert [expense.id for expense in expenses] == [1, 2]
 
     def test_delete_by_index_success(self):
         # Setup: add some records

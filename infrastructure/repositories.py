@@ -380,16 +380,17 @@ class JsonFileRecordRepository(RecordRepository):
                     item["transfer_id"] = None
                     migrated = True
 
+        normalized_mandatory_id = 1
         seen_mandatory_ids: set[int] = set()
         for item in data["mandatory_expenses"]:
             if not isinstance(item, dict):
                 continue
             raw_id = self._as_int(item.get("id"), 0)
-            if raw_id <= 0 or raw_id in seen_mandatory_ids:
-                item["id"] = next_record_id
-                next_record_id += 1
+            if raw_id != normalized_mandatory_id or raw_id in seen_mandatory_ids:
+                item["id"] = normalized_mandatory_id
                 migrated = True
             seen_mandatory_ids.add(int(item["id"]))
+            normalized_mandatory_id += 1
 
         self._validate_transfer_integrity(data)
 
@@ -440,14 +441,28 @@ class JsonFileRecordRepository(RecordRepository):
             max_id = max(max_id, int(JsonFileRecordRepository._as_float(item.get("id"), 0.0)))
         return max_id + 1
 
+    @staticmethod
+    def _next_mandatory_id_from_items(items: list[dict]) -> int:
+        max_id = 0
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            max_id = max(max_id, int(JsonFileRecordRepository._as_float(item.get("id"), 0.0)))
+        return max_id + 1
+
     def _ensure_unique_record_id(self, record: T, data: dict) -> T:
-        existing_ids: set[int] = set()
-        for item in data.get("records", []):
-            if isinstance(item, dict):
-                existing_ids.add(self._as_int(item.get("id"), 0))
-        for item in data.get("mandatory_expenses", []):
-            if isinstance(item, dict):
-                existing_ids.add(self._as_int(item.get("id"), 0))
+        if isinstance(record, MandatoryExpenseRecord):
+            existing_ids = {
+                self._as_int(item.get("id"), 0)
+                for item in data.get("mandatory_expenses", [])
+                if isinstance(item, dict)
+            }
+        else:
+            existing_ids = {
+                self._as_int(item.get("id"), 0)
+                for item in data.get("records", [])
+                if isinstance(item, dict)
+            }
         record_id = int(getattr(record, "id", 0) or 0)
         if record_id > 0 and record_id not in existing_ids:
             return record
@@ -777,7 +792,8 @@ class JsonFileRecordRepository(RecordRepository):
         """Save mandatory expense."""
         with self._lock:
             data = self._load_data()
-            expense = self._ensure_unique_record_id(expense, data)
+            next_id = self._next_mandatory_id_from_items(data.get("mandatory_expenses", []))
+            expense = dc_replace(expense, id=next_id)
             if "mandatory_expenses" not in data:
                 data["mandatory_expenses"] = []
             expense_data = self._record_to_dict(expense, "mandatory_expense")
@@ -852,8 +868,8 @@ class JsonFileRecordRepository(RecordRepository):
         with self._lock:
             data = self._load_data()
             data["mandatory_expenses"] = []
-            for expense in expenses:
-                payload = self._record_to_dict(expense, "mandatory_expense")
+            for index, expense in enumerate(expenses, start=1):
+                payload = self._record_to_dict(dc_replace(expense, id=index), "mandatory_expense")
                 payload.pop("type", None)
                 data["mandatory_expenses"].append(payload)
             self._save_data(data)
