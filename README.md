@@ -40,8 +40,11 @@ python -m venv .venv
 # Активация (Linux/macOS)
 source .venv/bin/activate
 
-# Установка зависимостей
+# Установка runtime-зависимостей
 pip install -r requirements.txt
+
+# Установка dev-зависимостей (тесты, coverage)
+pip install -r requirements-dev.txt
 ```
 
 ### Первый запуск
@@ -558,7 +561,8 @@ project/
 ├── main.py                     # Точка входа приложения
 ├── records.json                # Хранилище записей (создаётся автоматически)
 ├── currency_rates.json         # Кэш курсов валют (use_online=True)
-├── requirements.txt            # Python-зависимости
+├── requirements.txt            # Runtime-зависимости
+├── requirements-dev.txt        # Dev-зависимости (тесты, coverage)
 ├── pytest.ini                  # Настройки pytest
 ├── pyproject.toml              # Конфигурация проекта
 ├── README.md                   # Эта документация
@@ -639,6 +643,9 @@ project/
 # Перейти в директорию проекта
 cd "Проект ФУ/project"
 
+# Установка dev-зависимостей (если не установлены)
+pip install -r requirements-dev.txt
+
 # Запуск всех тестов
 pytest
 
@@ -655,7 +662,7 @@ pytest tests/test_reports.py::test_report_total -v
 ### Покрытие
 
 ```bash
-pip install pytest-cov
+pip install -r requirements-dev.txt
 pytest --cov=. --cov-report=term-missing
 pytest --cov=. --cov-report=html
 ```

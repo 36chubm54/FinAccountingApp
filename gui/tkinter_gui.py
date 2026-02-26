@@ -1,25 +1,22 @@
 import logging
-import os
 import sys
 import tkinter as tk
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
-from tkinter import (
-    VERTICAL,
-    Listbox,
-    filedialog,
-    messagebox,
-    ttk,
-)
+from tkinter import Listbox, messagebox, ttk
 from typing import Any
 
 from app.services import CurrencyService
 from domain.import_policy import ImportPolicy
-from domain.reports import Report
 from gui.controllers import FinancialController
-from gui.helpers import open_in_file_manager
+from gui.tabs import (
+    build_infographics_tab,
+    build_operations_tab,
+    build_reports_tab,
+    build_settings_tab,
+)
 from infrastructure.repositories import JsonFileRecordRepository
 from utils.charting import (
     aggregate_daily_cashflow,
@@ -38,23 +35,14 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 IMPORT_FORMATS = {
-    "CSV": {
-        "ext": ".csv",
-        "desc": "CSV",
-    },
-    "XLSX": {
-        "ext": ".xlsx",
-        "desc": "Excel",
-    },
-    "JSON": {
-        "ext": ".json",
-        "desc": "JSON",
-    },
+    "CSV": {"ext": ".csv", "desc": "CSV"},
+    "XLSX": {"ext": ".xlsx", "desc": "Excel"},
+    "JSON": {"ext": ".json", "desc": "JSON"},
 }
 
 
 class FinancialApp(tk.Tk):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.title("Financial Accounting")
         self.geometry("1000x800")
@@ -65,12 +53,29 @@ class FinancialApp(tk.Tk):
         )
         self.currency = CurrencyService()
         self.controller = FinancialController(self.repository, self.currency)
+
         self._executor = ThreadPoolExecutor(max_workers=2)
         self._busy = False
         self._list_index_to_record_id: dict[int, str] = {}
         self._record_id_to_repo_index: dict[str, int] = {}
+        self._chart_refresh_suspended = False
 
-        # Build main Notebook with four tabs
+        self.records_listbox: Listbox | None = None
+        self.refresh_operation_wallet_menu: Callable[[], None] | None = None
+        self.refresh_transfer_wallet_menus: Callable[[], None] | None = None
+
+        self.pie_month_var: tk.StringVar | None = None
+        self.pie_month_menu: ttk.OptionMenu | None = None
+        self.chart_month_var: tk.StringVar | None = None
+        self.chart_month_menu: ttk.OptionMenu | None = None
+        self.chart_year_var: tk.StringVar | None = None
+        self.chart_year_menu: ttk.OptionMenu | None = None
+        self.expense_pie_canvas: tk.Canvas | None = None
+        self.expense_legend_canvas: tk.Canvas | None = None
+        self.expense_legend_frame: tk.Frame | None = None
+        self.daily_bar_canvas: tk.Canvas | None = None
+        self.monthly_bar_canvas: tk.Canvas | None = None
+
         notebook = ttk.Notebook(self)
         notebook.pack(fill=tk.BOTH, expand=True)
 
@@ -84,17 +89,39 @@ class FinancialApp(tk.Tk):
         notebook.add(self.tab_reports, text="Reports")
         notebook.add(self.tab_settings, text="Settings")
 
-        # Build UI inside tabs
-        self.infographics_tab(self.tab_infographics)
-        self.operations_tab(self.tab_operations)
-        self.reports_tab(self.tab_reports)
-        self.settings_tab(self.tab_settings)
+        infographics = build_infographics_tab(
+            self.tab_infographics,
+            on_chart_filter_change=self._on_chart_filter_change,
+            on_refresh_charts=self._refresh_charts,
+            on_legend_mousewheel=self._on_legend_mousewheel,
+            bind_all=self.bind_all,
+            after=self.after,
+            after_cancel=self.after_cancel,
+        )
+        self.pie_month_var = infographics.pie_month_var
+        self.pie_month_menu = infographics.pie_month_menu
+        self.chart_month_var = infographics.chart_month_var
+        self.chart_month_menu = infographics.chart_month_menu
+        self.chart_year_var = infographics.chart_year_var
+        self.chart_year_menu = infographics.chart_year_menu
+        self.expense_pie_canvas = infographics.expense_pie_canvas
+        self.expense_legend_canvas = infographics.expense_legend_canvas
+        self.expense_legend_frame = infographics.expense_legend_frame
+        self.daily_bar_canvas = infographics.daily_bar_canvas
+        self.monthly_bar_canvas = infographics.monthly_bar_canvas
+
+        operations = build_operations_tab(self.tab_operations, self, IMPORT_FORMATS)
+        self.records_listbox = operations.records_listbox
+        self.refresh_operation_wallet_menu = operations.refresh_operation_wallet_menu
+        self.refresh_transfer_wallet_menus = operations.refresh_transfer_wallet_menus
+
+        build_reports_tab(self.tab_reports, self)
+        build_settings_tab(self.tab_settings, self, IMPORT_FORMATS)
 
         self.progress = ttk.Progressbar(self, mode="indeterminate")
         self.progress.pack(fill=tk.X, padx=8, pady=(0, 8))
         self.progress.pack_forget()
 
-        # Initial data refresh
         self._refresh_charts()
 
     def destroy(self) -> None:
@@ -149,1330 +176,6 @@ class FinancialApp(tk.Tk):
 
         self.after(100, _poll)
 
-    def infographics_tab(self, parent: tk.Frame | ttk.Frame) -> None:
-        pie_frame = ttk.LabelFrame(parent, text="Expenses by category")
-        pie_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
-
-        pie_controls = tk.Frame(pie_frame)
-        pie_controls.pack(fill=tk.X, padx=10, pady=(8, 0))
-        ttk.Label(pie_controls, text="Month:").pack(side=tk.LEFT)
-
-        self.pie_month_var = tk.StringVar()
-        self.pie_month_menu = ttk.OptionMenu(pie_controls, self.pie_month_var, "")
-        self.pie_month_menu.pack(side=tk.LEFT, padx=6)
-        self.pie_month_var.trace_add("write", self._on_chart_filter_change)
-
-        daily_frame = ttk.LabelFrame(parent, text="Income/expense by day of month")
-        daily_frame.grid(row=1, column=1, sticky="nsew", padx=10, pady=10)
-
-        monthly_frame = ttk.LabelFrame(parent, text="Income/expense by months of year")
-        monthly_frame.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
-
-        parent.grid_columnconfigure(0, weight=1)
-        parent.grid_columnconfigure(1, weight=1)
-        parent.grid_rowconfigure(1, weight=1)
-        parent.grid_rowconfigure(2, weight=1)
-
-        self.expense_pie_canvas = tk.Canvas(pie_frame, height=240, bg="white", highlightthickness=0)
-        self.expense_pie_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 6))
-
-        legend_container = tk.Frame(pie_frame)
-        legend_container.pack(fill=tk.BOTH, expand=False, padx=10, pady=(0, 10))
-        self.expense_legend_canvas = tk.Canvas(legend_container, height=110, highlightthickness=0)
-        self.expense_legend_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        legend_scroll = ttk.Scrollbar(
-            legend_container,
-            orient="vertical",
-            command=self.expense_legend_canvas.yview,
-        )
-        legend_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.expense_legend_canvas.configure(yscrollcommand=legend_scroll.set)
-
-        self.expense_legend_frame = tk.Frame(self.expense_legend_canvas)
-        self.expense_legend_canvas.create_window(
-            (0, 0), window=self.expense_legend_frame, anchor="nw"
-        )
-
-        def _update_legend_scroll(_event=None):
-            self.expense_legend_canvas.configure(
-                scrollregion=self.expense_legend_canvas.bbox("all")
-            )
-
-        self.expense_legend_frame.bind("<Configure>", _update_legend_scroll)
-        self.expense_legend_canvas.bind("<MouseWheel>", self._on_legend_mousewheel)
-        self.expense_legend_frame.bind("<MouseWheel>", self._on_legend_mousewheel)
-
-        self.bind_all("<MouseWheel>", self._on_legend_mousewheel)
-
-        daily_controls = tk.Frame(daily_frame)
-        daily_controls.pack(fill=tk.X, padx=10, pady=(10, 0))
-        ttk.Label(daily_controls, text="Month:").pack(side=tk.LEFT)
-
-        self.chart_month_var = tk.StringVar()
-        self.chart_month_menu = ttk.OptionMenu(daily_controls, self.chart_month_var, "")
-        self.chart_month_menu.pack(side=tk.LEFT, padx=6)
-        self.chart_month_var.trace_add("write", self._on_chart_filter_change)
-
-        self.daily_bar_canvas = tk.Canvas(daily_frame, height=220, bg="white", highlightthickness=0)
-        self.daily_bar_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        monthly_controls = tk.Frame(monthly_frame)
-        monthly_controls.pack(fill=tk.X, padx=10, pady=(10, 0))
-        ttk.Label(monthly_controls, text="Year:").pack(side=tk.LEFT)
-
-        self.chart_year_var = tk.StringVar()
-        self.chart_year_menu = ttk.OptionMenu(monthly_controls, self.chart_year_var, "")
-        self.chart_year_menu.pack(side=tk.LEFT, padx=6)
-        self.chart_year_var.trace_add("write", self._on_chart_filter_change)
-
-        self.monthly_bar_canvas = tk.Canvas(
-            monthly_frame, height=220, bg="white", highlightthickness=0
-        )
-        self.monthly_bar_canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        self._chart_refresh_suspended = False
-        self._chart_redraw_job = None
-
-        def _schedule_redraw(_event=None):
-            if self._chart_redraw_job is not None:
-                try:
-                    self.after_cancel(self._chart_redraw_job)
-                except Exception:
-                    pass
-            self._chart_redraw_job = self.after(120, self._refresh_charts)
-
-        self.expense_pie_canvas.bind("<Configure>", _schedule_redraw)
-        self.daily_bar_canvas.bind("<Configure>", _schedule_redraw)
-        self.monthly_bar_canvas.bind("<Configure>", _schedule_redraw)
-
-    def operations_tab(self, parent: tk.Frame | ttk.Frame) -> None:
-        parent.grid_columnconfigure(0, weight=0)
-        parent.grid_columnconfigure(1, weight=1)
-        parent.grid_rowconfigure(0, weight=1)
-
-        # -------------------------
-        # LEFT COLUMN CONTAINER
-        # -------------------------
-        left_frame = tk.Frame(parent)
-        left_frame.grid(row=0, column=0, sticky="nsw", padx=10, pady=10)
-
-        # Left: Add operation
-        form_frame = ttk.LabelFrame(left_frame, text="Add operation")
-        form_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-        form_frame.grid_columnconfigure(1, weight=1)
-
-        ttk.Label(form_frame, text="Type:").grid(row=0, column=0, sticky="w", padx=6, pady=4)
-        type_var = tk.StringVar(value="Income")
-        ttk.OptionMenu(form_frame, type_var, "Income", "Income", "Expense").grid(
-            row=0, column=1, sticky="ew", padx=6, pady=4
-        )
-
-        ttk.Label(form_frame, text="Date (YYYY-MM-DD):").grid(
-            row=1, column=0, sticky="w", padx=6, pady=4
-        )
-        date_entry = ttk.Entry(form_frame)
-        date_entry.grid(row=1, column=1, sticky="ew", padx=6, pady=4)
-
-        ttk.Label(form_frame, text="Amount:").grid(row=2, column=0, sticky="w", padx=6, pady=4)
-        amount_entry = ttk.Entry(form_frame)
-        amount_entry.grid(row=2, column=1, sticky="ew", padx=6, pady=4)
-
-        ttk.Label(form_frame, text="Currency:").grid(row=3, column=0, sticky="w", padx=6, pady=4)
-        currency_entry = ttk.Entry(form_frame)
-        currency_entry.insert(0, "KZT")
-        currency_entry.grid(row=3, column=1, sticky="ew", padx=6, pady=4)
-
-        ttk.Label(form_frame, text="Category:").grid(row=4, column=0, sticky="w", padx=6, pady=4)
-        category_entry = ttk.Entry(form_frame)
-        category_entry.insert(0, "General")
-        category_entry.grid(row=4, column=1, sticky="ew", padx=6, pady=4)
-
-        ttk.Label(form_frame, text="Wallet:").grid(row=5, column=0, sticky="w", padx=6, pady=4)
-        operation_wallet_var = tk.StringVar(value="")
-        operation_wallet_menu = ttk.OptionMenu(form_frame, operation_wallet_var, "")
-        operation_wallet_menu.grid(row=5, column=1, sticky="ew", padx=6, pady=4)
-        operation_wallet_map: dict[str, int] = {}
-
-        def _refresh_operation_wallet_menu() -> None:
-            nonlocal operation_wallet_map
-            wallets = self.controller.load_active_wallets()
-            operation_wallet_map = {
-                f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id for wallet in wallets
-            }
-            labels = list(operation_wallet_map.keys()) or [""]
-            menu = operation_wallet_menu["menu"]
-            menu.delete(0, "end")
-            for label in labels:
-                menu.add_command(
-                    label=label,
-                    command=lambda value=label: operation_wallet_var.set(value),
-                )
-            if operation_wallet_var.get() not in operation_wallet_map:
-                operation_wallet_var.set(labels[0])
-
-        _refresh_operation_wallet_menu()
-
-        # Right: Records list
-        list_frame = ttk.LabelFrame(parent, text="List of operations")
-        list_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
-        list_frame.grid_rowconfigure(0, weight=1)
-        list_frame.grid_columnconfigure(0, weight=1)
-
-        self.records_listbox = Listbox(list_frame)
-        self.records_listbox.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
-
-        scrollbar = ttk.Scrollbar(list_frame, orient=VERTICAL, command=self.records_listbox.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns", pady=6)
-        self.records_listbox.config(yscrollcommand=scrollbar.set)
-
-        def save_record():
-            date_str = date_entry.get().strip()
-            if not date_str:
-                messagebox.showerror("Error", "Date is required.")
-                return
-            try:
-                from domain.validation import ensure_not_future, parse_ymd
-
-                entered_date = parse_ymd(date_str)
-                ensure_not_future(entered_date)
-            except ValueError as e:
-                messagebox.showerror("Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD.")
-                return
-
-            amount_str = amount_entry.get().strip()
-            if not amount_str:
-                messagebox.showerror("Error", "Amount is required.")
-                return
-            try:
-                amount = float(amount_str)
-            except ValueError:
-                messagebox.showerror("Error", "Invalid amount.")
-                return
-
-            currency = (currency_entry.get() or "KZT").strip()
-            category = (category_entry.get() or "General").strip()
-            wallet_label = operation_wallet_var.get()
-            wallet_id = operation_wallet_map.get(wallet_label)
-            if wallet_id is None:
-                messagebox.showerror("Error", "Wallet is required.")
-                return
-
-            try:
-                if type_var.get() == "Income":
-                    self.controller.create_income(
-                        date=date_str,
-                        wallet_id=wallet_id,
-                        amount=amount,
-                        currency=currency,
-                        category=category,
-                    )
-                else:
-                    self.controller.create_expense(
-                        date=date_str,
-                        wallet_id=wallet_id,
-                        amount=amount,
-                        currency=currency,
-                        category=category,
-                    )
-                if type_var.get() == "Income":
-                    messagebox.showinfo("Success", "Income record added.")
-                else:  # Expense
-                    messagebox.showinfo("Success", "Expense record added.")
-                date_entry.delete(0, tk.END)
-                amount_entry.delete(0, tk.END)
-                category_entry.delete(0, tk.END)
-                self._refresh_list()
-                self._refresh_charts()
-                _refresh_operation_wallet_menu()
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to add record: {str(e)}")
-
-        ttk.Button(form_frame, text="Save", command=save_record).grid(
-            row=6, column=0, columnspan=2, pady=8
-        )
-
-        def delete_selected():
-            if not hasattr(self, "records_listbox"):
-                messagebox.showerror("Error", "Records list is not available.")
-                return
-            selection = self.records_listbox.curselection()
-            if not selection:
-                messagebox.showerror("Error", "Please select a record to delete.")
-                return
-            list_index = selection[0]
-            record_id = self._list_index_to_record_id.get(list_index)
-            repository_index = self._record_id_to_repo_index.get(record_id) if record_id else None
-            if repository_index is None:
-                messagebox.showerror("Error", "Selected record is no longer available.")
-                self._refresh_list()
-                return
-            try:
-                transfer_id = self.controller.transfer_id_by_repository_index(repository_index)
-                if transfer_id is not None:
-                    self.controller.delete_transfer(transfer_id)
-                    messagebox.showinfo("Success", f"Deleted transfer #{transfer_id}.")
-                elif self.controller.delete_record(repository_index):
-                    messagebox.showinfo("Success", f"Deleted record at index {repository_index}.")
-                else:
-                    messagebox.showerror("Error", "Failed to delete record.")
-                    return
-                self._refresh_list()
-                self._refresh_charts()
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to delete: {str(e)}")
-
-        def delete_all():
-            confirm = messagebox.askyesno(
-                "Confirm Delete All",
-                "Are you sure you want to delete ALL records? This action cannot be undone.",
-            )
-            if confirm:
-                self.controller.delete_all_records()
-                messagebox.showinfo("Success", "All records have been deleted.")
-                self._refresh_list()
-                self._refresh_charts()
-
-        wallet_id_map: dict[str, int] = {}
-
-        def _refresh_transfer_wallet_menus() -> None:
-            nonlocal wallet_id_map
-            wallets = self.controller.load_active_wallets()
-            wallet_id_map = {
-                f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id for wallet in wallets
-            }
-            labels = list(wallet_id_map.keys()) or [""]
-
-            for menu_widget, var in (
-                (transfer_from_menu, transfer_from_var),
-                (transfer_to_menu, transfer_to_var),
-            ):
-                menu = menu_widget["menu"]
-                menu.delete(0, "end")
-                for label in labels:
-                    menu.add_command(label=label, command=lambda value=label, v=var: v.set(value))
-                if not var.get() or var.get() not in wallet_id_map:
-                    var.set(labels[0])
-            if len(labels) > 1 and transfer_to_var.get() == transfer_from_var.get():
-                transfer_to_var.set(labels[1])
-
-        # Left: Transfer
-        transfer_frame = ttk.LabelFrame(left_frame, text="Transfer")
-        transfer_frame.grid(row=1, column=0, sticky="ew")
-        transfer_frame.grid_columnconfigure(1, weight=1)
-
-        ttk.Label(transfer_frame, text="From wallet:").grid(
-            row=0, column=0, sticky="w", padx=4, pady=2
-        )
-        transfer_from_var = tk.StringVar(value="")
-        transfer_from_menu = ttk.OptionMenu(transfer_frame, transfer_from_var, "")
-        transfer_from_menu.grid(row=0, column=1, sticky="ew", padx=4, pady=2)
-
-        ttk.Label(transfer_frame, text="To wallet:").grid(
-            row=1, column=0, sticky="w", padx=4, pady=2
-        )
-        transfer_to_var = tk.StringVar(value="")
-        transfer_to_menu = ttk.OptionMenu(transfer_frame, transfer_to_var, "")
-        transfer_to_menu.grid(row=1, column=1, sticky="ew", padx=4, pady=2)
-
-        ttk.Label(transfer_frame, text="Date:").grid(row=2, column=0, sticky="w", padx=4, pady=2)
-        transfer_date_entry = ttk.Entry(transfer_frame)
-        transfer_date_entry.grid(row=2, column=1, sticky="ew", padx=4, pady=2)
-        transfer_date_entry.insert(0, date.today().isoformat())
-
-        ttk.Label(transfer_frame, text="Amount:").grid(row=3, column=0, sticky="w", padx=4, pady=2)
-        transfer_amount_entry = ttk.Entry(transfer_frame)
-        transfer_amount_entry.grid(row=3, column=1, sticky="ew", padx=4, pady=2)
-
-        ttk.Label(transfer_frame, text="Currency:").grid(
-            row=4, column=0, sticky="w", padx=4, pady=2
-        )
-        transfer_currency_entry = ttk.Entry(transfer_frame)
-        transfer_currency_entry.insert(0, "KZT")
-        transfer_currency_entry.grid(row=4, column=1, sticky="ew", padx=4, pady=2)
-
-        ttk.Label(transfer_frame, text="Commission:").grid(
-            row=5, column=0, sticky="w", padx=4, pady=2
-        )
-        transfer_commission_entry = ttk.Entry(transfer_frame)
-        transfer_commission_entry.insert(0, "0")
-        transfer_commission_entry.grid(row=5, column=1, sticky="ew", padx=4, pady=2)
-
-        ttk.Label(transfer_frame, text="Commission currency:").grid(
-            row=6, column=0, sticky="w", padx=4, pady=2
-        )
-        transfer_commission_currency_entry = ttk.Entry(transfer_frame)
-        transfer_commission_currency_entry.insert(0, "KZT")
-        transfer_commission_currency_entry.grid(row=6, column=1, sticky="ew", padx=4, pady=2)
-
-        ttk.Label(transfer_frame, text="Description:").grid(
-            row=7, column=0, sticky="w", padx=4, pady=2
-        )
-        transfer_description_entry = ttk.Entry(transfer_frame)
-        transfer_description_entry.grid(row=7, column=1, sticky="ew", padx=4, pady=2)
-
-        def create_transfer() -> None:
-            from_label = transfer_from_var.get()
-            to_label = transfer_to_var.get()
-            from_wallet_id = wallet_id_map.get(from_label)
-            to_wallet_id = wallet_id_map.get(to_label)
-            if from_wallet_id is None or to_wallet_id is None:
-                messagebox.showerror("Error", "Please select source and destination wallets.")
-                return
-
-            date_str = transfer_date_entry.get().strip()
-            if not date_str:
-                messagebox.showerror("Error", "Transfer date is required.")
-                return
-            try:
-                from domain.validation import ensure_not_future, parse_ymd
-
-                entered_date = parse_ymd(date_str)
-                ensure_not_future(entered_date)
-            except ValueError as e:
-                messagebox.showerror("Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD.")
-                return
-
-            amount_str = transfer_amount_entry.get().strip()
-            if not amount_str:
-                messagebox.showerror("Error", "Transfer amount is required.")
-                return
-
-            try:
-                transfer_amount = float(amount_str)
-                commission_amount = float((transfer_commission_entry.get() or "0").strip())
-            except ValueError:
-                messagebox.showerror("Error", "Transfer amount/commission must be numeric.")
-                return
-
-            try:
-                transfer_id = self.controller.create_transfer(
-                    from_wallet_id=from_wallet_id,
-                    to_wallet_id=to_wallet_id,
-                    transfer_date=date_str,
-                    amount=transfer_amount,
-                    currency=(transfer_currency_entry.get() or "KZT").strip(),
-                    description=transfer_description_entry.get().strip(),
-                    commission_amount=commission_amount,
-                    commission_currency=(transfer_commission_currency_entry.get() or "").strip(),
-                )
-                messagebox.showinfo("Success", f"Transfer created (id={transfer_id}).")
-                transfer_amount_entry.delete(0, tk.END)
-                transfer_description_entry.delete(0, tk.END)
-                transfer_commission_entry.delete(0, tk.END)
-                transfer_commission_entry.insert(0, "0")
-                self._refresh_list()
-                self._refresh_charts()
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to create transfer: {str(e)}")
-
-        ttk.Button(transfer_frame, text="Create transfer", command=create_transfer).grid(
-            row=8, column=0, columnspan=2, pady=6
-        )
-
-        self._refresh_transfer_wallet_menus = _refresh_transfer_wallet_menus
-        self._refresh_operation_wallet_menu = _refresh_operation_wallet_menu
-        _refresh_transfer_wallet_menus()
-
-        def import_records_data():
-            mode_label = import_mode_var.get()
-            policy = self._import_policy_from_ui(mode_label)
-            fmt = import_format_var.get()
-            cfg = IMPORT_FORMATS.get(fmt)
-            if not cfg:
-                messagebox.showerror("Error", f"Unsupported import format: {fmt}")
-                return
-
-            filepath = filedialog.askopenfilename(
-                defaultextension=cfg["ext"],
-                filetypes=[(f"{fmt} files", f"*{cfg['ext']}"), ("All files", "*.*")],
-                title=f"Select {cfg['desc']} file to import",
-            )
-            if not filepath:
-                return
-
-            if policy == ImportPolicy.CURRENT_RATE:
-                messagebox.showwarning(
-                    "Current Rate Import",
-                    "For CURRENT_RATE mode, exchange rates will be fixed at import time.",
-                )
-
-            if not messagebox.askyesno(
-                "Confirm Import",
-                f"Are you sure you want to import from file '{filepath}'?"
-                "\nThis will replace all existing records.",
-            ):
-                return
-
-            def _task() -> tuple[int, int, list[str]]:
-                return self.controller.import_records(fmt, filepath, policy)
-
-            def _on_success(result: tuple[int, int, list[str]]) -> None:
-                imported_count, skipped_count, errors = result
-                details = ""
-                if skipped_count:
-                    details = f"\nSkipped: {skipped_count} rows.\nFirst errors:\n- " + "\n- ".join(
-                        errors[:5]
-                    )
-                messagebox.showinfo(
-                    "Success",
-                    f"Successfully imported {imported_count} records from {cfg['desc']} file."
-                    "\nAll existing records have been replaced." + details,
-                )
-                self._refresh_list()
-                self._refresh_charts()
-
-            def _on_error(exc: BaseException) -> None:
-                if isinstance(exc, FileNotFoundError):
-                    logger.error("%s import file not found: %s", cfg["desc"], filepath)
-                    messagebox.showerror("Error", f"File not found: {filepath}")
-                    return
-                logger.error("Failed to import %s from %s: %s", cfg["desc"], filepath, exc)
-                messagebox.showerror("Error", f"Failed to import {cfg['desc']}: {str(exc)}")
-
-            self._run_background(
-                _task,
-                on_success=_on_success,
-                on_error=_on_error,
-                busy_message=f"Importing {cfg['desc']}...",
-            )
-
-        def export_records_data():
-            fmt = import_format_var.get()
-            cfg = IMPORT_FORMATS.get(fmt)
-            if not cfg or fmt == "JSON":
-                messagebox.showerror("Error", "Unsupported export format for records.")
-                return
-            filepath = filedialog.asksaveasfilename(
-                defaultextension=cfg["ext"],
-                filetypes=[
-                    (f"{cfg['desc']} files", f"*{cfg['ext']}"),
-                    ("All files", "*.*"),
-                ],
-                title=f"Save records as {cfg['desc']}",
-            )
-            if not filepath:
-                return
-            records = self.repository.load_all()
-            transfers = self.repository.load_transfers()
-
-            def _task() -> None:
-                from gui.exporters import export_records
-
-                export_records(
-                    records,
-                    filepath,
-                    fmt.lower(),
-                    transfers=transfers,
-                )
-
-            def _on_success(_: Any) -> None:
-                messagebox.showinfo("Success", f"Records exported to {filepath}")
-                open_in_file_manager(os.path.dirname(filepath))
-
-            self._run_background(
-                _task,
-                on_success=_on_success,
-                busy_message=f"Exporting {cfg['desc']}...",
-            )
-
-        btn_frame = tk.Frame(list_frame)
-        btn_frame.grid(row=1, column=0, columnspan=2, pady=6)
-
-        ttk.Button(btn_frame, text="Delete Selected", command=delete_selected).pack(
-            side=tk.LEFT, padx=6
-        )
-        ttk.Button(btn_frame, text="Delete All", command=delete_all).pack(side=tk.LEFT, padx=6)
-        ttk.Button(btn_frame, text="Refresh", command=self._refresh_list).pack(side=tk.LEFT, padx=6)
-
-        # Import controls (reuse existing import handler)
-        import_mode_var = tk.StringVar(value="Full Backup")
-        ttk.OptionMenu(
-            btn_frame,
-            import_mode_var,
-            "Full Backup",
-            "Full Backup",
-            "Current Rate",
-            "Legacy Import",
-        ).pack(side=tk.LEFT, padx=6)
-        import_format_var = tk.StringVar(value="CSV")
-        ttk.OptionMenu(btn_frame, import_format_var, "CSV", "CSV", "XLSX").pack(
-            side=tk.LEFT, padx=6
-        )
-        ttk.Button(btn_frame, text="Import", command=import_records_data).pack(side=tk.LEFT, padx=6)
-        ttk.Button(btn_frame, text="Export Data", command=export_records_data).pack(
-            side=tk.LEFT, padx=6
-        )
-
-        # Initial refresh
-        self._refresh_list()
-
-    def reports_tab(self, parent: tk.Frame | ttk.Frame) -> None:
-        parent.grid_rowconfigure(1, weight=1)
-        parent.grid_columnconfigure(0, weight=1)
-
-        controls = tk.Frame(parent)
-        controls.grid(row=0, column=0, sticky="nw", padx=10, pady=10)
-
-        ttk.Label(controls, text="Period (e.g., 2025-03):").grid(row=0, column=0, sticky="w")
-        period_start_entry = ttk.Entry(controls)
-        period_start_entry.grid(row=0, column=1, padx=6, pady=4)
-
-        ttk.Label(controls, text="Period end (e.g., 2025-03-31):").grid(row=1, column=0, sticky="w")
-        period_end_entry = ttk.Entry(controls)
-        period_end_entry.grid(row=1, column=1, padx=6, pady=4)
-
-        ttk.Label(controls, text="Category:").grid(row=2, column=0, sticky="w")
-        category_entry = ttk.Entry(controls)
-        category_entry.grid(row=2, column=1, padx=6, pady=4)
-
-        ttk.Label(controls, text="Wallet:").grid(row=3, column=0, sticky="w")
-        report_wallet_var = tk.StringVar(value="All wallets")
-        report_wallet_menu = ttk.OptionMenu(controls, report_wallet_var, "All wallets")
-        report_wallet_menu.grid(row=3, column=1, padx=6, pady=4, sticky="ew")
-
-        wallet_label_to_id: dict[str, int | None] = {"All wallets": None}
-
-        def _refresh_report_wallet_menu() -> None:
-            nonlocal wallet_label_to_id
-            wallet_label_to_id = {"All wallets": None}
-            for wallet in self.controller.load_active_wallets():
-                wallet_label_to_id[f"[{wallet.id}] {wallet.name} ({wallet.currency})"] = wallet.id
-            labels = list(wallet_label_to_id.keys())
-            menu = report_wallet_menu["menu"]
-            menu.delete(0, "end")
-            for label in labels:
-                menu.add_command(
-                    label=label, command=lambda value=label: report_wallet_var.set(value)
-                )
-            if report_wallet_var.get() not in wallet_label_to_id:
-                report_wallet_var.set("All wallets")
-
-        _refresh_report_wallet_menu()
-
-        group_var = tk.BooleanVar()
-        ttk.Checkbutton(controls, text="Group by category", variable=group_var).grid(
-            row=4, column=0, columnspan=2, sticky="w"
-        )
-
-        table_var = tk.BooleanVar()
-        ttk.Checkbutton(controls, text="Display as table", variable=table_var).grid(
-            row=5, column=0, columnspan=2, sticky="w"
-        )
-
-        result_frame = tk.Frame(parent)
-        result_frame.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=10, pady=6)
-        result_frame.grid_rowconfigure(0, weight=1)
-        result_frame.grid_columnconfigure(0, weight=1)
-
-        result_text = tk.Text(result_frame, wrap="word")
-        result_text.grid(row=0, column=0, sticky="nsew")
-        scrollbar = ttk.Scrollbar(result_frame, orient=VERTICAL, command=result_text.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        result_text.config(yscrollcommand=scrollbar.set)
-
-        current_report: dict[str, Report | None] = {"report": None}
-        report_mode_var = tk.StringVar(value="fixed")
-
-        ttk.Label(controls, text="Totals mode:").grid(row=0, column=2, sticky="w", padx=(12, 0))
-        ttk.Radiobutton(
-            controls, text="On fixed rate", variable=report_mode_var, value="fixed"
-        ).grid(row=1, column=2, sticky="w", padx=(12, 0))
-        ttk.Radiobutton(
-            controls, text="On current rate", variable=report_mode_var, value="current"
-        ).grid(row=2, column=2, sticky="w", padx=(12, 0))
-
-        def generate():
-            _refresh_report_wallet_menu()
-            selected_wallet = wallet_label_to_id.get(report_wallet_var.get(), None)
-            report = self.controller.generate_report_for_wallet(selected_wallet)
-            period_start = period_start_entry.get().strip()
-            period_end = period_end_entry.get().strip()
-            if period_start:
-                try:
-                    report = report.filter_by_period_range(
-                        period_start, period_end or date.today().isoformat()
-                    )
-                except ValueError as e:
-                    messagebox.showerror("Error", str(e))
-                    return
-            elif period_end:
-                messagebox.showerror(
-                    "Error", "Period start is required when period end is provided."
-                )
-                return
-            cat = category_entry.get().strip()
-            if cat:
-                report = report.filter_by_category(cat)
-
-            current_report["report"] = report
-
-            result_text.delete(1.0, tk.END)
-            summary_year = None
-            summary_up_to_month = None
-            if period_start:
-                try:
-                    parts = period_start.split("-")
-                    if parts and parts[0].isdigit():
-                        summary_year = int(parts[0])
-                    if len(parts) > 1 and parts[1].isdigit():
-                        summary_up_to_month = int(parts[1])
-                except Exception:
-                    summary_year = None
-                    summary_up_to_month = None
-
-            result_text.insert(tk.END, report.statement_title + "\n\n")
-            result_text.insert(
-                tk.END,
-                f"Net Worth (fixed): {self.controller.net_worth_fixed():.2f} KZT\n"
-                f"Net Worth (current): {self.controller.net_worth_current():.2f} KZT\n\n",
-            )
-
-            if group_var.get():
-                if table_var.get():
-                    groups = report.grouped_by_category()
-                    for cat, cat_report in groups.items():
-                        result_text.insert(tk.END, f"\nCategory: {cat}\n")
-                        result_text.insert(
-                            tk.END,
-                            cat_report.as_table(summary_mode="total_only") + "\n",
-                        )
-                else:
-                    groups = report.grouped_by_category()
-                    for cat, cat_report in groups.items():
-                        if report_mode_var.get() == "current":
-                            total = cat_report.total_current(self.currency)
-                        else:
-                            total = cat_report.total_fixed()
-                        result_text.insert(tk.END, f"{cat}: {total:.2f} KZT\n")
-            elif table_var.get():
-                result_text.insert(tk.END, report.as_table())
-            else:
-                balance_value = report.initial_balance
-                balance_label = (
-                    "Opening balance" if report.is_opening_balance else "Initial balance"
-                )
-                records_total_fixed = report.net_profit_fixed()
-                final_balance_fixed = report.total_fixed()
-                final_balance_current = report.total_current(self.currency)
-                fx_diff = report.fx_difference(self.currency)
-                result_text.insert(tk.END, f"{balance_label}: {balance_value:.2f} KZT\n")
-                if report_mode_var.get() == "current":
-                    result_text.insert(
-                        tk.END,
-                        f"Records Total (fixed): {records_total_fixed:.2f} KZT\n",
-                    )
-                    result_text.insert(
-                        tk.END,
-                        f"Final Balance (current rate): {final_balance_current:.2f} KZT\n",
-                    )
-                else:
-                    result_text.insert(
-                        tk.END,
-                        f"Records Total (fixed): {records_total_fixed:.2f} KZT\n",
-                    )
-                    result_text.insert(
-                        tk.END,
-                        f"Final Balance (operation rate): {final_balance_fixed:.2f} KZT\n",
-                    )
-                result_text.insert(tk.END, f"FX Difference: {fx_diff:.2f} KZT\n")
-
-            summary_table = report.monthly_income_expense_table(
-                year=summary_year, up_to_month=summary_up_to_month
-            )
-            result_text.insert(
-                tk.END, "\n\nMonthly Income/Expense Summary (Past & Current Months)\n"
-            )
-            result_text.insert(tk.END, summary_table + "\n")
-
-        generate_btn = ttk.Button(controls, text="Generate", command=generate)
-        generate_btn.grid(row=6, column=0, pady=8)
-
-        export_format_var = tk.StringVar(value="CSV")
-        ttk.OptionMenu(controls, export_format_var, "CSV", "CSV", "XLSX", "PDF").grid(
-            row=6, column=1, padx=6
-        )
-
-        def export_any():
-            report = current_report.get("report")
-            if report is None:
-                messagebox.showerror("Error", "Please generate a report first.")
-                return
-            fmt = export_format_var.get()
-            filepath = filedialog.asksaveasfilename(
-                defaultextension=f".{fmt.lower()}", title="Save Report"
-            )
-            if not filepath:
-                return
-            try:
-                from gui.exporters import export_report
-
-                export_report(report, filepath, fmt.lower())
-                messagebox.showinfo("Success", f"Report exported to {filepath}")
-                open_in_file_manager(os.path.dirname(filepath))
-            except Exception as e:
-                logger.exception("Failed to export report")
-                messagebox.showerror("Error", f"Failed to export: {str(e)}")
-
-        ttk.Button(controls, text="Export", command=export_any).grid(row=6, column=2, padx=6)
-
-    def settings_tab(self, parent: tk.Frame | ttk.Frame) -> None:
-        PAD_X = 8
-        PAD_Y = 6
-
-        # =========================================================
-        # Root layout (2 columns: left / right)
-        # =========================================================
-        parent.grid_columnconfigure(0, weight=0)
-        parent.grid_columnconfigure(1, weight=1)
-        parent.grid_rowconfigure(0, weight=1)
-
-        left_panel = ttk.Frame(parent)
-        left_panel.grid(row=0, column=0, sticky="ns", padx=10, pady=10)
-
-        right_panel = ttk.Frame(parent)
-        right_panel.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
-        right_panel.grid_rowconfigure(0, weight=1)
-        right_panel.grid_columnconfigure(0, weight=1)
-
-        # =========================================================
-        # WALLETS
-        # =========================================================
-        wallets_frame = ttk.LabelFrame(left_panel, text="Wallets")
-        wallets_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
-        wallets_frame.grid_columnconfigure(0, weight=1)
-        wallets_frame.grid_rowconfigure(1, weight=1)
-
-        # ---- Wallet Form ----
-        form = ttk.Frame(wallets_frame)
-        form.grid(row=0, column=0, sticky="ew", padx=PAD_X, pady=PAD_Y)
-        form.grid_columnconfigure(1, weight=1)
-
-        ttk.Label(form, text="Name:").grid(row=0, column=0, sticky="w")
-        wallet_name_entry = ttk.Entry(form)
-        wallet_name_entry.grid(row=0, column=1, sticky="ew", pady=2)
-
-        ttk.Label(form, text="Currency:").grid(row=1, column=0, sticky="w")
-        wallet_currency_entry = ttk.Entry(form, width=8)
-        wallet_currency_entry.insert(0, "KZT")
-        wallet_currency_entry.grid(row=1, column=1, sticky="ew", pady=2)
-
-        ttk.Label(form, text="Initial balance:").grid(row=2, column=0, sticky="w")
-        wallet_initial_entry = ttk.Entry(form)
-        wallet_initial_entry.insert(0, "0")
-        wallet_initial_entry.grid(row=2, column=1, sticky="ew", pady=2)
-
-        wallet_allow_negative_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(form, text="Allow negative", variable=wallet_allow_negative_var).grid(
-            row=3, column=0, columnspan=2, sticky="w", pady=2
-        )
-
-        def create_wallet() -> None:
-            try:
-                initial_balance = float(wallet_initial_entry.get().strip() or "0")
-            except ValueError:
-                messagebox.showerror("Error", "Invalid wallet initial balance.")
-                return
-            try:
-                wallet = self.controller.create_wallet(
-                    name=wallet_name_entry.get().strip(),
-                    currency=(wallet_currency_entry.get() or "KZT").strip(),
-                    initial_balance=initial_balance,
-                    allow_negative=wallet_allow_negative_var.get(),
-                )
-                messagebox.showinfo("Success", f"Wallet created: [{wallet.id}] {wallet.name}")
-                wallet_name_entry.delete(0, tk.END)
-                wallet_initial_entry.delete(0, tk.END)
-                wallet_initial_entry.insert(0, "0")
-                refresh_wallets()
-                self._refresh_charts()
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to create wallet: {str(e)}")
-
-        ttk.Button(form, text="Create wallet", command=create_wallet).grid(
-            row=4, column=0, columnspan=2, sticky="ew", pady=(6, 0)
-        )
-
-        # ---- Wallet List ----
-        list_frame = ttk.Frame(wallets_frame)
-        list_frame.grid(row=1, column=0, sticky="nsew", padx=PAD_X)
-        list_frame.grid_rowconfigure(0, weight=1)
-        list_frame.grid_columnconfigure(0, weight=1)
-
-        wallet_listbox = Listbox(list_frame, height=8)
-        wallet_listbox.grid(row=0, column=0, sticky="nsew")
-
-        wallet_scroll = ttk.Scrollbar(list_frame, orient="vertical", command=wallet_listbox.yview)
-        wallet_scroll.grid(row=0, column=1, sticky="ns")
-        wallet_listbox.config(yscrollcommand=wallet_scroll.set)
-
-        def refresh_wallets() -> None:
-            wallet_listbox.delete(0, tk.END)
-            for wallet in self.controller.load_wallets():
-                try:
-                    balance = self.controller.wallet_balance(wallet.id)
-                except Exception:
-                    balance = wallet.initial_balance
-                wallet_listbox.insert(
-                    tk.END,
-                    f"[{wallet.id}] {wallet.name} | {wallet.currency} | "
-                    f"Initial={wallet.initial_balance:.2f} | Balance={balance:.2f} | "
-                    f"allow_negative={wallet.allow_negative} | active={wallet.is_active}",
-                )
-            if hasattr(self, "_refresh_transfer_wallet_menus"):
-                try:
-                    self._refresh_transfer_wallet_menus()
-                except Exception:
-                    pass
-            if hasattr(self, "_refresh_operation_wallet_menu"):
-                try:
-                    self._refresh_operation_wallet_menu()
-                except Exception:
-                    pass
-
-        def delete_wallet() -> None:
-            selection = wallet_listbox.curselection()
-            if not selection:
-                messagebox.showerror("Error", "Select wallet to delete.")
-                return
-            row = wallet_listbox.get(selection[0])
-            try:
-                wallet_id = int(row.split("]")[0].strip().lstrip("["))
-            except Exception:
-                messagebox.showerror("Error", "Failed to parse selected wallet id.")
-                return
-            try:
-                self.controller.soft_delete_wallet(wallet_id)
-                messagebox.showinfo("Success", "Wallet was soft-deleted.")
-                refresh_wallets()
-            except Exception as e:
-                messagebox.showerror("Error", str(e))
-
-        wallet_actions = ttk.Frame(wallets_frame)
-        wallet_actions.grid(row=2, column=0, sticky="ew", padx=PAD_X, pady=PAD_Y)
-        wallet_actions.grid_columnconfigure(0, weight=1)
-        wallet_actions.grid_columnconfigure(1, weight=1)
-        ttk.Button(wallet_actions, text="Delete wallet", command=delete_wallet).grid(
-            row=0, column=0, sticky="ew", padx=(0, 4)
-        )
-        ttk.Button(wallet_actions, text="Refresh", command=refresh_wallets).grid(
-            row=0, column=1, sticky="ew", padx=(4, 0)
-        )
-
-        refresh_wallets()
-
-        # =========================================================
-        # MANDATORY EXPENSES (RIGHT PANEL)
-        # =========================================================
-        mand_frame = ttk.LabelFrame(right_panel, text="Mandatory expenses")
-        mand_frame.grid(row=0, column=0, sticky="nsew")
-        mand_frame.grid_rowconfigure(0, weight=1)
-        mand_frame.grid_columnconfigure(0, weight=1)
-
-        mand_listbox = tk.Listbox(mand_frame)
-        mand_listbox.grid(row=0, column=0, sticky="nsew", padx=PAD_X, pady=PAD_Y)
-
-        mand_scroll = ttk.Scrollbar(mand_frame, orient="vertical", command=mand_listbox.yview)
-        mand_scroll.grid(row=0, column=1, sticky="ns", pady=PAD_Y)
-
-        mand_listbox.config(yscrollcommand=mand_scroll.set)
-
-        def refresh_mandatory():
-            mand_listbox.delete(0, tk.END)
-            expenses = self.controller.load_mandatory_expenses()
-            for i, expense in enumerate(expenses):
-                mand_listbox.insert(
-                    tk.END,
-                    (
-                        f"[{i}] {expense.amount_original:.2f} {expense.currency} "
-                        f"(={expense.amount_kzt:.2f} KZT) - {expense.category} - "
-                        f"{expense.description} ({expense.period})"
-                    ),
-                )
-
-        current_panel: dict[str, tk.Frame | None] = {"add": None, "report": None}
-
-        def add_mandatory_inline():
-            # Close the previous panel if it is open
-            if current_panel["add"] is not None:
-                try:
-                    current_panel["add"].destroy()
-                except Exception:
-                    pass
-            if current_panel["report"] is not None:
-                try:
-                    current_panel["report"].destroy()
-                except Exception:
-                    pass
-
-            add_panel = tk.Frame(mand_frame)
-            add_panel.grid(row=2, column=0, columnspan=2, pady=6, sticky="ew")
-            current_panel["add"] = add_panel
-
-            ttk.Label(add_panel, text="Amount:").grid(row=0, column=0, sticky="w")
-            amt = ttk.Entry(add_panel)
-            amt.grid(row=0, column=1)
-
-            ttk.Label(add_panel, text="Currency (default KZT):").grid(row=1, column=0, sticky="w")
-            currency_entry = ttk.Entry(add_panel)
-            currency_entry.insert(0, "KZT")
-            currency_entry.grid(row=1, column=1)
-
-            ttk.Label(add_panel, text="Category (default Mandatory):").grid(
-                row=2, column=0, sticky="w"
-            )
-            category_entry = ttk.Entry(add_panel)
-            category_entry.insert(0, "Mandatory")
-            category_entry.grid(row=2, column=1)
-
-            ttk.Label(add_panel, text="Description:").grid(row=3, column=0, sticky="w")
-            desc = ttk.Entry(add_panel)
-            desc.grid(row=3, column=1)
-
-            ttk.Label(add_panel, text="Period:").grid(row=4, column=0, sticky="w")
-            period_var = tk.StringVar(value="monthly")
-            ttk.OptionMenu(
-                add_panel, period_var, "daily", "daily", "weekly", "monthly", "yearly"
-            ).grid(row=4, column=1)
-
-            def save():
-                try:
-                    amount = float(amt.get())
-                    description = desc.get()
-                    period = period_var.get()
-                    if not description:
-                        messagebox.showerror("Error", "Description is required.")
-                        return
-                    self.controller.create_mandatory_expense(
-                        amount=amount,
-                        currency=(currency_entry.get() or "KZT").strip(),
-                        category=(category_entry.get() or "Mandatory").strip(),
-                        description=description,
-                        period=period,
-                    )
-                    messagebox.showinfo("Success", "Mandatory expense added.")
-                    add_panel.destroy()
-                    current_panel["add"] = None
-                    self._refresh_charts()
-                    refresh_mandatory()
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to add expense: {str(e)}")
-
-            def cancel():
-                try:
-                    add_panel.destroy()
-                    current_panel["add"] = None
-                except Exception:
-                    pass
-
-            ttk.Button(add_panel, text="Save", command=save).grid(row=5, column=0, padx=6)
-            ttk.Button(add_panel, text="Cancel", command=cancel).grid(row=5, column=1, padx=6)
-
-        def add_to_records_inline():
-            # Close the previous panel if it is open
-            if current_panel["add"] is not None:
-                try:
-                    current_panel["add"].destroy()
-                except Exception:
-                    pass
-            if current_panel["report"] is not None:
-                try:
-                    current_panel["report"].destroy()
-                except Exception:
-                    pass
-
-            add_to_report_panel = tk.Frame(mand_frame)
-            add_to_report_panel.grid(row=2, column=0, columnspan=2, pady=6, sticky="ew")
-            current_panel["report"] = add_to_report_panel
-
-            ttk.Label(add_to_report_panel, text="Date (YYYY-MM-DD):").grid(
-                row=0, column=0, sticky="w"
-            )
-            date_entry = ttk.Entry(add_to_report_panel)
-            date_entry.grid(row=0, column=1)
-
-            ttk.Label(add_to_report_panel, text="Wallet:").grid(row=1, column=0, sticky="w")
-            mandatory_wallet_var = tk.StringVar(value="")
-            mandatory_wallet_menu = ttk.OptionMenu(add_to_report_panel, mandatory_wallet_var, "")
-            mandatory_wallet_menu.grid(row=1, column=1, sticky="ew")
-            mandatory_wallet_map: dict[str, int] = {}
-
-            wallets = self.controller.load_active_wallets()
-            mandatory_wallet_map = {
-                f"[{wallet.id}] {wallet.name} ({wallet.currency})": wallet.id for wallet in wallets
-            }
-            wallet_labels = list(mandatory_wallet_map.keys()) or [""]
-            wallet_menu = mandatory_wallet_menu["menu"]
-            wallet_menu.delete(0, "end")
-            for label in wallet_labels:
-                wallet_menu.add_command(
-                    label=label,
-                    command=lambda value=label: mandatory_wallet_var.set(value),
-                )
-            mandatory_wallet_var.set(wallet_labels[0])
-
-            selection = mand_listbox.curselection()
-            index = selection[0] if selection else -1
-
-            def save():
-                try:
-                    from domain.validation import ensure_not_future, parse_ymd
-
-                    date = date_entry.get()
-                    entered_date = parse_ymd(date)
-                    ensure_not_future(entered_date)
-                    wallet_id = mandatory_wallet_map.get(mandatory_wallet_var.get())
-                    if wallet_id is None:
-                        messagebox.showerror("Error", "Wallet is required.")
-                        return
-
-                    if self.controller.add_mandatory_to_report(index, date, wallet_id):
-                        messagebox.showinfo(
-                            "Success", f"Mandatory expense added to report for {date}."
-                        )
-                        add_to_report_panel.destroy()
-                        current_panel["report"] = None
-                        refresh_mandatory()
-                        refresh_wallets()
-                        self._refresh_list()
-                        self._refresh_charts()
-
-                    else:
-                        messagebox.showerror(
-                            "Error",
-                            "Please select a mandatory expense to add to records."
-                            "\nThen click 'Add to Records' and try again.",
-                        )
-                except ValueError as e:
-                    messagebox.showerror("Error", f"Invalid date: {str(e)}. Use YYYY-MM-DD.")
-
-            def cancel():
-                try:
-                    add_to_report_panel.destroy()
-                    current_panel["report"] = None
-                except Exception:
-                    pass
-
-            ttk.Button(add_to_report_panel, text="Save", command=save).grid(row=2, column=0, padx=6)
-            ttk.Button(add_to_report_panel, text="Cancel", command=cancel).grid(
-                row=2, column=1, padx=6
-            )
-
-        def delete_mandatory():
-            sel = mand_listbox.curselection()
-            if not sel:
-                messagebox.showerror("Error", "Please select an expense to delete.")
-                return
-            idx = sel[0]
-            if self.controller.delete_mandatory_expense(idx):
-                messagebox.showinfo("Success", "Mandatory expense deleted.")
-                refresh_mandatory()
-            else:
-                messagebox.showerror("Error", "Failed to delete expense.")
-
-        def delete_all_mandatory():
-            confirm = messagebox.askyesno("Confirm", "Delete all mandatory expenses?")
-            if confirm:
-                self.controller.delete_all_mandatory_expenses()
-                messagebox.showinfo("Success", "All mandatory expenses deleted.")
-                refresh_mandatory()
-            else:
-                messagebox.showerror("Error", "Failed to delete all mandatory expenses.")
-
-        # ---- Buttons row ----
-        btns = ttk.Frame(mand_frame)
-        btns.grid(row=1, column=0, columnspan=2, sticky="ew", padx=PAD_X, pady=PAD_Y)
-        for i in range(8):
-            btns.grid_columnconfigure(i, weight=1)
-
-        ttk.Button(btns, text="Add", command=add_mandatory_inline).grid(row=0, column=0)
-        ttk.Button(btns, text="Delete", command=delete_mandatory).grid(row=0, column=1)
-        ttk.Button(btns, text="Delete All", command=delete_all_mandatory).grid(row=0, column=2)
-        ttk.Button(btns, text="Add to Records", command=add_to_records_inline).grid(row=0, column=3)
-        ttk.Button(btns, text="Refresh", command=refresh_mandatory).grid(row=0, column=4)
-        format_var = tk.StringVar(value="CSV")
-        ttk.OptionMenu(btns, format_var, "CSV", "CSV", "XLSX").grid(row=0, column=5)
-
-        refresh_mandatory()
-
-        def import_mand():
-            fmt = format_var.get()
-            cfg = IMPORT_FORMATS.get(fmt)
-            if not cfg:
-                messagebox.showerror("Error", f"Unsupported format: {fmt}")
-                return
-
-            filepath = filedialog.askopenfilename(
-                defaultextension=cfg["ext"],
-                filetypes=[
-                    (f"{cfg['desc']} files", f"*{cfg['ext']}"),
-                    ("All files", "*.*"),
-                ],
-                title=f"Select {cfg['desc']} file to import mandatory expenses",
-            )
-            if not filepath:
-                return
-
-            if not messagebox.askyesno(
-                "Confirm Import",
-                f"This will replace all existing mandatory expenses with data from:\n"
-                f"{filepath}\n\nContinue?",
-            ):
-                return
-
-            def _task() -> tuple[int, int, list[str]]:
-                return self.controller.import_mandatory(fmt, filepath)
-
-            def _on_success(result: tuple[int, int, list[str]]) -> None:
-                imported_count, skipped_count, errors = result
-                details = ""
-                if skipped_count:
-                    details = f"\nSkipped: {skipped_count} rows.\nFirst errors:\n- " + "\n- ".join(
-                        errors[:5]
-                    )
-
-                messagebox.showinfo(
-                    "Success",
-                    f"Successfully imported {imported_count} mandatory expenses from "
-                    f"{cfg['desc']} file.\nAll existing mandatory expenses have been replaced."
-                    + details,
-                )
-                refresh_mandatory()
-                self._refresh_charts()
-
-            def _on_error(exc: BaseException) -> None:
-                if isinstance(exc, FileNotFoundError):
-                    messagebox.showerror("Error", f"File not found: {filepath}")
-                    return
-                messagebox.showerror("Error", f"Failed to import {fmt}: {str(exc)}")
-
-            self._run_background(
-                _task,
-                on_success=_on_success,
-                on_error=_on_error,
-                busy_message=f"Importing {cfg['desc']} mandatory expenses...",
-            )
-
-        def export_mand():
-            fmt = format_var.get()
-            expenses = self.controller.load_mandatory_expenses()
-            if not expenses:
-                messagebox.showinfo("No Expenses", "No mandatory expenses to export.")
-                return
-            filepath = filedialog.asksaveasfilename(
-                defaultextension=f".{fmt.lower()}", title="Save Mandatory Expenses"
-            )
-            if not filepath:
-                return
-
-            def _task() -> None:
-                from gui.exporters import export_mandatory_expenses
-
-                export_mandatory_expenses(expenses, filepath, fmt.lower())
-
-            def _on_success(_: Any) -> None:
-                messagebox.showinfo("Success", f"Mandatory expenses exported to {filepath}")
-                open_in_file_manager(os.path.dirname(filepath))
-
-            self._run_background(
-                _task,
-                on_success=_on_success,
-                busy_message=f"Exporting {fmt} mandatory expenses...",
-            )
-
-        ttk.Button(btns, text="Import", command=import_mand).grid(row=0, column=6)
-        ttk.Button(btns, text="Export", command=export_mand).grid(row=0, column=7)
-
-        # =========================================================
-        # BACKUP
-        # =========================================================
-        backup_frame = ttk.LabelFrame(left_panel, text="Backup (JSON)")
-        backup_frame.grid(row=2, column=0, sticky="ew")
-
-        backup_frame.grid_columnconfigure(0, weight=1)
-        backup_frame.grid_columnconfigure(1, weight=1)
-
-        def import_backup():
-            filepath = filedialog.askopenfilename(
-                defaultextension=".json",
-                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-                title="Import Full Backup",
-            )
-            if not filepath:
-                return
-            if not messagebox.askyesno(
-                "Confirm Backup Import",
-                "This will replace all wallets, records, transfers and mandatory expenses. "
-                "Continue?",
-            ):
-                return
-
-            def _task() -> tuple[int, int, list[str]]:
-                return self.controller.import_records("JSON", filepath, ImportPolicy.FULL_BACKUP)
-
-            def _on_success(result: tuple[int, int, list[str]]) -> None:
-                imported, skipped, errors = result
-                details = ""
-                if skipped:
-                    details = f"\nSkipped: {skipped}\n- " + "\n- ".join(errors[:5])
-                messagebox.showinfo(
-                    "Success",
-                    f"Backup imported. Imported entities: {imported}.{details}",
-                )
-                refresh_mandatory()
-                self._refresh_list()
-                self._refresh_charts()
-
-            self._run_background(
-                _task,
-                on_success=_on_success,
-                busy_message="Importing full backup...",
-            )
-
-        def export_backup():
-            filepath = filedialog.asksaveasfilename(
-                defaultextension=".json",
-                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-                title="Export Full Backup",
-            )
-            if not filepath:
-                return
-            wallets = self.repository.load_wallets()
-            records = self.repository.load_all()
-            mandatory_expenses = self.repository.load_mandatory_expenses()
-            transfers = self.repository.load_transfers()
-
-            def _task() -> None:
-                from gui.exporters import export_full_backup
-
-                export_full_backup(
-                    filepath,
-                    wallets=wallets,
-                    records=records,
-                    mandatory_expenses=mandatory_expenses,
-                    transfers=transfers,
-                )
-
-            def _on_success(_: Any) -> None:
-                messagebox.showinfo("Success", f"Full backup exported to {filepath}")
-                open_in_file_manager(os.path.dirname(filepath))
-
-            self._run_background(
-                _task,
-                on_success=_on_success,
-                busy_message="Exporting full backup...",
-            )
-
-        ttk.Button(backup_frame, text="Export Full Backup", command=export_backup).grid(
-            row=0, column=0, sticky="ew", padx=PAD_X, pady=PAD_Y
-        )
-
-        ttk.Button(backup_frame, text="Import Full Backup", command=import_backup).grid(
-            row=0, column=1, sticky="ew", padx=PAD_X, pady=PAD_Y
-        )
-
-        # Initial refresh
-        refresh_mandatory()
-
     def _import_policy_from_ui(self, mode_label: str) -> ImportPolicy:
         if mode_label == "Full Backup":
             return ImportPolicy.FULL_BACKUP
@@ -1480,7 +183,9 @@ class FinancialApp(tk.Tk):
             return ImportPolicy.LEGACY
         return ImportPolicy.CURRENT_RATE
 
-    def _refresh_list(self):
+    def _refresh_list(self) -> None:
+        if self.records_listbox is None:
+            return
         self.records_listbox.delete(0, tk.END)
         self._list_index_to_record_id = {}
         self._record_id_to_repo_index = {}
@@ -1490,6 +195,16 @@ class FinancialApp(tk.Tk):
             self.records_listbox.insert(tk.END, item.label)
 
     def _refresh_charts(self) -> None:
+        if (
+            self.chart_month_menu is None
+            or self.chart_month_var is None
+            or self.pie_month_menu is None
+            or self.pie_month_var is None
+            or self.chart_year_menu is None
+            or self.chart_year_var is None
+        ):
+            return
+
         records = self.repository.load_all()
 
         self._chart_refresh_suspended = True
@@ -1502,12 +217,15 @@ class FinancialApp(tk.Tk):
         self._draw_daily_bars(records)
         self._draw_monthly_bars(records)
 
-    def _on_chart_filter_change(self, *_args) -> None:
+    def _on_chart_filter_change(self, *_args: Any) -> None:
         if self._chart_refresh_suspended:
             return
         self._refresh_charts()
 
-    def _update_month_options(self, records) -> None:
+    def _update_month_options(self, records: Any) -> None:
+        if self.chart_month_menu is None or self.chart_month_var is None:
+            return
+        chart_month_var = self.chart_month_var
         months = extract_months(records)
         current_month = datetime.now().strftime("%Y-%m")
         if current_month not in months:
@@ -1517,13 +235,14 @@ class FinancialApp(tk.Tk):
         menu = self.chart_month_menu["menu"]
         menu.delete(0, "end")
         for month in months:
-            menu.add_command(
-                label=month, command=lambda value=month: self.chart_month_var.set(value)
-            )
-        if not self.chart_month_var.get() or self.chart_month_var.get() not in months:
-            self.chart_month_var.set(months[-1])
+            menu.add_command(label=month, command=lambda value=month: chart_month_var.set(value))
+        if not chart_month_var.get() or chart_month_var.get() not in months:
+            chart_month_var.set(months[-1])
 
-    def _update_pie_month_options(self, records) -> None:
+    def _update_pie_month_options(self, records: Any) -> None:
+        if self.pie_month_menu is None or self.pie_month_var is None:
+            return
+        pie_month_var = self.pie_month_var
         months = extract_months(records)
         current_month = datetime.now().strftime("%Y-%m")
         if current_month not in months:
@@ -1532,20 +251,21 @@ class FinancialApp(tk.Tk):
 
         menu = self.pie_month_menu["menu"]
         menu.delete(0, "end")
-        menu.add_command(
-            label="Все время", command=lambda value="all": self.pie_month_var.set(value)
-        )
+        menu.add_command(label="Все время", command=lambda value="all": pie_month_var.set(value))
         for month in months:
-            menu.add_command(label=month, command=lambda value=month: self.pie_month_var.set(value))
+            menu.add_command(label=month, command=lambda value=month: pie_month_var.set(value))
 
-        current_value = self.pie_month_var.get()
+        current_value = pie_month_var.get()
         if not current_value:
-            self.pie_month_var.set("all")
+            pie_month_var.set("all")
             return
         if current_value != "all" and current_value not in months:
-            self.pie_month_var.set(months[-1] if months else "all")
+            pie_month_var.set(months[-1] if months else "all")
 
-    def _update_year_options(self, records) -> None:
+    def _update_year_options(self, records: Any) -> None:
+        if self.chart_year_menu is None or self.chart_year_var is None:
+            return
+        chart_year_var = self.chart_year_var
         years = extract_years(records)
         current_year = datetime.now().year
         if current_year not in years:
@@ -1557,18 +277,25 @@ class FinancialApp(tk.Tk):
         for year in years:
             menu.add_command(
                 label=str(year),
-                command=lambda value=year: self.chart_year_var.set(str(value)),
+                command=lambda value=year: chart_year_var.set(str(value)),
             )
-        if not self.chart_year_var.get() or int(self.chart_year_var.get()) not in years:
-            self.chart_year_var.set(str(years[-1]))
+        if not chart_year_var.get() or int(chart_year_var.get()) not in years:
+            chart_year_var.set(str(years[-1]))
 
-    def _draw_expense_pie(self, records) -> None:
+    def _draw_expense_pie(self, records: Any) -> None:
+        if (
+            self.pie_month_var is None
+            or self.expense_pie_canvas is None
+            or self.expense_legend_frame is None
+        ):
+            return
+
         month_value = self.pie_month_var.get()
         filtered = records
         if month_value and month_value != "all":
             filtered = self._filter_records_by_month(records, month_value)
         totals = aggregate_expenses_by_category(filtered)
-        data = [(k, v) for k, v in totals.items() if v > 0]
+        data = [(key, value) for key, value in totals.items() if value > 0]
         data.sort(key=lambda item: item[1], reverse=True)
         data = self._group_minor_categories(data, max_slices=10)
 
@@ -1603,7 +330,14 @@ class FinancialApp(tk.Tk):
             extent = (value / total) * 360
             color = colors[index % len(colors)]
             self.expense_pie_canvas.create_arc(
-                x0, y0, x1, y1, start=start, extent=extent, fill=color, outline="white"
+                x0,
+                y0,
+                x1,
+                y1,
+                start=start,
+                extent=extent,
+                fill=color,
+                outline="white",
             )
             start += extent
 
@@ -1618,7 +352,9 @@ class FinancialApp(tk.Tk):
                 font=("Segoe UI", 9),
             ).pack(side=tk.LEFT, padx=6)
 
-    def _group_minor_categories(self, data, max_slices: int) -> list[tuple[str, float]]:
+    def _group_minor_categories(
+        self, data: list[tuple[str, float]], max_slices: int
+    ) -> list[tuple[str, float]]:
         if len(data) <= max_slices:
             return data
 
@@ -1627,13 +363,13 @@ class FinancialApp(tk.Tk):
         major.append(("Other", other_total))
         return major
 
-    def _filter_records_by_month(self, records, month_value: str):
+    def _filter_records_by_month(self, records: Any, month_value: str) -> list[Any]:
         try:
             year, month = map(int, month_value.split("-"))
         except Exception:
             return records
 
-        filtered = []
+        filtered: list[Any] = []
         for record in records:
             try:
                 if isinstance(record.date, date):
@@ -1670,8 +406,8 @@ class FinancialApp(tk.Tk):
 
         colors = list(base_palette)
         remaining = count - len(colors)
-        for i in range(remaining):
-            hue = (i * 360 / max(1, remaining)) % 360
+        for idx in range(remaining):
+            hue = (idx * 360 / max(1, remaining)) % 360
             saturation = 70
             lightness = 50
             colors.append(f"#{self._hsl_to_hex(hue, saturation, lightness)}")
@@ -1703,16 +439,20 @@ class FinancialApp(tk.Tk):
         b = int((b + m) * 255)
         return f"{r:02x}{g:02x}{b:02x}"
 
-    def _draw_daily_bars(self, records) -> None:
+    def _draw_daily_bars(self, records: Any) -> None:
+        if self.chart_month_var is None or self.daily_bar_canvas is None:
+            return
         month_value = self.chart_month_var.get()
         if not month_value:
             return
         year, month = map(int, month_value.split("-"))
         income, expense = aggregate_daily_cashflow(records, year, month)
-        labels = [str(i + 1) for i in range(len(income))]
+        labels = [str(idx + 1) for idx in range(len(income))]
         self._draw_bar_chart(self.daily_bar_canvas, labels, income, expense, max_labels=8)
 
-    def _draw_monthly_bars(self, records) -> None:
+    def _draw_monthly_bars(self, records: Any) -> None:
+        if self.chart_year_var is None or self.monthly_bar_canvas is None:
+            return
         year_value = self.chart_year_var.get()
         if not year_value:
             return
@@ -1734,8 +474,8 @@ class FinancialApp(tk.Tk):
         ]
         self._draw_bar_chart(self.monthly_bar_canvas, labels, income, expense, 12)
 
-    def _on_legend_mousewheel(self, event) -> None:
-        if not hasattr(self, "expense_legend_canvas"):
+    def _on_legend_mousewheel(self, event: tk.Event) -> None:
+        if self.expense_legend_canvas is None:
             return
 
         widget = self.winfo_containing(event.x_root, event.y_root)
@@ -1749,9 +489,9 @@ class FinancialApp(tk.Tk):
     def _draw_bar_chart(
         self,
         canvas: tk.Canvas,
-        labels,
-        income_values,
-        expense_values,
+        labels: list[str],
+        income_values: list[float],
+        expense_values: list[float],
         max_labels: int,
     ) -> None:
         canvas.delete("all")

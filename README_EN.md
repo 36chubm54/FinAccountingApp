@@ -40,8 +40,11 @@ python -m venv .venv
 # Activation (Linux/macOS)
 source .venv/bin/activate
 
-# Install dependencies
+# Install runtime dependencies
 pip install -r requirements.txt
+
+# Install dev dependencies (tests, coverage)
+pip install -r requirements-dev.txt
 ```
 
 ### First launch
@@ -558,7 +561,8 @@ project/
 ├── main.py                     # Application entry point
 ├── records.json                # Record storage (created automatically)
 ├── currency_rates.json         # Currency rate cache (use_online=True)
-├── requirements.txt            # Python dependencies
+├── requirements.txt            # Runtime dependencies
+├── requirements-dev.txt        # Dev dependencies (tests, coverage)
 ├── pytest.ini                  # pytest settings
 ├── pyproject.toml              # Project configuration
 ├── README.md                   # This documentation
@@ -639,6 +643,9 @@ project/
 # Go to project directory
 cd "FU Project/project"
 
+# Install dev dependencies (if not installed yet)
+pip install -r requirements-dev.txt
+
 # Run all tests
 pytest
 
@@ -655,7 +662,7 @@ pytest tests/test_reports.py::test_report_total -v
 ### Coverage
 
 ```bash
-pip install pytest-cov
+pip install -r requirements-dev.txt
 pytest --cov=. --cov-report=term-missing
 pytest --cov=. --cov-report=html
 ```

@@ -45,8 +45,8 @@ class CurrencyService:
     def convert(self, amount: float, currency: str) -> float:
         try:
             return self._service.convert(amount, currency)
-        except KeyError:
-            raise ValueError(f"Unsupported currency: {currency}")
+        except KeyError as err:
+            raise ValueError(f"Unsupported currency: {currency}") from err
 
     def get_rate(self, currency: str) -> float:
         code = (currency or "").upper()
@@ -54,8 +54,8 @@ class CurrencyService:
             raise ValueError("Currency is required")
         try:
             return float(self._service.get_rate(code))
-        except KeyError:
-            raise ValueError(f"Unsupported currency: {currency}")
+        except KeyError as err:
+            raise ValueError(f"Unsupported currency: {currency}") from err
 
     @property
     def base_currency(self) -> str:
