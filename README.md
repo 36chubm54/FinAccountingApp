@@ -254,7 +254,15 @@ Backup восстанавливает:
 
 ### Хранение данных
 
-Данные хранятся в `records.json` в корне проекта.
+Текущий primary storage — JSON (`records.json`).
+Для миграции на SQLite добавлен отдельный слой `storage/`:
+
+- `storage/base.py` — контракт `Storage` (только data-access операции).
+- `storage/json_storage.py` — адаптер `JsonStorage` поверх текущей JSON-реализации.
+- `storage/sqlite_storage.py` — `SQLiteStorage` на стандартном `sqlite3`.
+- `db/schema.sql` — SQL-схема таблиц `wallets`, `records`, `transfers`, `mandatory_expenses`.
+
+Сервисный слой и доменные модели при этом не изменялись.
 
 Формат:
 
@@ -371,6 +379,8 @@ Backup восстанавливает:
 - `domain/` — бизнес‑модели и правила (записи, отчёты, валидация дат и периодов, валюты, кошельки, transfers).
 - `app/` — сценарии использования (use cases) и адаптер сервиса валют.
 - `infrastructure/` — хранилище данных (JSON‑репозиторий).
+- `storage/` — абстракция хранилища и адаптеры JSON/SQLite.
+- `db/` — SQL-схема для SQLite.
 - `utils/` — импорт/экспорт и подготовка данных для графиков.
 - `gui/` — GUI слой (Tkinter).
 - `web/` — автономное веб-приложение.
@@ -496,6 +506,25 @@ Backup восстанавливает:
 
 - `RecordRepository` — интерфейс репозитория.
 - `JsonFileRecordRepository(file_path="records.json")` — JSON‑хранилище.
+
+`storage/base.py`
+
+- `Storage` — минимальный контракт хранения (`get/save` для wallets/records/transfers и `get` для mandatory expenses).
+
+`storage/json_storage.py`
+
+- `JsonStorage(file_path="records.json")` — обёртка над текущей JSON-реализацией, совместимая с существующим кодом.
+
+`storage/sqlite_storage.py`
+
+- `SQLiteStorage(db_path="records.db")` — SQLite-адаптер на `sqlite3`, включает:
+  - `PRAGMA foreign_keys = ON`;
+  - `PRAGMA journal_mode = WAL`;
+  - чтение/запись доменных объектов без дублирования бизнес-логики.
+
+`db/schema.sql`
+
+- SQL-схема БД: таблицы `wallets`, `records`, `transfers`, `mandatory_expenses`, ограничения и индексы.
 
 ### GUI
 
@@ -634,6 +663,15 @@ project/
 │
 ├── infrastructure/             # Infrastructure layer
 │   └── repositories.py         # JSON-репозиторий
+│
+├── storage/                    # Абстракция storage и адаптеры JSON/SQLite
+│   ├── __init__.py
+│   ├── base.py
+│   ├── json_storage.py
+│   └── sqlite_storage.py
+│
+├── db/                         # SQL schema для SQLite
+│   └── schema.sql
 │
 ├── utils/                      # Импорт/экспорт и графики
 │   ├── __init__.py

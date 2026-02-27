@@ -254,7 +254,15 @@ Rules for migrating old formats:
 
 ### Data storage
 
-The data is stored in `records.json` at the root of the project.
+Current primary storage is JSON (`records.json`).
+To prepare JSON->SQLite migration, a dedicated `storage/` layer was added:
+
+- `storage/base.py` — `Storage` contract (data-access operations only).
+- `storage/json_storage.py` — `JsonStorage` adapter over the current JSON implementation.
+- `storage/sqlite_storage.py` — `SQLiteStorage` based on standard `sqlite3`.
+- `db/schema.sql` — SQL schema for `wallets`, `records`, `transfers`, `mandatory_expenses`.
+
+Domain models and service-layer business logic remain unchanged.
 
 Format:
 
@@ -371,6 +379,8 @@ The project follows a layered architecture:
 - `domain/` — business models and rules (records, reports, date/period validation, currencies, wallets, transfers).
 - `app/` — use cases and currency service adapter.
 - `infrastructure/` — data storage (JSON repository).
+- `storage/` — storage abstraction and JSON/SQLite adapters.
+- `db/` — SQLite SQL schema.
 - `utils/` — import/export and preparation of data for graphs.
 - `gui/` — GUI layer (Tkinter).
 - `web/` — standalone web application.
@@ -496,6 +506,25 @@ Below are the key classes and functions synchronized with the actual code.
 
 - `RecordRepository` — repository interface.
 - `JsonFileRecordRepository(file_path="records.json")` — JSON storage.
+
+`storage/base.py`
+
+- `Storage` — minimal storage contract (`get/save` for wallets/records/transfers and `get` for mandatory expenses).
+
+`storage/json_storage.py`
+
+- `JsonStorage(file_path="records.json")` — wrapper over the existing JSON implementation, compatible with the current codebase.
+
+`storage/sqlite_storage.py`
+
+- `SQLiteStorage(db_path="records.db")` — SQLite adapter based on `sqlite3`, including:
+  - `PRAGMA foreign_keys = ON`;
+  - `PRAGMA journal_mode = WAL`;
+  - domain object read/write mapping without business-logic duplication.
+
+`db/schema.sql`
+
+- Database schema with tables `wallets`, `records`, `transfers`, `mandatory_expenses`, constraints, and indexes.
 
 ### GUI
 
@@ -634,6 +663,15 @@ project/
 │
 ├── infrastructure/             # Infrastructure layer
 │   └── repositories.py         # JSON repository
+│
+├── storage/                    # Storage abstraction and JSON/SQLite adapters
+│   ├── __init__.py
+│   ├── base.py
+│   ├── json_storage.py
+│   └── sqlite_storage.py
+│
+├── db/                         # SQL schema for SQLite
+│   └── schema.sql
 │
 ├── utils/                      # Import/export and graphs
 │   ├── __init__.py

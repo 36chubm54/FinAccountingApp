@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Storage Abstraction and SQLite Migration Foundation (Day 1):
+  - Added `storage/base.py` with `Storage` contract for wallets, records, transfers, and mandatory expenses.
+  - Added `storage/json_storage.py` (`JsonStorage`) as a wrapper over current JSON persistence.
+  - Added `storage/sqlite_storage.py` (`SQLiteStorage`) on standard `sqlite3` with:
+    - `PRAGMA foreign_keys = ON`,
+    - `PRAGMA journal_mode = WAL`,
+    - domain-object mapping for read/write operations.
+  - Added `db/schema.sql` with tables `wallets`, `records`, `transfers`, `mandatory_expenses`, including PK/FK/CHECK constraints and date/wallet indexes.
+  - Preserved existing domain models and service-layer business logic without changes.
 - Immutable Domain Model and SQL-ready Repository Layer (Phase 3.3):
   - Added immutable `Record.id` for stable identity of domain records.
   - Added `Record.with_updated_amount_kzt()` that returns a new instance via copy/replace.
@@ -97,6 +106,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- Updated `README.md` and `README_EN.md` with storage abstraction, JSON/SQLite adapters, and `db/schema.sql` details.
 - Fixed link to the "Web application" title in the README_EN.md table of contents
 - Improve README formatting and add test setup note
 - Add web application section to README.md with features, setup, and structure details
