@@ -264,6 +264,29 @@ Backup восстанавливает:
 
 Сервисный слой и доменные модели при этом не изменялись.
 
+### Миграция JSON -> SQLite
+
+Для безопасного переноса данных используется скрипт `migrate_json_to_sqlite.py`.
+
+Примеры запуска:
+
+```bash
+# Проверка без записи в SQLite
+python migrate_json_to_sqlite.py --dry-run
+
+# Полная миграция
+python migrate_json_to_sqlite.py --json-path records.json --sqlite-path records.db
+```
+
+Что делает скрипт:
+
+- загружает данные через `JsonStorage`;
+- пишет в SQLite в одной явной транзакции в порядке:
+  `wallets -> transfers -> records -> mandatory_expenses`;
+- сохраняет существующие `id` (или строит mapping `old_id -> new_id` при авто-генерации);
+- валидирует целостность и сверяет балансы/`net worth`;
+- делает `rollback` при любой ошибке или расхождении.
+
 Формат:
 
 ```json
@@ -633,6 +656,7 @@ Backup восстанавливает:
 project/
 │
 ├── main.py                     # Точка входа приложения
+├── migrate_json_to_sqlite.py   # Миграция данных из JSON в SQLite
 ├── records.json                # Хранилище записей (создаётся автоматически)
 ├── currency_rates.json         # Кэш курсов валют (use_online=True)
 ├── requirements.txt            # Runtime-зависимости
@@ -709,6 +733,7 @@ project/
     ├── test_excel.py
     ├── test_gui_exporters_importers.py
     ├── test_import_balance_contract.py
+    ├── test_migrate_json_to_sqlite.py
     ├── test_import_core.py
     ├── test_import_policy_and_backup.py
     ├── test_import_security.py
@@ -740,25 +765,25 @@ cd "Проект ФУ/project"
 # Установка dev-зависимостей (если не установлены)
 pip install -r requirements-dev.txt
 
-# Запуск всех тестов
-pytest
+# Запуск всех тестов (в активированном venv)
+python -m pytest
 
 # С подробным выводом
-pytest -v
+python -m pytest -v
 
 # Конкретный файл
-pytest tests/test_records.py -v
+python -m pytest tests/test_records.py -v
 
 # Конкретный тест
-pytest tests/test_reports.py::test_report_total -v
+python -m pytest tests/test_reports.py::test_report_total -v
 ```
 
 ### Покрытие
 
 ```bash
 pip install -r requirements-dev.txt
-pytest --cov=. --cov-report=term-missing
-pytest --cov=. --cov-report=html
+python -m pytest --cov=. --cov-report=term-missing
+python -m pytest --cov=. --cov-report=html
 ```
 
 > **Примечание:** тесты ожидают, что `CurrencyService` по умолчанию использует локальные курсы (параметр `use_online=False`).

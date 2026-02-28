@@ -18,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - domain-object mapping for read/write operations.
   - Added `db/schema.sql` with tables `wallets`, `records`, `transfers`, `mandatory_expenses`, including PK/FK/CHECK constraints and date/wallet indexes.
   - Preserved existing domain models and service-layer business logic without changes.
+- JSON -> SQLite Migration Script:
+  - Added `migrate_json_to_sqlite.py` with `parse_args()`, `main()`, `run_dry_run()`, `run_migration()`, and `validate_migration()`.
+  - Added dry-run mode with source integrity checks and migration statistics output without inserts.
+  - Added transactional migration flow with strict insert order: wallets, transfers, records, mandatory expenses.
+  - Added id-preservation and fallback id-mapping (`old_id -> new_id`) with reference remapping for `wallet_id` and `transfer_id`.
+  - Added post-migration consistency checks: counts, wallet balances, and net worth; rollback on mismatch/error.
+  - Added tests in `tests/test_migrate_json_to_sqlite.py` for dry-run and successful migration with id preservation.
+- Migration script/test hardening:
+  - Fixed `schema.sql` path resolution in `migrate_json_to_sqlite.py` for non-project working directories.
+  - Updated migration tests to use absolute path to `db/schema.sql`.
+  - Clarified test commands in docs to run via `python -m pytest` in active virtual environment.
 - Immutable Domain Model and SQL-ready Repository Layer (Phase 3.3):
   - Added immutable `Record.id` for stable identity of domain records.
   - Added `Record.with_updated_amount_kzt()` that returns a new instance via copy/replace.
@@ -107,6 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 
 - Updated `README.md` and `README_EN.md` with storage abstraction, JSON/SQLite adapters, and `db/schema.sql` details.
+- Documented `migrate_json_to_sqlite.py` usage and migration guarantees in `README.md` and `README_EN.md`.
 - Fixed link to the "Web application" title in the README_EN.md table of contents
 - Improve README formatting and add test setup note
 - Add web application section to README.md with features, setup, and structure details

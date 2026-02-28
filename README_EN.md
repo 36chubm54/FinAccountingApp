@@ -264,6 +264,29 @@ To prepare JSON->SQLite migration, a dedicated `storage/` layer was added:
 
 Domain models and service-layer business logic remain unchanged.
 
+### JSON -> SQLite migration
+
+Use `migrate_json_to_sqlite.py` for safe data migration.
+
+Run examples:
+
+```bash
+# Validation only, no write
+python migrate_json_to_sqlite.py --dry-run
+
+# Full migration
+python migrate_json_to_sqlite.py --json-path records.json --sqlite-path records.db
+```
+
+What the script does:
+
+- loads source data via `JsonStorage`;
+- writes to SQLite in one explicit transaction with strict order:
+  `wallets -> transfers -> records -> mandatory_expenses`;
+- preserves existing `id` values (or builds `old_id -> new_id` mapping when ids are auto-generated);
+- validates integrity and compares balances/`net worth`;
+- performs `rollback` on any error or mismatch.
+
 Format:
 
 ```json
@@ -633,6 +656,7 @@ Below are the key classes and functions synchronized with the actual code.
 project/
 │
 ├── main.py                     # Application entry point
+├── migrate_json_to_sqlite.py   # Data migration from JSON to SQLite
 ├── records.json                # Record storage (created automatically)
 ├── currency_rates.json         # Currency rate cache (use_online=True)
 ├── requirements.txt            # Runtime dependencies
@@ -709,6 +733,7 @@ project/
     ├── test_excel.py
     ├── test_gui_exporters_importers.py
     ├── test_import_balance_contract.py
+    ├── test_migrate_json_to_sqlite.py
     ├── test_import_core.py
     ├── test_import_policy_and_backup.py
     ├── test_import_security.py
@@ -740,25 +765,25 @@ cd "FU Project/project"
 # Install dev dependencies (if not installed yet)
 pip install -r requirements-dev.txt
 
-# Run all tests
-pytest
+# Run all tests (inside activated venv)
+python -m pytest
 
 # With verbose output
-pytest -v
+python -m pytest -v
 
 # Specific file
-pytest tests/test_records.py -v
+python -m pytest tests/test_records.py -v
 
 # Specific test
-pytest tests/test_reports.py::test_report_total -v
+python -m pytest tests/test_reports.py::test_report_total -v
 ```
 
 ### Coverage
 
 ```bash
 pip install -r requirements-dev.txt
-pytest --cov=. --cov-report=term-missing
-pytest --cov=. --cov-report=html
+python -m pytest --cov=. --cov-report=term-missing
+python -m pytest --cov=. --cov-report=html
 ```
 
 > **Note:** The tests expect the `CurrencyService` to use local courses by default (parameter `use_online=False`).
