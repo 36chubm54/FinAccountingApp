@@ -11,7 +11,7 @@ from .base import Storage
 class JsonStorage(Storage):
     """Storage adapter over the existing JSON repository implementation."""
 
-    def __init__(self, file_path: str = "records.json") -> None:
+    def __init__(self, file_path: str = "data.json") -> None:
         self._repo = JsonFileRecordRepository(file_path=file_path)
 
     def get_wallets(self) -> list[Wallet]:

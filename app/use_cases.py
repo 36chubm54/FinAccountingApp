@@ -388,14 +388,14 @@ class DeleteTransfer:
         linked = [record for record in records if record.transfer_id == transfer_id]
         if len(linked) != 2:
             raise DomainError(
-                f"Transfer integrity violated for #{transfer_id}:"
+                f"Transfer integrity violated for #{transfer_id}: "
                 f"expected 2 linked records, got {len(linked)}"
             )
 
         types = {record.type for record in linked}
         if types != {"expense", "income"}:
             raise DomainError(
-                f"Transfer integrity violated for #{transfer_id}:"
+                f"Transfer integrity violated for #{transfer_id}: "
                 "requires one expense and one income"
             )
 

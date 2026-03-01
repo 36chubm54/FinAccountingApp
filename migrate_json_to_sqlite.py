@@ -12,6 +12,7 @@ from storage.json_storage import JsonStorage
 from storage.sqlite_storage import SQLiteStorage
 
 EPSILON = 0.00001
+PROJECT_ROOT = Path(__file__).resolve().parent
 
 
 def _resolve_schema_path(schema_path: str) -> str:
@@ -27,18 +28,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--json-path",
-        default="records.json",
-        help="Path to source JSON file (default: records.json)",
+        default=str(PROJECT_ROOT / "data.json"),
+        help="Path to source JSON file (default: <project>/data.json)",
     )
     parser.add_argument(
         "--sqlite-path",
-        default="records.db",
-        help="Path to target SQLite database (default: records.db)",
+        default=str(PROJECT_ROOT / "finance.db"),
+        help="Path to target SQLite database (default: <project>/finance.db)",
     )
     parser.add_argument(
         "--schema-path",
-        default=str(Path("db") / "schema.sql"),
-        help="Path to SQLite schema.sql (default: db/schema.sql)",
+        default=str(PROJECT_ROOT / "db" / "schema.sql"),
+        help="Path to SQLite schema.sql (default: <project>/db/schema.sql)",
     )
     parser.add_argument(
         "--dry-run",
@@ -119,6 +120,13 @@ def _check_target_is_empty(conn: sqlite3.Connection) -> None:
             )
 
 
+def _has_any_data(conn: sqlite3.Connection) -> bool:
+    for table in ("wallets", "transfers", "records", "mandatory_expenses"):
+        if int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]) > 0:
+            return True
+    return False
+
+
 def _all_positive_unique_ids(items: list, id_getter) -> bool:
     ids = [int(id_getter(item)) for item in items]
     return all(value > 0 for value in ids) and len(ids) == len(set(ids))
@@ -160,11 +168,10 @@ def _insert_wallets(conn: sqlite3.Connection, wallets: list[Wallet]) -> dict[int
             cursor = conn.execute(
                 """
                 INSERT INTO wallets (
-                    id, name, currency, initial_balance, system, allow_negative, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    name, currency, initial_balance, system, allow_negative, is_active)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    int(wallet.id),
                     wallet.name,
                     wallet.currency.upper(),
                     float(wallet.initial_balance),
@@ -220,13 +227,12 @@ def _insert_transfers(
             cursor = conn.execute(
                 """
                 INSERT INTO transfers (
-                    id, from_wallet_id, to_wallet_id, date, amount_original, currency,
+                    from_wallet_id, to_wallet_id, date, amount_original, currency,
                     rate_at_operation, amount_kzt, description
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    int(transfer.id),
                     from_wallet_id,
                     to_wallet_id,
                     (
@@ -315,13 +321,12 @@ def _insert_records(
             cursor = conn.execute(
                 """
                 INSERT INTO records (
-                    id, type, date, wallet_id, transfer_id, amount_original,
+                    type, date, wallet_id, transfer_id, amount_original,
                     currency, rate_at_operation, amount_kzt, category, description, period
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    int(record.id),
                     payload[10],
                     payload[0],
                     payload[1],
@@ -384,13 +389,12 @@ def _insert_mandatory_expenses(
             cursor = conn.execute(
                 """
                 INSERT INTO mandatory_expenses (
-                    id, date, wallet_id, amount_original, currency, rate_at_operation,
+                    date, wallet_id, amount_original, currency, rate_at_operation,
                     amount_kzt, category, description, period
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    int(expense.id),
                     date_value,
                     wallet_map[int(expense.wallet_id)],
                     float(expense.amount_original or 0.0),
@@ -515,6 +519,27 @@ def validate_migration(
     return (len(errors) == 0, errors)
 
 
+def _validate_existing_target_equivalence(
+    conn: sqlite3.Connection,
+    wallets: list[Wallet],
+    records: list[Record],
+    transfers: list,
+    mandatory_expenses: list[MandatoryExpenseRecord],
+) -> tuple[bool, list[str]]:
+    identity_map = {int(wallet.id): int(wallet.id) for wallet in wallets}
+    return validate_migration(
+        conn=conn,
+        wallets=wallets,
+        records=records,
+        transfers=transfers,
+        mandatory_expenses=mandatory_expenses,
+        wallet_map=identity_map,
+        record_map={int(record.id): int(record.id) for record in records},
+        transfer_map={int(transfer.id): int(transfer.id) for transfer in transfers},
+        mandatory_map={int(expense.id): int(expense.id) for expense in mandatory_expenses},
+    )
+
+
 def run_dry_run(args: argparse.Namespace) -> int:
     print("== DRY RUN: JSON -> SQLite migration check ==")
     json_storage = JsonStorage(file_path=args.json_path)
@@ -560,9 +585,6 @@ def run_migration(args: argparse.Namespace) -> int:
         if not Path(schema_path).exists():
             raise FileNotFoundError(f"schema.sql not found: {schema_path}")
 
-        sqlite_storage.initialize_schema(schema_path)
-        _check_target_is_empty(conn)
-
         wallets = json_storage.get_wallets()
         transfers = json_storage.get_transfers()
         records = json_storage.get_records()
@@ -570,6 +592,23 @@ def run_migration(args: argparse.Namespace) -> int:
 
         _validate_source_integrity(wallets, records, transfers, mandatory_expenses)
         print("[ok] Source data integrity passed")
+
+        sqlite_storage.initialize_schema(schema_path)
+        if _has_any_data(conn):
+            valid_existing, existing_errors = _validate_existing_target_equivalence(
+                conn,
+                wallets=wallets,
+                records=records,
+                transfers=transfers,
+                mandatory_expenses=mandatory_expenses,
+            )
+            if valid_existing:
+                print("[ok] Target SQLite already contains equivalent data, migration skipped")
+                return 0
+            details = "; ".join(existing_errors[:3]) if existing_errors else "dataset mismatch"
+            raise RuntimeError(
+                f"Target SQLite is not empty and differs from source JSON: {details}"
+            )
 
         conn.execute("BEGIN")
         print("[tx] Transaction started")

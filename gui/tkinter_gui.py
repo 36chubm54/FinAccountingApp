@@ -9,6 +9,7 @@ from tkinter import Listbox, messagebox, ttk
 from typing import Any
 
 from app.services import CurrencyService
+from bootstrap import bootstrap_repository
 from domain.import_policy import ImportPolicy
 from gui.controllers import FinancialController
 from gui.tabs import (
@@ -17,7 +18,6 @@ from gui.tabs import (
     build_reports_tab,
     build_settings_tab,
 )
-from infrastructure.repositories import JsonFileRecordRepository
 from utils.charting import (
     aggregate_daily_cashflow,
     aggregate_expenses_by_category,
@@ -48,9 +48,7 @@ class FinancialApp(tk.Tk):
         self.geometry("1100x800")
         self.minsize(900, 600)
 
-        self.repository = JsonFileRecordRepository(
-            str(Path(__file__).resolve().parent.parent / "records.json")
-        )
+        self.repository = bootstrap_repository()
         self.currency = CurrencyService()
         self.controller = FinancialController(self.repository, self.currency)
 
@@ -127,6 +125,9 @@ class FinancialApp(tk.Tk):
 
     def destroy(self) -> None:
         self._executor.shutdown(wait=False, cancel_futures=True)
+        close_method = getattr(self.repository, "close", None)
+        if callable(close_method):
+            close_method()
         super().destroy()
 
     def _set_busy(self, busy: bool, message: str = "") -> None:

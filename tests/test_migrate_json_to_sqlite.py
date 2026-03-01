@@ -76,7 +76,7 @@ def _build_json_fixture(json_path: str) -> None:
 
 
 def test_dry_run_does_not_insert(tmp_path) -> None:
-    json_path = tmp_path / "records.json"
+    json_path = tmp_path / "data.json"
     sqlite_path = tmp_path / "records.db"
     schema_path = Path(__file__).resolve().parents[1] / "db" / "schema.sql"
     _build_json_fixture(str(json_path))
@@ -102,7 +102,7 @@ def test_dry_run_does_not_insert(tmp_path) -> None:
 
 
 def test_migration_moves_all_data_and_preserves_ids(tmp_path) -> None:
-    json_path = tmp_path / "records.json"
+    json_path = tmp_path / "data.json"
     sqlite_path = tmp_path / "records.db"
     schema_path = Path(__file__).resolve().parents[1] / "db" / "schema.sql"
     _build_json_fixture(str(json_path))
@@ -138,4 +138,33 @@ def test_migration_moves_all_data_and_preserves_ids(tmp_path) -> None:
     assert transfer_ids == [1]
     assert record_ids == [1, 2]
     assert mandatory_ids == [1]
+    sqlite_storage.close()
+
+
+def test_migration_is_safe_to_rerun_on_equivalent_dataset(tmp_path) -> None:
+    json_path = tmp_path / "records.json"
+    sqlite_path = tmp_path / "records.db"
+    schema_path = Path(__file__).resolve().parents[1] / "db" / "schema.sql"
+    _build_json_fixture(str(json_path))
+
+    args = Namespace(
+        json_path=str(json_path),
+        sqlite_path=str(sqlite_path),
+        schema_path=str(schema_path),
+        dry_run=False,
+    )
+
+    first_code = run_migration(args)
+    second_code = run_migration(args)
+
+    assert first_code == 0
+    assert second_code == 0
+
+    sqlite_storage = SQLiteStorage(str(sqlite_path))
+    sqlite_storage.initialize_schema(str(schema_path))
+    conn = sqlite_storage._conn
+    assert conn.execute("SELECT COUNT(*) FROM wallets").fetchone()[0] == 2
+    assert conn.execute("SELECT COUNT(*) FROM transfers").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM records").fetchone()[0] == 2
+    assert conn.execute("SELECT COUNT(*) FROM mandatory_expenses").fetchone()[0] == 1
     sqlite_storage.close()

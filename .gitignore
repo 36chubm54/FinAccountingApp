@@ -9,3 +9,6 @@ __pycache__/
 *.xlsx
 *.pdf
 *.json
+*.db
+*.db-shm
+*.db-wal

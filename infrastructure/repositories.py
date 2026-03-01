@@ -166,7 +166,7 @@ class JsonFileRecordRepository(RecordRepository):
     _path_locks: dict[str, threading.RLock] = {}
     _path_locks_guard = threading.Lock()
 
-    def __init__(self, file_path: str = "records.json"):
+    def __init__(self, file_path: str = "data.json"):
         self._file_path = file_path
         abs_path = os.path.abspath(file_path)
         with self._path_locks_guard:
@@ -244,13 +244,13 @@ class JsonFileRecordRepository(RecordRepository):
             linked = records_by_transfer.get(transfer_id, [])
             if len(linked) != 2:
                 raise DomainError(
-                    f"Transfer integrity violated for #{transfer_id}:"
+                    f"Transfer integrity violated for #{transfer_id}: "
                     f"expected 2 linked records, got {len(linked)}"
                 )
             record_types = {str(item.get("type", "") or "").lower() for item in linked}
             if record_types != {"expense", "income"}:
                 raise DomainError(
-                    f"Transfer integrity violated for #{transfer_id}:"
+                    f"Transfer integrity violated for #{transfer_id}: "
                     f"requires one income and one expense"
                 )
 

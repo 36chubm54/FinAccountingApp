@@ -25,10 +25,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added id-preservation and fallback id-mapping (`old_id -> new_id`) with reference remapping for `wallet_id` and `transfer_id`.
   - Added post-migration consistency checks: counts, wallet balances, and net worth; rollback on mismatch/error.
   - Added tests in `tests/test_migrate_json_to_sqlite.py` for dry-run and successful migration with id preservation.
+- SQLite Primary Storage Bootstrap (Day 3):
+  - Added `config.py` with `USE_SQLITE`, `SQLITE_PATH`, `JSON_PATH`.
+  - Added `infrastructure/sqlite_repository.py` as `RecordRepository` implementation backed by SQLite.
+  - Added `bootstrap.py` for storage selection and startup flow:
+    - SQLite/JSON switch via config flag,
+    - protection from repeated migration if SQLite already has data,
+    - one-time migration from JSON when SQLite is empty,
+    - startup integrity validation (counts + net worth) with emergency mode on mismatch.
+  - Added `backup.py` with:
+    - `create_backup()` for timestamped JSON backup at startup,
+    - `export_to_json()` for SQLite -> JSON export without recalculations.
+  - Updated GUI initialization to use bootstrap-selected repository while keeping service layer unchanged.
+  - Added tests `tests/test_bootstrap_backup.py`.
 - Migration script/test hardening:
   - Fixed `schema.sql` path resolution in `migrate_json_to_sqlite.py` for non-project working directories.
   - Updated migration tests to use absolute path to `db/schema.sql`.
   - Clarified test commands in docs to run via `python -m pytest` in active virtual environment.
+- Migration reliability fixes:
+  - Fixed fallback auto-ID insertion branches in `migrate_json_to_sqlite.py` to avoid forcing source ids.
+  - Improved rerun behavior: migration now checks existing SQLite dataset and skips safely when data is equivalent.
+  - Added test coverage for safe migration rerun on non-empty SQLite.
+- Storage path fixes:
+  - Fixed `config.py` storage paths to be anchored to the `project` directory.
+  - Fixed migration script defaults to use `<project>/data.json`, `<project>/finance.db`, and `<project>/db/schema.sql`.
+  - Ensured backup/database files are created inside `project` regardless of current working directory.
 - Immutable Domain Model and SQL-ready Repository Layer (Phase 3.3):
   - Added immutable `Record.id` for stable identity of domain records.
   - Added `Record.with_updated_amount_kzt()` that returns a new instance via copy/replace.

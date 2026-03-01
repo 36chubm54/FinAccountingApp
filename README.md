@@ -254,7 +254,7 @@ Backup восстанавливает:
 
 ### Хранение данных
 
-Текущий primary storage — JSON (`records.json`).
+Текущий primary storage — JSON (`data.json`).
 Для миграции на SQLite добавлен отдельный слой `storage/`:
 
 - `storage/base.py` — контракт `Storage` (только data-access операции).
@@ -275,7 +275,7 @@ Backup восстанавливает:
 python migrate_json_to_sqlite.py --dry-run
 
 # Полная миграция
-python migrate_json_to_sqlite.py --json-path records.json --sqlite-path records.db
+python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 ```
 
 Что делает скрипт:
@@ -286,6 +286,27 @@ python migrate_json_to_sqlite.py --json-path records.json --sqlite-path records.
 - сохраняет существующие `id` (или строит mapping `old_id -> new_id` при авто-генерации);
 - валидирует целостность и сверяет балансы/`net worth`;
 - делает `rollback` при любой ошибке или расхождении.
+- безопасен к повторному запуску: если SQLite уже содержит эквивалентный набор данных, миграция пропускается без ошибки.
+
+### Конфигурация primary storage
+
+В модуле `config.py` задаётся источник данных:
+
+- `USE_SQLITE = True`
+- `SQLITE_PATH = "finance.db"`
+- `JSON_PATH = "data.json"`
+
+Пути в `config.py` и значения по умолчанию в `migrate_json_to_sqlite.py`
+резолвятся относительно каталога `project`, поэтому `finance.db` и `data.json` создаются внутри `project` даже при запуске из другой папки, а `data_backup_*.json` — внутри `project/backups/` (папка создаётся автоматически).
+
+Инициализация происходит через `bootstrap.py`:
+
+- при `USE_SQLITE=True` выбирается SQLite как primary storage;
+- если SQLite пуст, выполняется одноразовая миграция из JSON;
+- если SQLite уже содержит данные, повторная миграция блокируется;
+- при старте создаётся backup JSON (`data_backup_YYYYMMDD_HHMMSS.json`);
+- выполняется финальная проверка целостности (counts + net worth), при расхождении — аварийный режим;
+- после старта поддерживается обратный экспорт SQLite -> JSON (`backup.export_to_json`).
 
 Формат:
 
@@ -351,6 +372,7 @@ python migrate_json_to_sqlite.py --json-path records.json --sqlite-path records.
   ],
   "mandatory_expenses": [
     {
+      "id": 1,
       "date": "",
       "amount_original": 300.0,
       "currency": "USD",
@@ -358,8 +380,7 @@ python migrate_json_to_sqlite.py --json-path records.json --sqlite-path records.
       "amount_kzt": 150000.0,
       "category": "Mandatory",
       "description": "Monthly rent",
-      "period": "monthly",
-      "id": 1
+      "period": "monthly"
     }
   ],
   "transfers": [
@@ -402,15 +423,19 @@ python migrate_json_to_sqlite.py --json-path records.json --sqlite-path records.
 - `domain/` — бизнес‑модели и правила (записи, отчёты, валидация дат и периодов, валюты, кошельки, transfers).
 - `app/` — сценарии использования (use cases) и адаптер сервиса валют.
 - `infrastructure/` — хранилище данных (JSON‑репозиторий).
+- `infrastructure/` — JSON и SQLite реализации `RecordRepository`.
 - `storage/` — абстракция хранилища и адаптеры JSON/SQLite.
 - `db/` — SQL-схема для SQLite.
+- `bootstrap.py` — выбор storage, миграция и стартовая валидация.
+- `backup.py` — backup JSON и экспорт SQLite -> JSON.
+- `config.py` — флаг и пути storage.
 - `utils/` — импорт/экспорт и подготовка данных для графиков.
 - `gui/` — GUI слой (Tkinter).
 - `web/` — автономное веб-приложение.
 
 Поток данных для GUI:
 
-- UI (Tkinter) → `gui/controllers.py` → `app/use_cases.py` → `infrastructure/repositories.py` → `records.json`.
+- UI (Tkinter) → `gui/controllers.py` → `app/use_cases.py` → `infrastructure/repositories.py` → `data.json`.
 
 Связь домена:
 
@@ -528,7 +553,11 @@ python migrate_json_to_sqlite.py --json-path records.json --sqlite-path records.
 `infrastructure/repositories.py`
 
 - `RecordRepository` — интерфейс репозитория.
-- `JsonFileRecordRepository(file_path="records.json")` — JSON‑хранилище.
+- `JsonFileRecordRepository(file_path="data.json")` — JSON‑хранилище.
+
+`infrastructure/sqlite_repository.py`
+
+- `SQLiteRecordRepository(db_path="finance.db")` — SQLite-реализация `RecordRepository` для сервисного слоя.
 
 `storage/base.py`
 
@@ -536,7 +565,7 @@ python migrate_json_to_sqlite.py --json-path records.json --sqlite-path records.
 
 `storage/json_storage.py`
 
-- `JsonStorage(file_path="records.json")` — обёртка над текущей JSON-реализацией, совместимая с существующим кодом.
+- `JsonStorage(file_path="data.json")` — обёртка над текущей JSON-реализацией, совместимая с существующим кодом.
 
 `storage/sqlite_storage.py`
 
@@ -656,8 +685,11 @@ python migrate_json_to_sqlite.py --json-path records.json --sqlite-path records.
 project/
 │
 ├── main.py                     # Точка входа приложения
+├── config.py                   # Конфигурация storage (SQLite/JSON)
+├── bootstrap.py                # Выбор storage + стартовая миграция/валидация
+├── backup.py                   # Backup JSON и экспорт SQLite -> JSON
 ├── migrate_json_to_sqlite.py   # Миграция данных из JSON в SQLite
-├── records.json                # Хранилище записей (создаётся автоматически)
+├── data.json                # Хранилище записей (создаётся автоматически)
 ├── currency_rates.json         # Кэш курсов валют (use_online=True)
 ├── requirements.txt            # Runtime-зависимости
 ├── requirements-dev.txt        # Dev-зависимости (тесты, coverage)
@@ -686,7 +718,8 @@ project/
 │   └── import_policy.py        # Политики импорта
 │
 ├── infrastructure/             # Infrastructure layer
-│   └── repositories.py         # JSON-репозиторий
+│   ├── repositories.py         # JSON-репозиторий
+│   └── sqlite_repository.py    # SQLite-репозиторий
 │
 ├── storage/                    # Абстракция storage и адаптеры JSON/SQLite
 │   ├── __init__.py
@@ -733,6 +766,7 @@ project/
     ├── test_excel.py
     ├── test_gui_exporters_importers.py
     ├── test_import_balance_contract.py
+    ├── test_bootstrap_backup.py
     ├── test_migrate_json_to_sqlite.py
     ├── test_import_core.py
     ├── test_import_policy_and_backup.py
