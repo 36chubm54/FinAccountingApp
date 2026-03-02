@@ -326,6 +326,7 @@ class CreateTransfer:
         projected_balance = from_balance - transfer_kzt - commission_kzt
         if not from_wallet.allow_negative and projected_balance < 0:
             raise ValueError("Insufficient funds in source wallet")
+        next_record_id = max((int(record.id) for record in records), default=0) + 1
 
         transfer_id = max((t.id for t in self._repository.load_transfers()), default=0) + 1
         transfer = Transfer(
@@ -341,6 +342,7 @@ class CreateTransfer:
         )
 
         expense_record = ExpenseRecord(
+            id=next_record_id,
             date=transfer_date,
             wallet_id=from_wallet_id,
             transfer_id=transfer_id,
@@ -351,6 +353,7 @@ class CreateTransfer:
             category="Transfer",
         )
         income_record = IncomeRecord(
+            id=next_record_id + 1,
             date=transfer_date,
             wallet_id=to_wallet_id,
             transfer_id=transfer_id,
@@ -366,6 +369,7 @@ class CreateTransfer:
         if commission_amount > 0:
             marker = _commission_marker(transfer_id)
             commission_record = ExpenseRecord(
+                id=next_record_id + 2,
                 date=transfer_date,
                 wallet_id=from_wallet_id,
                 transfer_id=None,

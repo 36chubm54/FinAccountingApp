@@ -110,6 +110,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add export of grouped category tables to Excel/PDF report after the main statement.
 - Add multicurrency records with FX revaluation and unified data import/export
 - Add import policies, validated row-level import, and full JSON backup support
+- SQLite migration verification and startup integrity tests:
+  - Added `tests/test_bootstrap_migration_verification.py` for `migration_verified` flow and SQLite-only startup validation.
+  - Added `tests/test_transfer_order_sqlite.py` to verify transfer records are appended to the end of `records`.
 
 ### Changed
 
@@ -121,6 +124,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added AUTOINCREMENT reset on table wipes (`sqlite_sequence`) so recreated entities start from `1`.
   - Hardened mandatory expense import/save path against missing wallet links (prevents FK failures on inconsistent payloads).
   - Removed hot-path `sync_sequences()` calls from frequent startup flow to fix long app startup delays.
+- SQLite bootstrap integrity flow:
+  - Added persistent migration marker `schema_meta.migration_verified`.
+  - Switched startup behavior to one-time JSON vs SQLite verification only before migration confirmation.
+  - Changed regular startup validation (with `USE_SQLITE=True`) to SQLite-only integrity checks.
+  - Added stricter transfer integrity check in bootstrap validation: each transfer must be exactly `income + expense`.
+- Transfer creation ordering:
+  - Updated `CreateTransfer` to assign deterministic tail IDs for linked transfer records so transfer entries are persisted at the end of `records`.
 
 - Updated transfer commission linkage:
   - transfer aggregate now keeps exactly two linked records via `transfer_id`,
@@ -148,6 +158,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 
 - Updated `README.md` and `README_EN.md` with storage abstraction, JSON/SQLite adapters, and `db/schema.sql` details.
+- Updated `README.md` and `README_EN.md` with:
+  - SQLite as source of truth,
+  - `migration_verified` startup flow,
+  - SQLite-only integrity checks after migration verification,
+  - new tests for migration verification and transfer order.
 - Updated `README.md` with SQLite ID normalization/reindex rules and JSON backup wallet-id remapping behavior.
 - Documented `migrate_json_to_sqlite.py` usage and migration guarantees in `README.md` and `README_EN.md`.
 - Fixed link to the "Web application" title in the README_EN.md table of contents

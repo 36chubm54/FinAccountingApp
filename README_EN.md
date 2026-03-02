@@ -264,8 +264,9 @@ Rules for migrating old formats:
 
 ### Data storage
 
-Current primary storage is JSON (`data.json`).
-To prepare JSON->SQLite migration, a dedicated `storage/` layer was added:
+Current primary storage is SQLite (`finance.db`).
+JSON (`data.json`) is used as backup/export.
+A dedicated `storage/` layer is used for data access:
 
 - `storage/base.py` — `Storage` contract (data-access operations only).
 - `storage/json_storage.py` — `JsonStorage` adapter over the current JSON implementation.
@@ -315,7 +316,11 @@ Initialization is handled by `bootstrap.py`:
 - if SQLite is empty, a one-time migration from JSON is executed;
 - if SQLite already has data, repeated migration is blocked;
 - on each startup a JSON backup is created (`data_backup_YYYYMMDD_HHMMSS.json`);
-- startup integrity validation runs (counts + net worth), mismatch triggers emergency mode;
+- after successful migration, `schema_meta.migration_verified=true` is stored;
+- JSON vs SQLite comparison runs only until migration is verified;
+- on regular starts with `USE_SQLITE=True`, only SQLite internal integrity is validated:
+  `PRAGMA foreign_key_check`, transfer linkage (`exactly 2 linked records: income+expense`),
+  no orphan records, and no CHECK-like violations;
 - reverse export SQLite -> JSON is available via `backup.export_to_json`.
 
 SQLite behavior by identifiers:
@@ -803,6 +808,7 @@ project/
     ├── test_gui_exporters_importers.py
     ├── test_import_balance_contract.py
     ├── test_bootstrap_backup.py
+    ├── test_bootstrap_migration_verification.py
     ├── test_migrate_json_to_sqlite.py
     ├── test_import_core.py
     ├── test_import_parser.py
@@ -817,6 +823,7 @@ project/
     ├── test_use_cases.py
     ├── test_validation.py
     ├── test_transfer_integrity.py
+    ├── test_transfer_order_sqlite.py
     ├── test_wallet_phase1.py
     ├── test_wallet_phase2.py
     ├── test_wallet_phase3.py

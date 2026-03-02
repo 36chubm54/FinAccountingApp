@@ -264,8 +264,9 @@ Backup восстанавливает:
 
 ### Хранение данных
 
-Текущий primary storage — JSON (`data.json`).
-Для миграции на SQLite добавлен отдельный слой `storage/`:
+Текущий primary storage — SQLite (`finance.db`).
+JSON (`data.json`) используется как backup/экспорт.
+Для работы со storage используется отдельный слой `storage/`:
 
 - `storage/base.py` — контракт `Storage` (только data-access операции).
 - `storage/json_storage.py` — адаптер `JsonStorage` поверх текущей JSON-реализации.
@@ -315,7 +316,11 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
 - если SQLite пуст, выполняется одноразовая миграция из JSON;
 - если SQLite уже содержит данные, повторная миграция блокируется;
 - при старте создаётся backup JSON (`data_backup_YYYYMMDD_HHMMSS.json`);
-- выполняется финальная проверка целостности (counts + net worth), при расхождении — аварийный режим;
+- после миграции выставляется флаг `schema_meta.migration_verified=true`;
+- сравнение JSON vs SQLite выполняется только до подтверждения миграции;
+- на обычных стартах при `USE_SQLITE=True` выполняется только проверка внутренней целостности SQLite:
+  `PRAGMA foreign_key_check`, корректность связок transfer (`ровно 2 записи: income+expense`),
+  отсутствие orphan records и CHECK-like нарушений;
 - после старта поддерживается обратный экспорт SQLite -> JSON (`backup.export_to_json`).
 
 Поведение SQLite по идентификаторам:
@@ -803,6 +808,7 @@ project/
     ├── test_gui_exporters_importers.py
     ├── test_import_balance_contract.py
     ├── test_bootstrap_backup.py
+    ├── test_bootstrap_migration_verification.py
     ├── test_migrate_json_to_sqlite.py
     ├── test_import_core.py
     ├── test_import_parser.py
@@ -817,6 +823,7 @@ project/
     ├── test_use_cases.py
     ├── test_validation.py
     ├── test_transfer_integrity.py
+    ├── test_transfer_order_sqlite.py
     ├── test_wallet_phase1.py
     ├── test_wallet_phase2.py
     ├── test_wallet_phase3.py
