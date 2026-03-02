@@ -55,28 +55,58 @@ class SQLiteStorage(Storage):
         ]
 
     def save_wallet(self, wallet: Wallet) -> None:
-        self._conn.execute(
-            """
-            INSERT INTO wallets (id, name, currency, initial_balance, system, allow_negative, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                name = excluded.name,
-                currency = excluded.currency,
-                initial_balance = excluded.initial_balance,
-                system = excluded.system,
-                allow_negative = excluded.allow_negative,
-                is_active = excluded.is_active
-            """,
-            (
-                int(wallet.id),
-                wallet.name,
-                wallet.currency.upper(),
-                float(wallet.initial_balance),
-                int(bool(wallet.system)),
-                int(bool(wallet.allow_negative)),
-                int(bool(wallet.is_active)),
-            ),
-        )
+        row = self._conn.execute(
+            "SELECT 1 FROM wallets WHERE id = ?",
+            (int(wallet.id),),
+        ).fetchone()
+        if row is not None:
+            self._conn.execute(
+                """
+                UPDATE wallets
+                SET
+                    name = ?,
+                    currency = ?,
+                    initial_balance = ?,
+                    system = ?,
+                    allow_negative = ?,
+                    is_active = ?
+                WHERE id = ?
+                """,
+                (
+                    wallet.name,
+                    wallet.currency.upper(),
+                    float(wallet.initial_balance),
+                    int(bool(wallet.system)),
+                    int(bool(wallet.allow_negative)),
+                    int(bool(wallet.is_active)),
+                    int(wallet.id),
+                ),
+            )
+        else:
+            cursor = self._conn.execute(
+                """
+                INSERT INTO wallets (
+                    name,
+                    currency,
+                    initial_balance,
+                    system,
+                    allow_negative,
+                    is_active
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    wallet.name,
+                    wallet.currency.upper(),
+                    float(wallet.initial_balance),
+                    int(bool(wallet.system)),
+                    int(bool(wallet.allow_negative)),
+                    int(bool(wallet.is_active)),
+                ),
+            )
+            wallet_id = cursor.lastrowid
+            if wallet_id is None:
+                raise RuntimeError("Failed to obtain lastrowid for wallets insert")
         self._conn.commit()
 
     def get_records(self) -> list[Record]:
@@ -129,51 +159,78 @@ class SQLiteStorage(Storage):
 
     def save_record(self, record: Record) -> None:
         period = record.period if isinstance(record, MandatoryExpenseRecord) else None
-        self._conn.execute(
-            """
-            INSERT INTO records (
-                id,
-                type,
-                date,
-                wallet_id,
-                transfer_id,
-                amount_original,
-                currency,
-                rate_at_operation,
-                amount_kzt,
-                category,
-                description,
-                period
+        row = self._conn.execute(
+            "SELECT 1 FROM records WHERE id = ?",
+            (int(record.id),),
+        ).fetchone()
+        if row is not None:
+            self._conn.execute(
+                """
+                UPDATE records
+                SET
+                    type = ?,
+                    date = ?,
+                    wallet_id = ?,
+                    transfer_id = ?,
+                    amount_original = ?,
+                    currency = ?,
+                    rate_at_operation = ?,
+                    amount_kzt = ?,
+                    category = ?,
+                    description = ?,
+                    period = ?
+                WHERE id = ?
+                """,
+                (
+                    self._record_type(record),
+                    self._date_as_text(record.date),
+                    int(record.wallet_id),
+                    int(record.transfer_id) if record.transfer_id is not None else None,
+                    float(record.amount_original or 0.0),
+                    str(record.currency).upper(),
+                    float(record.rate_at_operation),
+                    float(record.amount_kzt or 0.0),
+                    str(record.category),
+                    str(record.description or ""),
+                    str(period) if period is not None else None,
+                    int(record.id),
+                ),
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                type = excluded.type,
-                date = excluded.date,
-                wallet_id = excluded.wallet_id,
-                transfer_id = excluded.transfer_id,
-                amount_original = excluded.amount_original,
-                currency = excluded.currency,
-                rate_at_operation = excluded.rate_at_operation,
-                amount_kzt = excluded.amount_kzt,
-                category = excluded.category,
-                description = excluded.description,
-                period = excluded.period
-            """,
-            (
-                int(record.id),
-                self._record_type(record),
-                self._date_as_text(record.date),
-                int(record.wallet_id),
-                int(record.transfer_id) if record.transfer_id is not None else None,
-                float(record.amount_original or 0.0),
-                str(record.currency).upper(),
-                float(record.rate_at_operation),
-                float(record.amount_kzt or 0.0),
-                str(record.category),
-                str(record.description or ""),
-                str(period) if period is not None else None,
-            ),
-        )
+        else:
+            cursor = self._conn.execute(
+                """
+                INSERT INTO records (
+                    type,
+                    date,
+                    wallet_id,
+                    transfer_id,
+                    amount_original,
+                    currency,
+                    rate_at_operation,
+                    amount_kzt,
+                    category,
+                    description,
+                    period
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    self._record_type(record),
+                    self._date_as_text(record.date),
+                    int(record.wallet_id),
+                    int(record.transfer_id) if record.transfer_id is not None else None,
+                    float(record.amount_original or 0.0),
+                    str(record.currency).upper(),
+                    float(record.rate_at_operation),
+                    float(record.amount_kzt or 0.0),
+                    str(record.category),
+                    str(record.description or ""),
+                    str(period) if period is not None else None,
+                ),
+            )
+            record_id = cursor.lastrowid
+            if record_id is None:
+                raise RuntimeError("Failed to obtain lastrowid for records insert")
         self._conn.commit()
 
     def get_transfers(self) -> list[Transfer]:
@@ -209,42 +266,66 @@ class SQLiteStorage(Storage):
         ]
 
     def save_transfer(self, transfer: Transfer) -> None:
-        self._conn.execute(
-            """
-            INSERT INTO transfers (
-                id,
-                from_wallet_id,
-                to_wallet_id,
-                date,
-                amount_original,
-                currency,
-                rate_at_operation,
-                amount_kzt,
-                description
+        row = self._conn.execute(
+            "SELECT 1 FROM transfers WHERE id = ?",
+            (int(transfer.id),),
+        ).fetchone()
+        if row is not None:
+            self._conn.execute(
+                """
+                UPDATE transfers
+                SET
+                    from_wallet_id = ?,
+                    to_wallet_id = ?,
+                    date = ?,
+                    amount_original = ?,
+                    currency = ?,
+                    rate_at_operation = ?,
+                    amount_kzt = ?,
+                    description = ?
+                WHERE id = ?
+                """,
+                (
+                    int(transfer.from_wallet_id),
+                    int(transfer.to_wallet_id),
+                    self._date_as_text(transfer.date),
+                    float(transfer.amount_original),
+                    str(transfer.currency).upper(),
+                    float(transfer.rate_at_operation),
+                    float(transfer.amount_kzt),
+                    str(transfer.description or ""),
+                    int(transfer.id),
+                ),
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                from_wallet_id = excluded.from_wallet_id,
-                to_wallet_id = excluded.to_wallet_id,
-                date = excluded.date,
-                amount_original = excluded.amount_original,
-                currency = excluded.currency,
-                rate_at_operation = excluded.rate_at_operation,
-                amount_kzt = excluded.amount_kzt,
-                description = excluded.description
-            """,
-            (
-                int(transfer.id),
-                int(transfer.from_wallet_id),
-                int(transfer.to_wallet_id),
-                self._date_as_text(transfer.date),
-                float(transfer.amount_original),
-                str(transfer.currency).upper(),
-                float(transfer.rate_at_operation),
-                float(transfer.amount_kzt),
-                str(transfer.description or ""),
-            ),
-        )
+        else:
+            cursor = self._conn.execute(
+                """
+                INSERT INTO transfers (
+                    from_wallet_id,
+                    to_wallet_id,
+                    date,
+                    amount_original,
+                    currency,
+                    rate_at_operation,
+                    amount_kzt,
+                    description
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(transfer.from_wallet_id),
+                    int(transfer.to_wallet_id),
+                    self._date_as_text(transfer.date),
+                    float(transfer.amount_original),
+                    str(transfer.currency).upper(),
+                    float(transfer.rate_at_operation),
+                    float(transfer.amount_kzt),
+                    str(transfer.description or ""),
+                ),
+            )
+            transfer_id = cursor.lastrowid
+            if transfer_id is None:
+                raise RuntimeError("Failed to obtain lastrowid for transfers insert")
         self._conn.commit()
 
     def get_mandatory_expenses(self) -> list[MandatoryExpenseRecord]:

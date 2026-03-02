@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from app.finance_service import FinanceService
@@ -52,6 +52,9 @@ class ImportService:
             else float(self._finance_service.get_system_initial_balance())
         )
         wallets = self._wallets_from_payload(parsed.wallets) if parsed.wallets else []
+        if wallets:
+            wallets, wallet_id_map = self._normalize_wallet_ids(wallets)
+            parsed = self._remap_parsed_wallet_ids(parsed, wallet_id_map)
         imported_wallets = len(wallets)
 
         wallet_ids = (
@@ -476,6 +479,76 @@ class ImportService:
                 )
             ]
         return wallets
+
+    @staticmethod
+    def _normalize_wallet_ids(wallets: list[Wallet]) -> tuple[list[Wallet], dict[int, int]]:
+        normalized: list[Wallet] = []
+        wallet_id_map: dict[int, int] = {}
+        for new_id, wallet in enumerate(sorted(wallets, key=lambda item: int(item.id)), start=1):
+            wallet_id_map[int(wallet.id)] = new_id
+            normalized.append(
+                replace(
+                    wallet,
+                    id=new_id,
+                    system=bool(wallet.system) or new_id == 1,
+                )
+            )
+        if normalized and not any(wallet.system for wallet in normalized):
+            normalized[0] = replace(normalized[0], system=True)
+        return normalized, wallet_id_map
+
+    @classmethod
+    def _remap_parsed_wallet_ids(
+        cls,
+        parsed: ParsedImportData,
+        wallet_id_map: dict[int, int],
+    ) -> ParsedImportData:
+        rows = [
+            cls._remap_wallet_ids_in_row(
+                row,
+                wallet_id_map,
+                fields=("wallet_id", "from_wallet_id", "to_wallet_id"),
+            )
+            for row in parsed.rows
+        ]
+        mandatory_rows = [
+            cls._remap_wallet_ids_in_row(row, wallet_id_map, fields=("wallet_id",))
+            for row in parsed.mandatory_rows
+        ]
+        wallets = [
+            cls._remap_wallet_ids_in_row(wallet, wallet_id_map, fields=("id",))
+            for wallet in parsed.wallets
+        ]
+        return ParsedImportData(
+            path=parsed.path,
+            file_type=parsed.file_type,
+            rows=rows,
+            mandatory_rows=mandatory_rows,
+            wallets=wallets,
+            initial_balance=parsed.initial_balance,
+        )
+
+    @staticmethod
+    def _remap_wallet_ids_in_row(
+        row: dict[str, Any],
+        wallet_id_map: dict[int, int],
+        *,
+        fields: tuple[str, ...],
+    ) -> dict[str, Any]:
+        remapped = dict(row)
+        for field in fields:
+            value = remapped.get(field)
+            mapped = ImportService._map_wallet_id(value, wallet_id_map)
+            if mapped is not None:
+                remapped[field] = mapped
+        return remapped
+
+    @staticmethod
+    def _map_wallet_id(value: Any, wallet_id_map: dict[int, int]) -> int | None:
+        wallet_id = int(as_float(value, 0.0) or 0)
+        if wallet_id <= 0:
+            return None
+        return wallet_id_map.get(wallet_id, wallet_id)
 
     @staticmethod
     def _build_error(errors: list[str]) -> str:

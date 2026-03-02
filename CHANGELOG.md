@@ -113,6 +113,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- SQLite import/ID normalization and startup performance:
+  - Restored deterministic ID normalization (`1..N`) for `wallets`, `records`, `transfers`, `mandatory_expenses` during full replacement flows.
+  - Added wallet-id remapping in JSON backup import (`wallet.id`, `wallet_id`, `from_wallet_id`, `to_wallet_id`) to keep references consistent after normalization.
+  - Reworked `replace_records_and_transfers()` to rebuild transfer/record sets with stable remapping and no manual ID collisions.
+  - Added repository bootstrap check to normalize already-drifted IDs in existing SQLite datasets.
+  - Added AUTOINCREMENT reset on table wipes (`sqlite_sequence`) so recreated entities start from `1`.
+  - Hardened mandatory expense import/save path against missing wallet links (prevents FK failures on inconsistent payloads).
+  - Removed hot-path `sync_sequences()` calls from frequent startup flow to fix long app startup delays.
+
 - Updated transfer commission linkage:
   - transfer aggregate now keeps exactly two linked records via `transfer_id`,
   - commission remains a separate expense and is associated for cascade delete via description marker.
@@ -139,6 +148,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 
 - Updated `README.md` and `README_EN.md` with storage abstraction, JSON/SQLite adapters, and `db/schema.sql` details.
+- Updated `README.md` with SQLite ID normalization/reindex rules and JSON backup wallet-id remapping behavior.
 - Documented `migrate_json_to_sqlite.py` usage and migration guarantees in `README.md` and `README_EN.md`.
 - Fixed link to the "Web application" title in the README_EN.md table of contents
 - Improve README formatting and add test setup note
