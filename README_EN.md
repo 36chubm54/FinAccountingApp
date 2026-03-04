@@ -172,6 +172,7 @@ Import/export of mandatory expenses:
 
 - Import: `CSV`, `XLSX`.
 - Export: `CSV`, `XLSX`.
+- `date` is no longer stored/exported for `mandatory_expenses` templates.
 
 ### Importing financial records
 
@@ -186,6 +187,9 @@ Import architecture:
 - `Full Backup` preserves source `amount_kzt` and `rate_at_operation` values.
 - `Current Rate` recalculates values using `CurrencyService.get_rate(...)`.
 - Parser-level guardrails are enabled (file size, row limit, CSV field size).
+- `initial_balance` is allowed only once per import file. Duplicate rows are treated as an error and abort the import.
+- `wallet_id` in import data must be a positive integer (no fractional part).
+- Non-numeric and non-finite values (`NaN`, `inf`) in numeric import fields are rejected.
 
 Formats:
 
@@ -343,7 +347,8 @@ Format:
       "currency": "USD",
       "rate_at_operation": 500.0,
       "amount_kzt": 350000.0,
-      "category": "Salary"
+      "category": "Salary",
+      "description": ""
     },
     {
       "id": 2,
@@ -353,7 +358,8 @@ Format:
       "currency": "KZT",
       "rate_at_operation": 1.0,
       "amount_kzt": 25000.0,
-      "category": "Products"
+      "category": "Products",
+      "description": ""
     },
     {
       "id": 3,
@@ -377,7 +383,8 @@ Format:
       "currency": "KZT",
       "rate_at_operation": 1.0,
       "amount_kzt": 5000.0,
-      "category": "Transfer"
+      "category": "Transfer",
+      "description": ""
     },
     {
       "id": 5,
@@ -389,13 +396,15 @@ Format:
       "currency": "KZT",
       "rate_at_operation": 1.0,
       "amount_kzt": 5000.0,
-      "category": "Transfer"
+      "category": "Transfer",
+      "description": ""
     }
   ],
   "mandatory_expenses": [
     {
       "id": 1,
-      "date": "",
+      "wallet_id": 1,
+      "transfer_id": null,
       "amount_original": 300.0,
       "currency": "USD",
       "rate_at_operation": 500.0,

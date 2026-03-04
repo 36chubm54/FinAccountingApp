@@ -387,6 +387,9 @@ class JsonFileRecordRepository(RecordRepository):
         for item in data["mandatory_expenses"]:
             if not isinstance(item, dict):
                 continue
+            if "date" in item:
+                item.pop("date", None)
+                migrated = True
             raw_id = self._as_int(item.get("id"), 0)
             if raw_id != normalized_mandatory_id or raw_id in seen_mandatory_ids:
                 item["id"] = normalized_mandatory_id
@@ -824,6 +827,7 @@ class JsonFileRecordRepository(RecordRepository):
                 data["mandatory_expenses"] = []
             expense_data = self._record_to_dict(expense, "mandatory_expense")
             expense_data.pop("type", None)
+            expense_data.pop("date", None)
             data["mandatory_expenses"].append(expense_data)
             self._save_data(data)
 
@@ -897,6 +901,7 @@ class JsonFileRecordRepository(RecordRepository):
             for index, expense in enumerate(expenses, start=1):
                 payload = self._record_to_dict(dc_replace(expense, id=index), "mandatory_expense")
                 payload.pop("type", None)
+                payload.pop("date", None)
                 data["mandatory_expenses"].append(payload)
             self._save_data(data)
 
@@ -960,6 +965,7 @@ class JsonFileRecordRepository(RecordRepository):
             for expense in mandatory_expenses:
                 payload = self._record_to_dict(expense, "mandatory_expense")
                 payload.pop("type", None)
+                payload.pop("date", None)
                 data["mandatory_expenses"].append(payload)
             self._validate_transfer_integrity(data)
             self._save_data(data)

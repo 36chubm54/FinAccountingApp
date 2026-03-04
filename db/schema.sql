@@ -49,7 +49,6 @@ CREATE TABLE IF NOT EXISTS records (
 
 CREATE TABLE IF NOT EXISTS mandatory_expenses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    date TEXT NOT NULL DEFAULT '',
     wallet_id INTEGER NOT NULL,
     amount_original REAL NOT NULL CHECK(amount_original >= 0),
     currency TEXT NOT NULL CHECK(length(trim(currency)) >= 3),
@@ -66,5 +65,4 @@ CREATE INDEX IF NOT EXISTS idx_records_wallet_id ON records(wallet_id);
 CREATE INDEX IF NOT EXISTS idx_transfers_date ON transfers(date);
 CREATE INDEX IF NOT EXISTS idx_transfers_wallet_from ON transfers(from_wallet_id);
 CREATE INDEX IF NOT EXISTS idx_transfers_wallet_to ON transfers(to_wallet_id);
-CREATE INDEX IF NOT EXISTS idx_mandatory_expenses_date ON mandatory_expenses(date);
 CREATE INDEX IF NOT EXISTS idx_mandatory_expenses_wallet_id ON mandatory_expenses(wallet_id);

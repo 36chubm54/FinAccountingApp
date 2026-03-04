@@ -172,6 +172,7 @@ python main.py
 
 - Импорт: `CSV`, `XLSX`.
 - Экспорт: `CSV`, `XLSX`.
+- Поле `date` для шаблонов `mandatory_expenses` не хранится и не экспортируется.
 
 ### Импорт финансовых записей
 
@@ -186,6 +187,9 @@ python main.py
 - Для `Full Backup` сохраняются исходные `amount_kzt` и `rate_at_operation` из файла.
 - Для `Current Rate` применяется пересчёт через `CurrencyService.get_rate(...)`.
 - В parser-слое действуют лимиты безопасности (размер файла, число строк, размер CSV-поля).
+- `initial_balance` в импортируемом файле допускается только один раз. Повторные строки считаются ошибкой и импорт откатывается.
+- `wallet_id` в импортируемых данных должен быть целым положительным числом (без дробной части).
+- Нечисловые и нефинитные значения (`NaN`, `inf`) в числовых полях импорта отклоняются.
 
 Форматы:
 
@@ -343,7 +347,8 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
       "currency": "USD",
       "rate_at_operation": 500.0,
       "amount_kzt": 350000.0,
-      "category": "Зарплата"
+      "category": "Зарплата",
+      "description": ""
     },
     {
       "id": 2,
@@ -353,7 +358,8 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
       "currency": "KZT",
       "rate_at_operation": 1.0,
       "amount_kzt": 25000.0,
-      "category": "Продукты"
+      "category": "Продукты",
+      "description": ""
     },
     {
       "id": 3,
@@ -377,7 +383,8 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
       "currency": "KZT",
       "rate_at_operation": 1.0,
       "amount_kzt": 5000.0,
-      "category": "Transfer"
+      "category": "Transfer",
+      "description": ""
     },
     {
       "id": 5,
@@ -389,13 +396,15 @@ python migrate_json_to_sqlite.py --json-path data.json --sqlite-path finance.db
       "currency": "KZT",
       "rate_at_operation": 1.0,
       "amount_kzt": 5000.0,
-      "category": "Transfer"
+      "category": "Transfer",
+      "description": ""
     }
   ],
   "mandatory_expenses": [
     {
       "id": 1,
-      "date": "",
+      "wallet_id": 1,
+      "transfer_id": null,
       "amount_original": 300.0,
       "currency": "USD",
       "rate_at_operation": 500.0,

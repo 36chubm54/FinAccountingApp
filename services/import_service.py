@@ -75,6 +75,7 @@ class ImportService:
         errors: list[str] = []
         skipped = 0
         imported = 0
+        seen_initial_balance = parsed.initial_balance is not None
 
         next_transfer_id = 1
         for index, row in enumerate(parsed.rows, start=2):
@@ -125,7 +126,12 @@ class ImportService:
                 errors.append(error)
                 continue
             if parsed_balance is not None:
+                if seen_initial_balance:
+                    skipped += 1
+                    errors.append(f"{row_label}: duplicate initial_balance row")
+                    continue
                 initial_balance = float(parsed_balance)
+                seen_initial_balance = True
                 continue
             if record is None:
                 continue
@@ -371,15 +377,14 @@ class ImportService:
         self, templates: list[MandatoryExpenseRecord]
     ) -> list[MandatoryExpenseRecord]:
         normalized: list[MandatoryExpenseRecord] = []
-        for template in templates:
+        for index, template in enumerate(templates, start=1):
             description = self._normalize_mandatory_description(
                 str(template.description or ""),
                 str(template.category),
             )
             normalized.append(
                 MandatoryExpenseRecord(
-                    id=int(template.id),
-                    date="",
+                    id=index,
                     wallet_id=1,
                     amount_original=float(template.amount_original or 0.0),
                     currency=str(template.currency).upper(),

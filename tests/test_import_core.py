@@ -76,3 +76,95 @@ def test_parse_import_row_handles_initial_balance_row() -> None:
     assert record is None
     assert error is None
     assert balance == pytest.approx(123.45)
+
+
+def test_parse_import_row_rejects_non_integer_wallet_id() -> None:
+    record, balance, error = parse_import_row(
+        {
+            "date": "2025-01-01",
+            "type": "income",
+            "wallet_id": "1.5",
+            "category": "Salary",
+            "amount_original": "10",
+            "currency": "KZT",
+            "rate_at_operation": "1",
+            "amount_kzt": "10",
+        },
+        row_label="row 4",
+        policy=ImportPolicy.FULL_BACKUP,
+    )
+    assert record is None
+    assert balance is None
+    assert "invalid wallet_id" in (error or "")
+
+
+def test_parse_import_row_rejects_overflow_wallet_id() -> None:
+    record, balance, error = parse_import_row(
+        {
+            "date": "2025-01-01",
+            "type": "income",
+            "wallet_id": "1e309",
+            "category": "Salary",
+            "amount_original": "10",
+            "currency": "KZT",
+            "rate_at_operation": "1",
+            "amount_kzt": "10",
+        },
+        row_label="row 5",
+        policy=ImportPolicy.FULL_BACKUP,
+    )
+    assert record is None
+    assert balance is None
+    assert "invalid wallet_id" in (error or "")
+
+
+def test_parse_import_row_rejects_non_finite_amounts() -> None:
+    record, balance, error = parse_import_row(
+        {
+            "date": "2025-01-01",
+            "type": "income",
+            "wallet_id": "1",
+            "category": "Salary",
+            "amount_original": "1e309",
+            "currency": "KZT",
+            "rate_at_operation": "1",
+            "amount_kzt": "10",
+        },
+        row_label="row 6",
+        policy=ImportPolicy.FULL_BACKUP,
+    )
+    assert record is None
+    assert balance is None
+    assert "invalid amount_original" in (error or "")
+
+
+def test_parse_import_row_rejects_non_finite_transfer_id() -> None:
+    record, balance, error = parse_import_row(
+        {
+            "date": "2025-01-01",
+            "type": "income",
+            "wallet_id": "1",
+            "transfer_id": "1e309",
+            "category": "Salary",
+            "amount_original": "10",
+            "currency": "KZT",
+            "rate_at_operation": "1",
+            "amount_kzt": "10",
+        },
+        row_label="row 7",
+        policy=ImportPolicy.FULL_BACKUP,
+    )
+    assert record is None
+    assert balance is None
+    assert "invalid transfer_id" in (error or "")
+
+
+def test_parse_import_row_rejects_invalid_initial_balance_amount() -> None:
+    record, balance, error = parse_import_row(
+        {"type": "initial_balance", "amount_original": "1e309"},
+        row_label="row 8",
+        policy=ImportPolicy.FULL_BACKUP,
+    )
+    assert record is None
+    assert balance is None
+    assert "invalid initial_balance amount" in (error or "")

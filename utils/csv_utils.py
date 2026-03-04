@@ -39,7 +39,6 @@ DATA_HEADERS = [
     "to_wallet_id",
 ]
 MANDATORY_HEADERS = [
-    "date",
     "type",
     "category",
     "amount_original",
@@ -350,6 +349,11 @@ def report_to_csv(report: Report, filepath: str) -> None:
         writer.writerow(["FINAL BALANCE", "", "", f"{report.total_fixed():.2f}"])
 
 
+def report_from_csv(filepath: str) -> Report:
+    records, initial_balance, _ = import_records_from_csv(filepath, ImportPolicy.LEGACY)
+    return Report(records, initial_balance)
+
+
 def export_records_to_csv(
     records: list[Record],
     filepath: str,
@@ -574,9 +578,6 @@ def export_mandatory_expenses_to_csv(expenses: list[MandatoryExpenseRecord], fil
         for expense in expenses:
             writer.writerow(
                 {
-                    "date": expense.date.isoformat()
-                    if isinstance(expense.date, dt_date)
-                    else expense.date,
                     "type": "mandatory_expense",
                     "category": expense.category,
                     "amount_original": expense.amount_original,

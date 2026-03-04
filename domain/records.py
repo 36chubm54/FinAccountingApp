@@ -136,6 +136,7 @@ class ExpenseRecord(Record):
 
 @dataclass(frozen=True)
 class MandatoryExpenseRecord(Record):
+    date: dt_date | str = ""
     description: str = ""
     period: Literal["daily", "weekly", "monthly", "yearly"] = "monthly"
 

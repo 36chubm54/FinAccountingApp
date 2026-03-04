@@ -357,23 +357,17 @@ def _insert_mandatory_expenses(
     mapping: dict[int, int] = {}
     preserve_ids = _all_positive_unique_ids(expenses, lambda expense: expense.id)
     for expense in expenses:
-        date_value = (
-            expense.date.isoformat()
-            if hasattr(expense.date, "isoformat") and not isinstance(expense.date, str)
-            else str(expense.date)
-        )
         if preserve_ids:
             cursor = conn.execute(
                 """
                 INSERT INTO mandatory_expenses (
-                    id, date, wallet_id, amount_original, currency, rate_at_operation,
+                    id, wallet_id, amount_original, currency, rate_at_operation,
                     amount_kzt, category, description, period
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(expense.id),
-                    date_value,
                     wallet_map[int(expense.wallet_id)],
                     float(expense.amount_original or 0.0),
                     str(expense.currency).upper(),
@@ -389,13 +383,12 @@ def _insert_mandatory_expenses(
             cursor = conn.execute(
                 """
                 INSERT INTO mandatory_expenses (
-                    date, wallet_id, amount_original, currency, rate_at_operation,
+                    wallet_id, amount_original, currency, rate_at_operation,
                     amount_kzt, category, description, period
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    date_value,
                     wallet_map[int(expense.wallet_id)],
                     float(expense.amount_original or 0.0),
                     str(expense.currency).upper(),

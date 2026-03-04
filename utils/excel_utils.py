@@ -41,7 +41,6 @@ DATA_HEADERS = [
     "to_wallet_id",
 ]
 MANDATORY_HEADERS = [
-    "date",
     "type",
     "category",
     "amount_original",
@@ -391,7 +390,6 @@ def export_mandatory_expenses_to_xlsx(
         if ws is not None:
             ws.append(
                 [
-                    e.date.isoformat() if isinstance(e.date, dt_date) else e.date,
                     "mandatory_expense",
                     e.category,
                     e.amount_original,

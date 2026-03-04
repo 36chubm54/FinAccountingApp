@@ -551,7 +551,6 @@ class CreateMandatoryExpense:
         if rate_at_operation is None:
             rate_at_operation = _build_rate(amount, amount_kzt, currency)
         expense = MandatoryExpenseRecord(
-            date="",  # Will be set when added to report
             wallet_id=SYSTEM_WALLET_ID,
             amount_original=amount,
             currency=currency.upper(),

@@ -295,7 +295,6 @@ class SQLiteRecordRepository(RecordRepository):
         cursor = self._conn.execute(
             """
             INSERT INTO mandatory_expenses (
-                date,
                 wallet_id,
                 amount_original,
                 currency,
@@ -305,10 +304,9 @@ class SQLiteRecordRepository(RecordRepository):
                 description,
                 period
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                self._date_as_text(expense.date),
                 int(wallet_id),
                 float(expense.amount_original or 0.0),
                 str(expense.currency).upper(),

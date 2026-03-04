@@ -284,3 +284,78 @@ def test_import_service_current_rate_does_not_pass_fixed_values() -> None:
     kwargs = finance_service.create_income.call_args.kwargs
     assert kwargs["amount_kzt"] is None
     assert kwargs["rate_at_operation"] is None
+
+
+def test_import_service_rejects_duplicate_initial_balance_rows() -> None:
+    finance_service = _finance_mock()
+    payload = ParsedImportData(
+        path="data.csv",
+        file_type="csv",
+        rows=[
+            {"type": "initial_balance", "amount_original": "100"},
+            {"type": "initial_balance", "amount_original": "200"},
+        ],
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        with pytest.raises(ValueError, match="duplicate initial_balance"):
+            ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file("data.csv")
+
+
+def test_import_service_bulk_replace_normalizes_mandatory_ids_from_one() -> None:
+    finance_service = _finance_mock()
+    finance_service.supports_bulk_import_replace = True
+    finance_service.replace_all_for_import = Mock()
+    payload = ParsedImportData(
+        path="data.json",
+        file_type="json",
+        rows=[],
+        mandatory_rows=[
+            {
+                "type": "mandatory_expense",
+                "id": "50",
+                "category": "Rent",
+                "amount_original": "100",
+                "currency": "KZT",
+                "rate_at_operation": "1",
+                "amount_kzt": "100",
+                "description": "Monthly",
+                "period": "monthly",
+            },
+            {
+                "type": "mandatory_expense",
+                "id": "77",
+                "category": "Internet",
+                "amount_original": "25",
+                "currency": "KZT",
+                "rate_at_operation": "1",
+                "amount_kzt": "25",
+                "description": "ISP",
+                "period": "monthly",
+            },
+        ],
+        wallets=[
+            {
+                "id": 1,
+                "name": "Main",
+                "currency": "KZT",
+                "initial_balance": 0.0,
+                "system": True,
+                "allow_negative": False,
+                "is_active": True,
+            }
+        ],
+        initial_balance=0.0,
+    )
+
+    with patch("services.import_service.parse_import_file", return_value=payload):
+        summary = ImportService(finance_service, policy=ImportPolicy.FULL_BACKUP).import_file(
+            "data.json"
+        )
+
+    assert summary == (2, 0, [])
+    finance_service.replace_all_for_import.assert_called_once()
+    mandatory_templates = finance_service.replace_all_for_import.call_args.kwargs[
+        "mandatory_templates"
+    ]
+    assert [template.id for template in mandatory_templates] == [1, 2]

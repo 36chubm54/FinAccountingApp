@@ -333,7 +333,6 @@ class SQLiteStorage(Storage):
             """
             SELECT
                 id,
-                date,
                 wallet_id,
                 amount_original,
                 currency,
@@ -349,7 +348,6 @@ class SQLiteStorage(Storage):
         return [
             MandatoryExpenseRecord(
                 id=int(row["id"]),
-                date=str(row["date"] or ""),
                 wallet_id=int(row["wallet_id"]),
                 amount_original=float(row["amount_original"]),
                 currency=str(row["currency"]).upper(),

@@ -309,11 +309,15 @@ class Report:
 
     @staticmethod
     def from_csv(filepath: str) -> "Report":
-        from domain.import_policy import ImportPolicy
-        from utils.csv_utils import import_records_from_csv
+        from utils.csv_utils import report_from_csv
 
-        records, initial_balance, _ = import_records_from_csv(filepath, ImportPolicy.LEGACY)
-        return Report(records, initial_balance)
+        return report_from_csv(filepath)
+
+    @staticmethod
+    def from_xlsx(filepath: str) -> "Report":
+        from utils.excel_utils import report_from_xlsx
+
+        return report_from_xlsx(filepath)
 
     @staticmethod
     def _sort_key(record: Record) -> tuple[int, dt_date]:

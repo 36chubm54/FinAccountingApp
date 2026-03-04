@@ -1,3 +1,4 @@
+import math
 import re
 from collections.abc import Callable
 from typing import Any
@@ -20,7 +21,10 @@ def as_float(value: Any, default: float | None = None) -> float | None:
         raw = str(value).strip()
         if raw.startswith("(") and raw.endswith(")"):
             raw = "-" + raw[1:-1]
-        return float(raw)
+        parsed = float(raw)
+        if not math.isfinite(parsed):
+            return default
+        return parsed
     except (TypeError, ValueError):
         return default
 
@@ -48,6 +52,19 @@ def _validate_currency(currency: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z]{3}", currency or ""))
 
 
+def _parse_wallet_id(raw_value: Any) -> int | None:
+    wallet_raw = as_float(raw_value, None)
+    if wallet_raw is None:
+        return None
+    try:
+        wallet_id = int(wallet_raw)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if abs(wallet_raw - wallet_id) > 1e-9:
+        return None
+    return wallet_id
+
+
 def parse_import_row(
     row: dict[str, Any],
     *,
@@ -62,9 +79,11 @@ def parse_import_row(
     if row_type == "initial_balance":
         balance = as_float(
             row_lc.get("amount_original", row_lc.get("amount_kzt", row_lc.get("amount"))),
-            0.0,
+            None,
         )
-        return None, float(balance or 0.0), None
+        if balance is None:
+            return None, None, f"{row_label}: invalid initial_balance amount"
+        return None, float(balance), None
 
     if mandatory_only:
         row_type = "mandatory_expense"
@@ -147,16 +166,29 @@ def parse_import_row(
 
     if amount_original < 0:
         return None, None, f"{row_label}: amount_original must be >= 0"
+    if not math.isfinite(float(amount_original)):
+        return None, None, f"{row_label}: invalid amount_original"
+    if not math.isfinite(float(rate_at_operation)):
+        return None, None, f"{row_label}: invalid rate_at_operation"
+    if not math.isfinite(float(amount_kzt)):
+        return None, None, f"{row_label}: invalid amount_kzt"
 
-    wallet_raw = as_float(row_lc.get("wallet_id"), None)
-    if mandatory_only:
-        wallet_id = int(wallet_raw if wallet_raw is not None else 1.0)
-    elif policy == ImportPolicy.LEGACY:
-        wallet_id = int(wallet_raw if wallet_raw is not None else 1.0)
+    wallet_value = row_lc.get("wallet_id")
+    if mandatory_only or policy == ImportPolicy.LEGACY:
+        if str(wallet_value or "").strip() == "":
+            wallet_id = 1
+        else:
+            parsed_wallet_id = _parse_wallet_id(wallet_value)
+            if parsed_wallet_id is None:
+                return None, None, f"{row_label}: invalid wallet_id '{row_lc.get('wallet_id')}'"
+            wallet_id = parsed_wallet_id
     else:
-        if wallet_raw is None:
+        if str(wallet_value or "").strip() == "":
             return None, None, f"{row_label}: missing required field 'wallet_id'"
-        wallet_id = int(wallet_raw)
+        parsed_wallet_id = _parse_wallet_id(wallet_value)
+        if parsed_wallet_id is None:
+            return None, None, f"{row_label}: invalid wallet_id '{row_lc.get('wallet_id')}'"
+        wallet_id = parsed_wallet_id
     if wallet_id <= 0:
         return None, None, f"{row_label}: invalid wallet_id '{row_lc.get('wallet_id')}'"
 
@@ -172,7 +204,12 @@ def parse_import_row(
         "description": description,
     }
     if row_lc.get("transfer_id") not in (None, ""):
-        transfer_id = int(as_float(row_lc.get("transfer_id"), 0.0) or 0)
+        transfer_raw = as_float(row_lc.get("transfer_id"), None)
+        if transfer_raw is None:
+            return None, None, f"{row_label}: invalid transfer_id '{row_lc.get('transfer_id')}'"
+        transfer_id = int(transfer_raw)
+        if abs(transfer_raw - transfer_id) > 1e-9:
+            return None, None, f"{row_label}: invalid transfer_id '{row_lc.get('transfer_id')}'"
         common["transfer_id"] = transfer_id if transfer_id > 0 else None
 
     if row_type == "income":
