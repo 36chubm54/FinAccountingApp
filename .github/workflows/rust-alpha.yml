@@ -119,3 +119,39 @@ jobs:
           ./tests/test_currency_core_wrapper.py
           ./tools/bench_alpha2_analytics.py
           ./rust/ledgera_engine
+
+  kotlin-alpha4:
+    name: kotlin-alpha4-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.5.1"
+
+      - name: Build Kotlin Desktop alpha.4
+        run: ./gradlew :ledgera-ui:desktopJar :ledgera-ui:desktopTest --no-daemon
+
+      - name: Upload Kotlin Desktop jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ledgera-kotlin-alpha4-${{ matrix.os }}
+          path: kotlin/ledgera-ui/build/compose/jars/*.jar
+          if-no-files-found: warn

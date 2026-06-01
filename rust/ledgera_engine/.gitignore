@@ -16,6 +16,8 @@ __pycache__/
 .venv/
 env/
 bin/
+!kotlin_ffi/src/bin/
+!kotlin_ffi/src/bin/uniffi-bindgen.rs
 build/
 develop-eggs/
 dist/

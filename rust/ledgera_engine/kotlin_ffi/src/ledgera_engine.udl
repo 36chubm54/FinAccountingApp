@@ -1,0 +1,80 @@
+namespace ledgera_engine {};
+
+[Error]
+enum LedgeraEngineError {
+    "Validation",
+    "Storage",
+};
+
+dictionary RecordFilterDto {
+    string? start_date;
+    string? end_date;
+    i64? wallet_id;
+    string? record_type;
+};
+
+dictionary CreateRecordRequest {
+    string record_type;
+    string date;
+    i64 wallet_id;
+    string amount_original;
+    string currency;
+    string rate_at_operation;
+    string amount_base;
+    string category;
+    string description;
+    sequence<string> tags;
+};
+
+dictionary RecordDto {
+    i64 id;
+    string record_type;
+    string date;
+    i64 wallet_id;
+    string amount_original;
+    string currency;
+    string rate_at_operation;
+    string amount_base;
+    string category;
+    string description;
+    sequence<string> tags;
+};
+
+dictionary WalletDto {
+    i64 id;
+    string name;
+    string currency;
+    string initial_balance;
+    boolean system;
+    boolean allow_negative;
+    boolean is_active;
+};
+
+dictionary WalletBalanceDto {
+    i64 wallet_id;
+    string name;
+    string currency;
+    string balance;
+};
+
+dictionary EngineStatusDto {
+    boolean ok;
+    string db_path;
+    string message;
+};
+
+interface LedgeraEngine {
+    constructor(string db_path);
+
+    EngineStatusDto engine_status();
+    [Throws=LedgeraEngineError]
+    sequence<RecordDto> list_records(RecordFilterDto filter);
+    [Throws=LedgeraEngineError]
+    RecordDto create_record(CreateRecordRequest request);
+    [Throws=LedgeraEngineError]
+    sequence<WalletDto> list_wallets();
+    [Throws=LedgeraEngineError]
+    sequence<WalletBalanceDto> wallet_balances();
+    [Throws=LedgeraEngineError]
+    WalletBalanceDto? wallet_balance(i64 wallet_id);
+};
