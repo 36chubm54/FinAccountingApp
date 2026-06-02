@@ -11,6 +11,7 @@ plugins {
 }
 
 kotlin {
+    jvmToolchain(21)
     jvm("desktop")
 
     sourceSets {
@@ -96,10 +97,13 @@ tasks.withType<Test>().configureEach {
 }
 
 tasks.named<Test>("desktopTest") {
-    val desktopMainClasses = layout.buildDirectory.dir("classes/kotlin/desktop/main").get().asFile
-    val desktopTestClasses = layout.buildDirectory.dir("classes/kotlin/desktop/test").get().asFile
+    val testCompilation = kotlin.targets["desktop"].compilations["test"]
+    val desktopTestClasses = layout.buildDirectory.dir("classes/kotlin/desktop/test")
+    val testOutputs = testCompilation.output.allOutputs
     testClassesDirs = files(desktopTestClasses)
-    classpath = files(desktopTestClasses, desktopMainClasses) + classpath
+    classpath = files(desktopTestClasses) + testOutputs + (testCompilation.runtimeDependencyFiles ?: files())
+    setScanForTestClasses(false)
+    include("**/*Test.class")
 }
 
 tasks.named("desktopProcessResources", Copy::class) {
