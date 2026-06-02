@@ -1,4 +1,7 @@
-use ledgera_engine_core::{minor_to_money_value, rate_float_from_text};
+use ledgera_engine_core::{
+    minor_to_money_value, quantize_money_text, quantize_rate_text, rate_float_from_text,
+    to_minor_units,
+};
 use rusqlite::{Connection, OptionalExtension};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -60,6 +63,28 @@ pub struct RecordRow {
     pub category: String,
     pub description: String,
     pub period: Option<String>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RecordFilterPayload {
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub wallet_id: Option<i64>,
+    pub record_type: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StandaloneRecordCreatePayload {
+    pub record_type: String,
+    pub date: String,
+    pub wallet_id: i64,
+    pub amount_original: String,
+    pub currency: String,
+    pub rate_at_operation: String,
+    pub amount_base: String,
+    pub category: String,
+    pub description: String,
     pub tags: Vec<String>,
 }
 
@@ -156,16 +181,16 @@ pub use planning::{
     budget_replace_rows, budget_rows, budget_spent_minor, budget_update_limit,
     debt_create_obligation, debt_delete, debt_delete_payment, debt_payment_rows,
     debt_payment_total_minor, debt_recalculate_payload, debt_register_payment, debt_replace_rows,
-    debt_rows, debt_validate_payment_amount, distribution_available_months, distribution_create_item,
-    distribution_create_subitem, distribution_delete_item, distribution_delete_subitem,
-    distribution_frozen_rows, distribution_history_months, distribution_is_month_auto_fixed,
-    distribution_is_month_fixed, distribution_item_rows, distribution_monthly_payload,
-    distribution_net_income_for_period, distribution_replace_frozen_rows,
-    distribution_replace_structure, distribution_subitem_rows, distribution_unfreeze_month,
-    distribution_update_item_name, distribution_update_item_order, distribution_update_item_pct,
-    distribution_update_subitem_name, distribution_update_subitem_order,
-    distribution_update_subitem_pct, distribution_validate_structure,
-    distribution_write_frozen_row,
+    debt_rows, debt_validate_payment_amount, distribution_available_months,
+    distribution_create_item, distribution_create_subitem, distribution_delete_item,
+    distribution_delete_subitem, distribution_frozen_rows, distribution_history_months,
+    distribution_is_month_auto_fixed, distribution_is_month_fixed, distribution_item_rows,
+    distribution_monthly_payload, distribution_net_income_for_period,
+    distribution_replace_frozen_rows, distribution_replace_structure, distribution_subitem_rows,
+    distribution_unfreeze_month, distribution_update_item_name, distribution_update_item_order,
+    distribution_update_item_pct, distribution_update_subitem_name,
+    distribution_update_subitem_order, distribution_update_subitem_pct,
+    distribution_validate_structure, distribution_write_frozen_row,
 };
 pub use timeline::{
     timeline_cumulative_income_expense, timeline_monthly_cashflow,
@@ -690,6 +715,54 @@ pub fn record_list_rows(db_path: &str) -> StorageResult<Vec<RecordRow>> {
     record_row_dicts(&conn, &format!("{RECORD_SELECT} ORDER BY id"), &[])
 }
 
+pub fn filtered_record_list_rows(
+    db_path: &str,
+    filter: &RecordFilterPayload,
+) -> StorageResult<Vec<RecordRow>> {
+    let conn = open_sqlite_connection(db_path)?;
+    let mut sql = String::from(RECORD_SELECT);
+    let mut clauses: Vec<String> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    if let Some(start_date) = filter
+        .start_date
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        clauses.push("date >= ?".to_owned());
+        params.push(Box::new(start_date.to_owned()));
+    }
+    if let Some(end_date) = filter.end_date.as_deref().filter(|value| !value.is_empty()) {
+        clauses.push("date <= ?".to_owned());
+        params.push(Box::new(end_date.to_owned()));
+    }
+    if let Some(wallet_id) = filter.wallet_id {
+        clauses.push("wallet_id = ?".to_owned());
+        params.push(Box::new(wallet_id));
+    }
+    if let Some(record_type) = filter
+        .record_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        clauses.push("type = ?".to_owned());
+        params.push(Box::new(record_type.to_owned()));
+    }
+
+    if !clauses.is_empty() {
+        sql.push_str(" WHERE ");
+        sql.push_str(&clauses.join(" AND "));
+    }
+    sql.push_str(" ORDER BY date DESC, id DESC");
+
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params
+        .iter()
+        .map(|param| param.as_ref() as &dyn rusqlite::ToSql)
+        .collect();
+    record_row_dicts(&conn, &sql, &param_refs)
+}
+
 pub fn record_get_row(db_path: &str, record_id: i64) -> StorageResult<Option<RecordRow>> {
     let conn = open_sqlite_connection(db_path)?;
     let mut rows = record_row_dicts(
@@ -717,6 +790,230 @@ pub fn record_rows_by_tag(db_path: &str, tag_name: &str) -> StorageResult<Vec<Re
         ),
         &[&tag_name],
     )
+}
+
+pub fn create_standalone_record(
+    db_path: &str,
+    payload: &StandaloneRecordCreatePayload,
+) -> StorageResult<RecordRow> {
+    let mut conn = open_sqlite_connection(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(sqlite_err)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+
+    let record_type = payload.record_type.trim().to_lowercase();
+    if record_type != "income" && record_type != "expense" {
+        return Err("Unsupported record type for Kotlin Operations MVP".to_owned());
+    }
+    if payload.date.trim().is_empty() {
+        return Err("Record date is required".to_owned());
+    }
+    if payload.wallet_id <= 0 {
+        return Err("wallet_id must be positive".to_owned());
+    }
+    let category = payload.category.trim();
+    if category.is_empty() {
+        return Err("Category is required".to_owned());
+    }
+    let currency = payload.currency.trim().to_uppercase();
+    if currency.len() != 3 {
+        return Err("Currency code must contain 3 letters".to_owned());
+    }
+
+    let wallet_exists = tx
+        .query_row(
+            "SELECT 1 FROM wallets WHERE id = ?1",
+            [payload.wallet_id],
+            |_row| Ok(()),
+        )
+        .optional()
+        .map_err(sqlite_err)?
+        .is_some();
+    if !wallet_exists {
+        return Err(format!("Wallet not found: {}", payload.wallet_id));
+    }
+
+    let amount_original_minor = to_minor_units(&payload.amount_original)?;
+    let amount_base_minor = to_minor_units(&payload.amount_base)?;
+    if amount_original_minor < 0 || amount_base_minor < 0 {
+        return Err("Record amount must not be negative".to_owned());
+    }
+    let amount_original = quantize_money_text(&payload.amount_original)?
+        .parse::<f64>()
+        .map_err(|_| "invalid amount_original".to_owned())?;
+    let amount_base = quantize_money_text(&payload.amount_base)?
+        .parse::<f64>()
+        .map_err(|_| "invalid amount_base".to_owned())?;
+    let rate_at_operation_text = quantize_rate_text(&payload.rate_at_operation)?;
+    let rate_at_operation = rate_at_operation_text
+        .parse::<f64>()
+        .map_err(|_| "invalid rate_at_operation".to_owned())?;
+    if rate_at_operation <= 0.0 {
+        return Err("rate_at_operation must be positive".to_owned());
+    }
+
+    let cursor = tx
+        .execute(
+            "INSERT INTO records (
+                type,
+                date,
+                wallet_id,
+                transfer_id,
+                related_debt_id,
+                amount_original,
+                amount_original_minor,
+                currency,
+                rate_at_operation,
+                rate_at_operation_text,
+                amount_base,
+                amount_base_minor,
+                category,
+                description,
+                period
+            )
+            VALUES (?1, ?2, ?3, NULL, NULL, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NULL)",
+            (
+                record_type.as_str(),
+                payload.date.trim(),
+                payload.wallet_id,
+                amount_original,
+                amount_original_minor,
+                currency.as_str(),
+                rate_at_operation,
+                rate_at_operation_text.as_str(),
+                amount_base,
+                amount_base_minor,
+                category,
+                payload.description.as_str(),
+            ),
+        )
+        .map_err(sqlite_err)?;
+    if cursor != 1 {
+        return Err("Failed to insert record".to_owned());
+    }
+    let record_id = tx.last_insert_rowid();
+    replace_record_tags_in_tx(&tx, record_id, &payload.tags)?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    record_get_row(db_path, record_id)?.ok_or_else(|| format!("Record not found: {record_id}"))
+}
+
+fn replace_record_tags_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    record_id: i64,
+    tags: &[String],
+) -> StorageResult<()> {
+    tx.execute("DELETE FROM record_tags WHERE record_id = ?1", [record_id])
+        .map_err(sqlite_err)?;
+    for tag_name in normalize_tag_names(tags) {
+        let tag_id = ensure_tag_id_in_tx(tx, &tag_name)?;
+        tx.execute(
+            "INSERT OR IGNORE INTO record_tags (record_id, tag_id) VALUES (?1, ?2)",
+            (record_id, tag_id),
+        )
+        .map_err(sqlite_err)?;
+    }
+    refresh_tag_metrics_in_tx(tx)?;
+    prune_orphan_tags_in_tx(tx)?;
+    Ok(())
+}
+
+fn ensure_tag_id_in_tx(tx: &rusqlite::Transaction<'_>, name: &str) -> StorageResult<i64> {
+    let normalized = normalize_tag_name(name);
+    if normalized.is_empty() {
+        return Err("Tag name must not be empty".to_owned());
+    }
+    let existing = tx
+        .query_row(
+            "SELECT id, name FROM tags WHERE lower(name) = lower(?1) LIMIT 1",
+            [normalized.as_str()],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(sqlite_err)?;
+    if let Some((tag_id, stored_name)) = existing {
+        if stored_name != normalized {
+            tx.execute(
+                "UPDATE tags SET name = ?1 WHERE id = ?2",
+                (normalized.as_str(), tag_id),
+            )
+            .map_err(sqlite_err)?;
+        }
+        return Ok(tag_id);
+    }
+
+    tx.execute(
+        "INSERT INTO tags (name, color, usage_count, last_used_at) VALUES (?1, ?2, 0, '')",
+        (normalized.as_str(), tag_color(&normalized).as_str()),
+    )
+    .map_err(sqlite_err)?;
+    Ok(tx.last_insert_rowid())
+}
+
+fn refresh_tag_metrics_in_tx(tx: &rusqlite::Transaction<'_>) -> StorageResult<()> {
+    tx.execute(
+        "UPDATE tags
+         SET usage_count = (
+             SELECT COUNT(*) FROM record_tags WHERE record_tags.tag_id = tags.id
+         ),
+         last_used_at = COALESCE((
+             SELECT MAX(records.date)
+             FROM record_tags
+             JOIN records ON records.id = record_tags.record_id
+             WHERE record_tags.tag_id = tags.id
+         ), '')",
+        [],
+    )
+    .map_err(sqlite_err)?;
+    Ok(())
+}
+
+fn prune_orphan_tags_in_tx(tx: &rusqlite::Transaction<'_>) -> StorageResult<()> {
+    tx.execute(
+        "DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM record_tags)",
+        [],
+    )
+    .map_err(sqlite_err)?;
+    Ok(())
+}
+
+fn normalize_tag_names(values: &[String]) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for value in values {
+        let name = normalize_tag_name(value);
+        if name.is_empty() || normalized.contains(&name) {
+            continue;
+        }
+        normalized.push(name);
+        if normalized.len() >= 3 {
+            break;
+        }
+    }
+    normalized
+}
+
+fn normalize_tag_name(value: &str) -> String {
+    let stripped = value.trim().replace('#', "");
+    let cleaned: String = stripped
+        .chars()
+        .filter(|ch| {
+            ch.is_ascii_alphanumeric() || ('А'..='Я').contains(ch) || ('а'..='я').contains(ch)
+        })
+        .flat_map(char::to_lowercase)
+        .collect();
+    if cleaned.is_empty() || cleaned.chars().all(|ch| ch.is_ascii_digit()) {
+        String::new()
+    } else {
+        cleaned
+    }
+}
+
+fn tag_color(name: &str) -> String {
+    const PALETTE: [&str; 6] = [
+        "#5B8DEF", "#34A853", "#F2994A", "#EB5757", "#9B51E0", "#00A3A3",
+    ];
+    let checksum: usize = name.chars().map(|ch| ch as usize).sum();
+    PALETTE[checksum % PALETTE.len()].to_owned()
 }
 
 #[cfg(test)]

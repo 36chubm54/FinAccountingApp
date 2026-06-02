@@ -7,6 +7,40 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [3.0.0-alpha.4] - 2026-06-03
+
+### Added
+
+- Added the first Kotlin Compose Multiplatform Desktop project under `kotlin/ledgera-ui`, including the alpha.4 Operations screen for listing records, adding standalone income/expense records, selecting wallets, filtering by record type, and showing basic validation/error states.
+- Added the `ledgera_engine_kotlin_ffi` Rust crate with UniFFI bindings for the Kotlin Operations MVP.
+- Added Kotlin-facing Rust APIs for filtered record reads, standalone record creation, wallet listing, wallet balances, and engine status checks.
+- Added Gradle wrapper/configuration and a `kotlin-alpha4` CI job for Kotlin Desktop jar/test validation on Ubuntu and Windows.
+
+### Changed
+
+- Kept Tkinter/Python as the primary runtime UI while introducing Kotlin Desktop as a parallel alpha.4 client over the same Rust storage engine.
+- Matched the Kotlin build to the CI Java 21 toolchain and configured `desktopTest` against Kotlin desktop test outputs/runtime dependencies.
+- Disabled local Kotlin daemon/incremental compilation for this Gradle project to avoid Windows cache-lock instability during alpha.4 test runs.
+- Kept the Kotlin FFI API intentionally narrow: standalone income/expense records and wallet reads only, with no transfer/debt/budget/distribution write ownership.
+
+### Fixed
+
+- Marked `gradlew` executable in git so Linux runners can invoke `./gradlew`.
+- Corrected Kotlin FFI wallet balance DTO mapping so balances include both wallet initial balance and record delta.
+- Added Rust FFI test coverage for wallet initial balance and balance after creating a record.
+
+### Testing
+
+- Validated the Kotlin FFI Rust crate with `cargo test --manifest-path rust/ledgera_engine/Cargo.toml -p ledgera_engine_kotlin_ffi --lib --bins`.
+- Validated Kotlin Desktop jar and tests with `.\gradlew.bat :ledgera-ui:desktopJar :ledgera-ui:desktopTest --no-daemon` from an ASCII `subst` path that avoids the local Windows Gradle/JUnit issue with Cyrillic checkout paths.
+- The UniFFI generator may print a non-fatal warning when `ktlint` is unavailable; generated Kotlin still compiles in the alpha.4 gate.
+
+### Deferred
+
+- Full Kotlin feature parity with the 9-tab Tkinter desktop UI remains beta.1 scope.
+- Android, iOS, CRDT sync, transfer/debt/budget/distribution Kotlin screens, and Tkinter deprecation remain later beta/RC milestones.
+- The Kotlin Operations MVP does not own schema migrations, import/export, updater, reporting, or broad repository replacement.
+
 ## [3.0.0-alpha.3] - 2026-05-31
 
 ### Added
