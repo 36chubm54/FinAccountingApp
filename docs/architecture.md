@@ -64,6 +64,38 @@ Current rules:
 - Rust surfaces exchange primitive payloads only: `int`, `float`, `str`, `bool`, `dict`, and `list`
 - seam-level logs are diagnostic only and must not include full DB paths, descriptions, tags, amounts, or financial payloads
 
+### Kotlin Desktop alpha.4
+
+`kotlin/ledgera-ui` is the first Kotlin Compose Multiplatform Desktop client for
+the v3 line. It is intentionally parallel to the Tkinter application: Tkinter
+remains the primary production UI, while Kotlin exercises the first Operations
+screen over a Rust UniFFI boundary.
+
+Current Kotlin/Rust contract:
+
+- `rust/ledgera_engine/kotlin_ffi` owns the UniFFI-exported `LedgeraEngine`
+  facade used by Kotlin
+- generated bindings live under the Kotlin package `app.ledgera.engine`
+- handwritten Kotlin adapter code lives under `app.ledgera.bridge` to avoid
+  namespace collisions with generated UniFFI code
+- Kotlin calls Rust through `RustEngineAdapter` and keeps UI state in
+  `OperationsViewModel`
+- Kotlin alpha.4 supports standalone `income` and `expense` record listing and
+  creation only
+- wallet balances exposed to Kotlin include both wallet initial balance and
+  record delta
+- Kotlin does not create production databases implicitly; manual smoke testing
+  needs an existing SQLite ledger database with at least one active wallet
+- the Gradle Desktop gate is `:ledgera-ui:desktopJar :ledgera-ui:desktopTest`
+  and CI runs it through the executable `gradlew` wrapper
+
+Deferred Kotlin scope:
+
+- all 9-tab Desktop feature parity remains beta.1 scope
+- Android, iOS, CRDT sync, transfer/debt/budget/distribution Kotlin screens,
+  updater UI, import/export, and Tkinter deprecation remain later beta/RC
+  milestones
+
 ### Runtime currency configuration
 
 `CurrencyService` treats runtime currency/provider settings as persisted application policy layered on top of the repository-owned accounting base currency.
