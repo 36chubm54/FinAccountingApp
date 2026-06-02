@@ -222,7 +222,7 @@ fn wallet_balance_to_dto(row: WalletBalanceRow) -> WalletBalanceDto {
         wallet_id: row.0,
         name: row.1,
         currency: row.2,
-        balance: format_money(row.4),
+        balance: format_money(row.3 + row.4),
     }
 }
 
@@ -313,6 +313,8 @@ mod tests {
     fn engine_creates_and_lists_standalone_record() {
         let db_path = fixture_db();
         let engine = LedgeraEngine::new(db_path.clone());
+        assert_eq!(engine.wallet_balances().unwrap()[0].balance, "100.00");
+
         let created = engine
             .create_record(CreateRecordRequest {
                 record_type: "income".to_owned(),
@@ -339,6 +341,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(rows, vec![created]);
+        assert_eq!(engine.wallet_balance(1).unwrap().unwrap().balance, "110.01");
         fs::remove_file(db_path).ok();
     }
 }
