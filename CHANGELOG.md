@@ -7,6 +7,25 @@ This project adheres to Semantic Versioning.
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- Completed the package-local decomposition wave across `app`, `gui`, `services`, `infrastructure`, and `utils` so internal code now imports direct package paths instead of flat compatibility facades.
+- Removed legacy `app/*` compatibility shims and `gui/tabs/*_tab.py` wrappers in favor of direct package entrypoints and `core/` + `support/` ownership.
+- Reorganized analytics, planning, import, shell, settings, report, operations, backup, export, spreadsheet, finance, and records helpers into clearer package clusters with narrower ownership boundaries.
+
+### Fixed
+
+- Preserved distinct standalone records that have identical stable fields during local sync by treating canonical fingerprints as counts instead of dropping repeated fingerprints within the same inbound batch; repeated pushes remain idempotent against records already present on the receiver.
+- Restored the `utils.backup_utils.json` compatibility seam so backup-export tests that patch `backup_utils.json.dump` still exercise the atomic write path after the backup helper split.
+
+### Docs
+
+- Updated v3 beta-cycle documentation: archived historical alpha readiness records under `docs/archive/v3-alpha/`, added `docs/v3_beta_plan.md` as the live beta entry point, and refreshed README/architecture wording for the post-alpha beta track.
+- Clarified the local sync documentation around fingerprint-based duplicate detection and record multiplicity.
+- Synced `README.md`, `README_EN.md`, and `docs/architecture.md` with the current package layout, direct import paths, and removal of legacy tab/app shim layers.
+
 ## [3.0.0-alpha.4] - 2026-06-03
 
 ### Added
@@ -136,22 +155,6 @@ This project adheres to Semantic Versioning.
 
 - Rust-owned SQLite write paths, WAL bootstrap, migrations, and ID normalization remain out of alpha.1 scope.
 - Kotlin/Native FFI, sync, mobile UI, and broader domain-engine migration remain scheduled for later v3 milestones.
-
-## [Unreleased]
-
-### Changed
-
-- Completed the package-local decomposition wave across `app`, `gui`, `services`, `infrastructure`, and `utils` so internal code now imports direct package paths instead of flat compatibility facades
-- Removed legacy `app/*` compatibility shims and `gui/tabs/*_tab.py` wrappers in favor of direct package entrypoints and `core/` + `support/` ownership
-- Reorganized analytics, planning, import, shell, settings, report, operations, backup, export, spreadsheet, finance, and records helpers into clearer package clusters with narrower ownership boundaries
-
-### Fixed
-
-- Restored the `utils.backup_utils.json` compatibility seam so backup-export tests that patch `backup_utils.json.dump` still exercise the atomic write path after the backup helper split
-
-### Docs
-
-- Synced `README.md`, `README_EN.md`, and `docs/architecture.md` with the current package layout, direct import paths, and removal of legacy tab/app shim layers
 
 ## [2.6.1] - 2026-05-25
 

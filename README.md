@@ -9,7 +9,9 @@
 
 Графическое приложение для персонального финансового учёта с мультивалютностью, импортом/экспортом, тегами, бюджетами, долгами, активами и целями.
 
-Текущий shipping-релиз `v2.6.1` оставляет в силе полный `FinAccountingApp -> Ledgera` rename и добавляет patch-level polish поверх Linux packaging и packaged updater flows. Поверх него текущее рабочее дерево закрывает большую internal decomposition wave: `app`, `gui`, `services`, `infrastructure` и `utils` теперь собраны в более узкие package-кластеры с прямыми import-path вместо старых flat compat-фасадов.
+Текущий shipping-релиз остаётся `v2.6.1`: он закрепляет полный `FinAccountingApp -> Ledgera` rename и patch-level polish поверх Linux packaging и packaged updater flows.
+
+Ветка `v3.0.0` завершила alpha-cycle и готовит beta-cycle. Alpha закрыла Rust engine workspace, Python bridge, analytics/currency hot paths, planning write paths, local Desktop sync MVP, AuditEngine v2 parity и первый Kotlin Operations screen через Rust UniFFI. Beta-cycle фокусируется на Kotlin Desktop feature parity, mobile clients и maturation local sync; Tkinter остаётся primary production UI до подтверждения parity. Живой beta-план: [`docs/v3_beta_plan.md`](docs/v3_beta_plan.md). Исторические alpha acceptance records: [`docs/archive/v3-alpha/`](docs/archive/v3-alpha/).
 
 В актуальном runtime-контракте:
 
@@ -228,7 +230,7 @@ python packaging/linux/verify_system_packages.py --deb artifacts/Ledgera-<versio
 - `FinancialController.list_tags()` / `search_tags()` / `set_tag_color()` — app-level entry points для tag-aware UI и аналитики
 - `SQLiteRecordRepository.replace_records_and_transfers(...)` — безопасная bulk-замена операций с ремапом связанных debt-payment ссылок
 - `gui.logging_utils.log_ui_error(...)` — общий structured logging helper для GUI ошибок и деградаций
-- `services.sync.SyncService` — alpha.3 локальная синхронизация standalone cashflow records между Desktop-инстансами; не является общим sync/CRDT слоем
+- `services.sync.SyncService` — текущий локальный sync MVP для standalone cashflow records между Desktop-инстансами; fingerprint-дедупликация сохраняет legitimate identical records, но это не общий sync/CRDT слой
 - `bridge.ledgera_bridge` — единственная поддерживаемая Python-точка загрузки Rust engine; прямые imports compiled extension в app code не используются
 
 ### Import / backup entry points
