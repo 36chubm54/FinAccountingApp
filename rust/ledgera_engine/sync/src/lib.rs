@@ -1,6 +1,6 @@
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{IpAddr, TcpListener, TcpStream, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -428,8 +428,8 @@ fn standalone_records(db_path: &str) -> SyncResult<Vec<SyncRecord>> {
 
 fn apply_inbound_records(db_path: &str, records: &[SyncRecord]) -> SyncResult<SyncApplyResult> {
     let mut conn = Connection::open(db_path).map_err(sqlite_err)?;
-    let existing = existing_fingerprints(&conn)?;
-    let mut batch_fingerprints = HashSet::new();
+    let existing = existing_fingerprint_counts(&conn)?;
+    let mut seen_fingerprints = HashMap::new();
     let mut inserted = 0;
     let mut skipped = 0;
     let mut to_insert = Vec::new();
@@ -437,10 +437,14 @@ fn apply_inbound_records(db_path: &str, records: &[SyncRecord]) -> SyncResult<Sy
     let tx = conn.transaction().map_err(sqlite_err)?;
     for record in records {
         let fingerprint = record_fingerprint(record);
-        if existing.contains(&fingerprint) || !batch_fingerprints.insert(fingerprint) {
+        let seen_count = seen_fingerprints.entry(fingerprint.clone()).or_insert(0);
+        let existing_count = existing.get(&fingerprint).copied().unwrap_or(0);
+        if *seen_count < existing_count {
+            *seen_count += 1;
             skipped += 1;
             continue;
         }
+        *seen_count += 1;
         let wallet_exists = tx
             .query_row(
                 "SELECT 1 FROM wallets WHERE id = ?",
@@ -508,9 +512,12 @@ pub fn standalone_records_for_test(db_path: &str) -> SyncResult<Vec<SyncRecord>>
     standalone_records(db_path)
 }
 
-fn existing_fingerprints(conn: &Connection) -> SyncResult<HashSet<String>> {
-    standalone_records_from_conn(conn)
-        .map(|records| records.iter().map(record_fingerprint).collect())
+fn existing_fingerprint_counts(conn: &Connection) -> SyncResult<HashMap<String, usize>> {
+    let mut counts = HashMap::new();
+    for record in standalone_records_from_conn(conn)? {
+        *counts.entry(record_fingerprint(&record)).or_insert(0) += 1;
+    }
+    Ok(counts)
 }
 
 fn standalone_records_from_conn(conn: &Connection) -> SyncResult<Vec<SyncRecord>> {
@@ -718,6 +725,24 @@ mod tests {
         assert_eq!(first.inserted, 1);
         let second = apply_inbound_records(&db_path, &[record]).expect("second");
         assert_eq!(second.skipped, 1);
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn inbound_apply_preserves_identical_records_in_same_batch() {
+        let db_path = test_db_path("apply_identical_batch");
+        init_schema(&db_path);
+        let record = sync_record(1);
+        let first =
+            apply_inbound_records(&db_path, &[record.clone(), record.clone()]).expect("first");
+        assert_eq!(first.inserted, 2);
+        assert_eq!(first.skipped, 0);
+        assert_eq!(standalone_records(&db_path).expect("records").len(), 2);
+
+        let second = apply_inbound_records(&db_path, &[record.clone(), record]).expect("second");
+        assert_eq!(second.inserted, 0);
+        assert_eq!(second.skipped, 2);
+        assert_eq!(standalone_records(&db_path).expect("records").len(), 2);
         fs::remove_file(db_path).ok();
     }
 
