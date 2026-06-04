@@ -19,6 +19,14 @@ compatibility, and controlled fallback during the beta cycle.
 Goal: make Kotlin Compose Desktop feature-complete with the current Tkinter
 desktop app while preserving Rust/Python fallback boundaries.
 
+Current status:
+
+- Foundation shell is started: Kotlin Desktop has beta.1 runtime framing,
+  navigation entries for all 9 roadmap sections, shared engine status/error
+  state, and Operations remains the only fully connected workflow.
+- Remaining beta.1 work is capability wiring and screen parity for the other
+  sections through Rust/Kotlin UniFFI, not a Kotlin-to-Python runtime bridge.
+
 Scope:
 
 - Kotlin Desktop implements all 9 main tabs: Operations, Reports, Analytics,

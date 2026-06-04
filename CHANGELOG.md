@@ -9,11 +9,18 @@ This project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Added the first beta.1 Kotlin Desktop shell with navigation entries for the 9 roadmap sections: Operations, Reports, Analytics, Dashboard, Budget, Debts, Distribution, Mandatory, and Settings.
+- Added shared Kotlin shell state for section selection and Rust engine status/error reporting while preserving the existing Operations workflow.
+- Added Kotlin shell ViewModel coverage for section order, navigation state, engine status mapping, and engine failure mapping.
+
 ### Changed
 
 - Completed the package-local decomposition wave across `app`, `gui`, `services`, `infrastructure`, and `utils` so internal code now imports direct package paths instead of flat compatibility facades.
 - Removed legacy `app/*` compatibility shims and `gui/tabs/*_tab.py` wrappers in favor of direct package entrypoints and `core/` + `support/` ownership.
 - Reorganized analytics, planning, import, shell, settings, report, operations, backup, export, spreadsheet, finance, and records helpers into clearer package clusters with narrower ownership boundaries.
+- Renamed the Kotlin Desktop runtime framing from alpha.4 to beta.1 and split the Kotlin adapter contract into runtime and operations capability groups so ViewModels depend only on the surfaces they use.
 
 ### Fixed
 
@@ -25,6 +32,11 @@ This project adheres to Semantic Versioning.
 - Updated v3 beta-cycle documentation: archived historical alpha readiness records under `docs/archive/v3-alpha/`, added `docs/v3_beta_plan.md` as the live beta entry point, and refreshed README/architecture wording for the post-alpha beta track.
 - Clarified the local sync documentation around fingerprint-based duplicate detection and record multiplicity.
 - Synced `README.md`, `README_EN.md`, and `docs/architecture.md` with the current package layout, direct import paths, and removal of legacy tab/app shim layers.
+
+### Testing
+
+- Validated the beta.1 Kotlin shell with `cargo test --manifest-path rust\ledgera_engine\Cargo.toml -p ledgera_engine_kotlin_ffi --lib --bins`.
+- Validated `:ledgera-ui:desktopTest` from an ASCII `subst` path because the local Windows Gradle/JUnit worker still cannot load test classes reliably from the Cyrillic checkout path.
 
 ## [3.0.0-alpha.4] - 2026-06-03
 

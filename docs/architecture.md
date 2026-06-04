@@ -78,10 +78,14 @@ Current Kotlin/Rust contract:
 - generated bindings live under the Kotlin package `app.ledgera.engine`
 - handwritten Kotlin adapter code lives under `app.ledgera.bridge` to avoid
   namespace collisions with generated UniFFI code
-- Kotlin calls Rust through `RustEngineAdapter` and keeps UI state in
-  `OperationsViewModel`
-- the current Kotlin surface supports standalone `income` and `expense` record
-  listing and creation only
+- Kotlin calls Rust through `RustEngineAdapter`; ViewModels depend on grouped
+  capability interfaces such as runtime status and operations instead of the
+  full native adapter
+- `AppShellViewModel` owns beta.1 section selection and engine status/error
+  state for the Kotlin Desktop shell
+- the current Kotlin shell exposes all 9 roadmap sections, while the connected
+  data surface still supports standalone `income` and `expense` record listing
+  and creation only
 - wallet balances exposed to Kotlin include both wallet initial balance and
   record delta
 - Kotlin does not create production databases implicitly; manual smoke testing
@@ -92,8 +96,10 @@ Current Kotlin/Rust contract:
 Deferred Kotlin scope:
 
 - all 9-tab Desktop feature parity is the beta.1 target
-- Android, iOS, CRDT sync, transfer/debt/budget/distribution Kotlin screens,
-  updater UI, import/export, and Tkinter deprecation remain later beta/RC
+- reports, analytics, dashboard, budget, debts, distribution, mandatory,
+  settings, transfer, import/export, updater, and broader operations workflows
+  still need Rust UniFFI capability wiring before beta.1 parity can be claimed
+- Android, iOS, CRDT sync, and Tkinter deprecation remain later beta/RC
   milestones
 
 ### Runtime currency configuration

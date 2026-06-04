@@ -1,6 +1,6 @@
 package app.ledgera.operations
 
-import app.ledgera.bridge.EngineAdapter
+import app.ledgera.bridge.OperationsEngine
 import app.ledgera.model.CreateOperationRequest
 import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationRecord
@@ -22,7 +22,7 @@ data class OperationsUiState(
 )
 
 class OperationsViewModel(
-    private val engine: EngineAdapter,
+    private val engine: OperationsEngine,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main),
 ) {
     private val mutableState = MutableStateFlow(OperationsUiState(loading = true))
