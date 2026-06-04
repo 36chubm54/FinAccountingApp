@@ -9,7 +9,9 @@
 
 Graphical application for personal financial accounting with multicurrency support, import/export, tags, budgets, debts, assets, and goals.
 
-The current shipping release `v2.6.1` keeps the full `FinAccountingApp -> Ledgera` rename in place and adds patch-level polish across Linux packaging and packaged updater flows. On top of that, the current working tree closes a large internal decomposition wave: `app`, `gui`, `services`, `infrastructure`, and `utils` now use narrower package clusters and direct import paths instead of older flat compatibility facades.
+The current shipping release remains `v2.6.1`: it keeps the full `FinAccountingApp -> Ledgera` rename in place and adds patch-level polish across Linux packaging and packaged updater flows.
+
+The `v3.0.0` branch has completed the alpha cycle and is preparing the beta cycle. Alpha delivered the Rust engine workspace, Python bridge, analytics/currency hot paths, planning write paths, local Desktop sync MVP, AuditEngine v2 parity, and the first Kotlin Operations screen through Rust UniFFI. The beta cycle focuses on Kotlin Desktop feature parity, mobile clients, and local sync maturation; Tkinter remains the primary production UI until parity is proven. The live beta plan is [`docs/v3_beta_plan.md`](docs/v3_beta_plan.md). Historical alpha acceptance records live in [`docs/archive/v3-alpha/`](docs/archive/v3-alpha/).
 
 In the current runtime contract:
 
@@ -204,6 +206,8 @@ Also important:
 | `services.planning.budget.BudgetService` | Budget CRUD, category/tag budgets, and live tracking |
 | `services.planning.debts.DebtService` | Debt/loan lifecycle |
 | `services.planning.distribution.DistributionService` | Monthly distribution and frozen rows |
+| `services.sync.SyncService` | Alpha local sync daemon/status/discovery/push seam |
+| `bridge.ledgera_bridge` | Opt-in Rust engine loader, capability checks, and Python fallback policy |
 | `services.support.app_update.AppUpdateService` | GitHub Releases lookup, prerelease-aware asset selection, and streamed updater downloads for the Windows installer and packaged Linux packages |
 | `infrastructure.sqlite_repository.SQLiteRecordRepository` | Primary runtime repository |
 | `storage.sqlite_storage.SQLiteStorage` | Low-level SQLite adapter / schema bootstrap |
@@ -226,6 +230,8 @@ Practical highlights in the current working tree:
 - `FinancialController.list_tags()` / `search_tags()` / `set_tag_color()` — app-level entry points for tag-aware UI and analytics
 - `SQLiteRecordRepository.replace_records_and_transfers(...)` — safe bulk operation replacement with debt-payment link remapping
 - `gui.logging_utils.log_ui_error(...)` — shared structured logging helper for GUI errors and degraded flows
+- `services.sync.SyncService` — the current local sync MVP for standalone cashflow records between Desktop instances; fingerprint deduplication preserves legitimate identical records, but this is not a general sync/CRDT layer
+- `bridge.ledgera_bridge` — the only supported Python loading surface for the Rust engine; app code does not directly import the compiled extension
 
 ### Import / backup entry points
 

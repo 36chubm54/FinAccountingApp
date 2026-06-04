@@ -11,17 +11,150 @@ This project adheres to Semantic Versioning.
 
 ### Changed
 
-- Completed the package-local decomposition wave across `app`, `gui`, `services`, `infrastructure`, and `utils` so internal code now imports direct package paths instead of flat compatibility facades
-- Removed legacy `app/*` compatibility shims and `gui/tabs/*_tab.py` wrappers in favor of direct package entrypoints and `core/` + `support/` ownership
-- Reorganized analytics, planning, import, shell, settings, report, operations, backup, export, spreadsheet, finance, and records helpers into clearer package clusters with narrower ownership boundaries
+- Completed the package-local decomposition wave across `app`, `gui`, `services`, `infrastructure`, and `utils` so internal code now imports direct package paths instead of flat compatibility facades.
+- Removed legacy `app/*` compatibility shims and `gui/tabs/*_tab.py` wrappers in favor of direct package entrypoints and `core/` + `support/` ownership.
+- Reorganized analytics, planning, import, shell, settings, report, operations, backup, export, spreadsheet, finance, and records helpers into clearer package clusters with narrower ownership boundaries.
 
 ### Fixed
 
-- Restored the `utils.backup_utils.json` compatibility seam so backup-export tests that patch `backup_utils.json.dump` still exercise the atomic write path after the backup helper split
+- Preserved distinct standalone records that have identical stable fields during local sync by treating canonical fingerprints as counts instead of dropping repeated fingerprints within the same inbound batch; repeated pushes remain idempotent against records already present on the receiver.
+- Restored the `utils.backup_utils.json` compatibility seam so backup-export tests that patch `backup_utils.json.dump` still exercise the atomic write path after the backup helper split.
 
 ### Docs
 
-- Synced `README.md`, `README_EN.md`, and `docs/architecture.md` with the current package layout, direct import paths, and removal of legacy tab/app shim layers
+- Updated v3 beta-cycle documentation: archived historical alpha readiness records under `docs/archive/v3-alpha/`, added `docs/v3_beta_plan.md` as the live beta entry point, and refreshed README/architecture wording for the post-alpha beta track.
+- Clarified the local sync documentation around fingerprint-based duplicate detection and record multiplicity.
+- Synced `README.md`, `README_EN.md`, and `docs/architecture.md` with the current package layout, direct import paths, and removal of legacy tab/app shim layers.
+
+## [3.0.0-alpha.4] - 2026-06-03
+
+### Added
+
+- Added the first Kotlin Compose Multiplatform Desktop project under `kotlin/ledgera-ui`, including the alpha.4 Operations screen for listing records, adding standalone income/expense records, selecting wallets, filtering by record type, and showing basic validation/error states.
+- Added the `ledgera_engine_kotlin_ffi` Rust crate with UniFFI bindings for the Kotlin Operations MVP.
+- Added Kotlin-facing Rust APIs for filtered record reads, standalone record creation, wallet listing, wallet balances, and engine status checks.
+- Added Gradle wrapper/configuration and a `kotlin-alpha4` CI job for Kotlin Desktop jar/test validation on Ubuntu and Windows.
+
+### Changed
+
+- Kept Tkinter/Python as the primary runtime UI while introducing Kotlin Desktop as a parallel alpha.4 client over the same Rust storage engine.
+- Matched the Kotlin build to the CI Java 21 toolchain and configured `desktopTest` against Kotlin desktop test outputs/runtime dependencies.
+- Disabled local Kotlin daemon/incremental compilation for this Gradle project to avoid Windows cache-lock instability during alpha.4 test runs.
+- Kept the Kotlin FFI API intentionally narrow: standalone income/expense records and wallet reads only, with no transfer/debt/budget/distribution write ownership.
+
+### Fixed
+
+- Marked `gradlew` executable in git so Linux runners can invoke `./gradlew`.
+- Corrected Kotlin FFI wallet balance DTO mapping so balances include both wallet initial balance and record delta.
+- Added Rust FFI test coverage for wallet initial balance and balance after creating a record.
+
+### Testing
+
+- Validated the Kotlin FFI Rust crate with `cargo test --manifest-path rust/ledgera_engine/Cargo.toml -p ledgera_engine_kotlin_ffi --lib --bins`.
+- Validated Kotlin Desktop jar and tests with `.\gradlew.bat :ledgera-ui:desktopJar :ledgera-ui:desktopTest --no-daemon` from an ASCII `subst` path that avoids the local Windows Gradle/JUnit issue with Cyrillic checkout paths.
+- The UniFFI generator may print a non-fatal warning when `ktlint` is unavailable; generated Kotlin still compiles in the alpha.4 gate.
+
+### Deferred
+
+- Full Kotlin feature parity with the 9-tab Tkinter desktop UI remains beta.1 scope.
+- Android, iOS, CRDT sync, transfer/debt/budget/distribution Kotlin screens, and Tkinter deprecation remain later beta/RC milestones.
+- The Kotlin Operations MVP does not own schema migrations, import/export, updater, reporting, or broad repository replacement.
+
+## [3.0.0-alpha.3] - 2026-05-31
+
+### Added
+
+- Added Rust-backed planning write-path MVPs for Distribution, Budget, and Debt services while preserving the existing Python public APIs, dataclasses, validation, and GUI contracts.
+- Added the first local `ledgera-sync` MVP for additive LAN synchronization of standalone cashflow records between Desktop instances.
+- Added Rust-backed AuditEngine v2 parity through a read-only `audit_run` batch path covering the current 15-check audit contract.
+- Added seam-level diagnostic logging for Rust bridge capability decisions, sync lifecycle/results, audit execution/fallback, controller sync entrypoints, and planning Rust/Python boundaries.
+
+### Changed
+
+- Extended `bridge.ledgera_bridge` with planning, sync, audit, and storage-control surfaces while keeping `LEDGERA_ENABLE_RUST_CORE=1` opt-in and `LEDGERA_FORCE_PYTHON_FALLBACK=1` rollback semantics.
+- Kept Python ownership of public planning models, service signatures, GUI/controller contracts, validation, and dataclass reconstruction while Rust owns selected atomic SQLite mutations.
+- Kept sync intentionally narrow: standalone income/expense records only, inserted as new local rows by fingerprint, with no update/delete propagation, CRDT, cloud relay, credentials, or schema migration.
+- Made sync discovery startup fail explicitly when the UDP discovery port cannot be bound instead of reporting a listening daemon with a dead discovery responder.
+
+### Fixed
+
+- Aligned Rust audit future-date validation with Python local-date semantics by passing the Python-side local `today` into the Rust audit path.
+- Normalized wildcard sync discovery hosts so peers discovered from `0.0.0.0` / `::` resolve to the sender address instead of an unusable wildcard address.
+- Exposed controller-level sync daemon options so LAN/discovery mode can be started through the app controller without manual service scripts.
+- Hardened Rust/Python seam observability so Rust fallback and partial capability states are visible in debug logs without logging financial payloads or full DB paths.
+
+### Testing
+
+- Added Rust tests for planning write paths, sync lifecycle/discovery failure, AuditEngine v2 checks, and smoke exports through `ledgera_core`.
+- Isolated daemon-lifecycle sync tests around the shared Rust daemon singleton so parallel Rust test execution remains deterministic.
+- Added Python parity tests for Distribution, Budget, Debt, SyncService, AuditService, bridge capability gating, forced Python fallback, and seam-level logging.
+- Validated the alpha.3 slice with targeted `cargo test`, `cargo clippy --all-targets -- -D warnings`, `maturin build --release`, targeted `pytest`, and `npx -y pyright`.
+- Manually validated local two-Desktop sync by pushing a standalone record into a second app clone in `0.049s`.
+
+### Deferred
+
+- General record CRUD, transfer sync, debt/budget/distribution sync, update/delete propagation, conflict resolution, CRDT, pairing UI, auth/encryption, Kotlin/Android, and cloud/relay sync remain out of alpha.3 scope.
+- Rust-owned schema migrations, WAL bootstrap policy, and broad repository ownership remain future v3 milestones.
+
+## [3.0.0-alpha.2] - 2026-05-30
+
+### Added
+
+- Added Rust-backed analytics hot paths for `MetricsService` and `TimelineService`, including savings rate, burn rate, category and tag aggregates, tag coverage, monthly summaries, monthly cashflow, cumulative totals, and net-worth delta reads.
+- Added Rust-backed currency helper paths for provider-order resolution, rate normalization, default-rate derivation, and `CurrencyService.get_rate()` parity while keeping HTTP providers, secrets, and runtime config ownership in Python.
+- Added a GUI-oriented analytics refresh snapshot that batches the dashboard refresh path through one compact Rust/Python bridge payload.
+- Added alpha.2 benchmark tooling for the analytics refresh path, including backend selection, stale-extension preflight output, and explicit `gui` versus `top10` limit modes.
+- Added criterion benchmark coverage for the Rust metrics engine and expanded alpha CI gates for analytics, currency, bridge parity, forced Python fallback, and benchmark compile checks.
+
+### Changed
+
+- Extended `bridge.ledgera_bridge` with typed metrics, timeline, currency, and storage-control accessors while preserving centralized capability detection and fallback policy.
+- Updated the analytics tab controller seam so the GUI can use the Rust-backed refresh snapshot without changing the public Tkinter-facing behavior.
+- Optimized the Rust analytics refresh path with compact tuple payloads, one-pass period aggregation, deterministic category ordering, and no-tag fast-path handling.
+- Kept Python as the owner of dataclass reconstruction, currency provider I/O, secrets, config persistence, and all DB write paths.
+
+### Fixed
+
+- Prevented limited Rust metrics snapshots from satisfying later unbounded metrics queries by requiring exact cache-limit matches.
+- Kept analytics snapshot methods optional in the GUI controller protocol so older/fake controllers continue to type-check and use the fallback method calls.
+- Fixed Rust/Python parity gaps for empty and whitespace-padded currency codes and strengthened parity coverage for equal category totals and no-tag analytics fixtures.
+
+### Testing
+
+- Added Rust/Python parity coverage for metrics, timeline, currency, analytics snapshots, compact refresh payloads, no-tag fast paths, and forced Python fallback behavior.
+- Verified the GUI-like analytics refresh benchmark reaches the alpha.2 speed target when run against a freshly built and installed `ledgera_core` wheel.
+- Validated the alpha.2 slice with `cargo test`, `cargo clippy --all-targets -- -D warnings`, `maturin build`, targeted `pytest`, and `npx -y pyright`.
+
+### Deferred
+
+- Rust-owned currency HTTP parsing, provider secrets, SQLite cache persistence, DB write paths, sync, Kotlin/Native FFI, and planning-domain migration remain out of alpha.2 scope.
+- Timeline-specific `>=5x` criterion reporting remains a follow-up; the measured speedup target is currently demonstrated on the GUI-like analytics refresh path.
+
+## [3.0.0-alpha.1] - 2026-05-28
+
+### Added
+
+- Added the initial Rust engine workspace under `rust/ledgera_engine` with `core`, `storage`, and `ffi` crates.
+- Added the PyO3-backed `ledgera_core` extension and the Python bridge package `bridge.ledgera_bridge`.
+- Added Rust-backed parity helpers for money math, balance reads, and selected read-only SQLite repository paths.
+- Added alpha.1 CI gates for Rust check/test/clippy, wheel build, targeted parity pytest, forced Python fallback pytest, and pyright.
+
+### Changed
+
+- Kept Rust runtime usage opt-in through `LEDGERA_ENABLE_RUST_CORE=1`; Python remains the default app runtime path.
+- Centralized Rust extension loading and capability checks behind `bridge.ledgera_bridge`.
+- Updated Windows and Linux packaging workflows to build and install the Rust extension wheel before PyInstaller.
+
+### Fixed
+
+- Replaced `maturin develop` in CI with `maturin build` plus wheel installation so GitHub Actions does not require an activated virtualenv.
+- Kept transaction-sensitive and Python-normalized repository reads on the Python SQLite connection to avoid stale reads from Rust's separate SQLite connection.
+- Silenced pyright source warnings for the compiled `ledgera_core.ledgera_core` extension imports.
+
+### Deferred
+
+- Rust-owned SQLite write paths, WAL bootstrap, migrations, and ID normalization remain out of alpha.1 scope.
+- Kotlin/Native FFI, sync, mobile UI, and broader domain-engine migration remain scheduled for later v3 milestones.
 
 ## [2.6.1] - 2026-05-25
 

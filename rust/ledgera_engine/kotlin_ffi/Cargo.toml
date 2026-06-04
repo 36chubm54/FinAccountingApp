@@ -1,0 +1,22 @@
+[package]
+name = "ledgera_engine_kotlin_ffi"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "ledgera_engine"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+ledgera_engine_storage.workspace = true
+uniffi = { workspace = true, features = ["cli"] }
+
+[build-dependencies]
+uniffi = { workspace = true, features = ["build"] }
+
+[dev-dependencies]
+rusqlite.workspace = true
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"

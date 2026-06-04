@@ -4,9 +4,14 @@ __pycache__/
 .pytest_cache/
 tests/_tmp/
 .pytest_tmp/
-.obsidian/
+.gradle/
+.kotlin/
+.codex-cargo-target/
+.idea/
 .vscode/
+local.properties
 build/
+kotlin/ledgera-ui/build/
 dist/
 installer_dist/
 windows_version_info.auto.txt

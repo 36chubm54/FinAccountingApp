@@ -32,16 +32,16 @@ Supported business areas include:
 
 ## 2. Layer Map
 
-| Layer            | Purpose                                                  | Main modules                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ---------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `domain`         | Immutable entities, enums, validation rules, report DTOs | `records.py`, `tags.py`, `wallets.py`, `budget.py`, `debt.py`, `asset.py`, `goal.py`, `reports.py`, `audit.py`, `validation.py`                                                                                                                                                                                                                                                                               |
-| `app`            | Use cases, application contracts, and orchestration      | `use_cases_pkg/*`, `data/*`, `importing/*`, `runtime/*`, `currency/*`, `services.py`                                                                                                                                                                                                                                                                                                                  |
-| `services`       | Focused business subsystems and read-only engines        | `import_service.py`, `importing/*`, `analytics/*`, `planning/*`, `portfolio/*`, `support/*` |
-| `infrastructure` | Runtime repository implementation                        | `sqlite_repository.py`, `repositories.py`                                                                                                                                                                                                                                                                                                                                                                     |
-| `storage`        | Low-level persistence adapters and schema bootstrap      | `sqlite_storage.py`, `json_storage.py`, `base.py`                                                                                                                                                                                                                                                                                                                                                             |
-| `gui`            | Tkinter presentation layer                               | `tkinter_gui.py`, `controllers.py`, `runtime_coordinator.py`, `startup_coordinator.py`, `status_bar_coordinator.py`, `tab_lifecycle.py`, `tabs/*`, `exporters.py`, `importers.py`, `tooltip.py`, `logging_utils.py`, `ui_theme.py`, `i18n.py`, `ui_dialogs.py`                                                                                                                                                |
-| `utils`          | Format-specific helpers and shared technical helpers     | `backup_utils.py`, `import_core.py`, `csv_utils.py`, `excel_utils.py`, `pdf_utils.py`, `charting.py`, `backup/*`, `export/*`, `spreadsheets/*`, `finance/*`, `records/*`                                                                                                                                                                                                                                      |
-| `tests`          | Regression, contract, and integration-like coverage      | `test_*` modules across all subsystems                                                                                                                                                                                                                                                                                                                                                                        |
+| Layer | Purpose | Main modules |
+| --- | --- | --- |
+| `domain` | Immutable entities, enums, validation rules, report DTOs | `records.py`, `tags.py`, `wallets.py`, `budget.py`, `debt.py`, `asset.py`, `goal.py`, `reports.py`, `audit.py`, `validation.py` |
+| `app` | Use cases, application contracts, and orchestration | `use_cases_pkg/*`, `data/*`, `importing/*`, `runtime/*`, `currency/*`, `services.py` |
+| `services` | Focused business subsystems and read-only engines | `import_service.py`, `importing/*`, `analytics/*`, `planning/*`, `portfolio/*`, `support/*` |
+| `infrastructure` | Runtime repository implementation | `sqlite_repository.py`, `repositories.py` |
+| `storage` | Low-level persistence adapters and schema bootstrap | `sqlite_storage.py`, `json_storage.py`, `base.py` |
+| `gui` | Tkinter presentation layer | `tkinter_gui.py`, `controllers.py`, `runtime_coordinator.py`, `startup_coordinator.py`, `status_bar_coordinator.py`, `tab_lifecycle.py`, `tabs/*`, `exporters.py`, `importers.py`, `tooltip.py`, `logging_utils.py`, `ui_theme.py`, `i18n.py`, `ui_dialogs.py` |
+| `utils` | Format-specific helpers and shared technical helpers | `backup_utils.py`, `import_core.py`, `csv_utils.py`, `excel_utils.py`, `pdf_utils.py`, `charting.py`, `backup/*`, `export/*`, `spreadsheets/*`, `finance/*`, `records/*` |
+| `tests` | Regression, contract, and integration-like coverage | `test_*` modules across all subsystems |
 
 Current implementation note:
 
@@ -49,6 +49,52 @@ Current implementation note:
 - application-side repository capabilities are now expressed through `app/data/protocols.py`
 - the desktop runtime still depends primarily on `infrastructure/sqlite_repository.py` as the only fully featured backend for preferences, audit, analytics, planning, and shell-facing workflows
 - treat JSON storage and other adapters as narrower persistence backends, not as drop-in replacements for the full runtime feature set
+
+### Rust engine bridge
+
+`rust/ledgera_engine` is the v3 Rust workspace. It is loaded by Python only through
+`bridge.ledgera_bridge`, which performs environment gating, extension loading, and
+capability checks for the PyO3 `ledgera_core` module.
+
+Current rules:
+
+- `LEDGERA_ENABLE_RUST_CORE=1` enables Rust-backed bridge loading
+- `LEDGERA_FORCE_PYTHON_FALLBACK=1` forces Python fallback and wins over the enable flag
+- Python remains the owner of public service APIs, dataclasses, GUI/controller contracts, user-facing validation, and fallback paths
+- Rust surfaces exchange primitive payloads only: `int`, `float`, `str`, `bool`, `dict`, and `list`
+- seam-level logs are diagnostic only and must not include full DB paths, descriptions, tags, amounts, or financial payloads
+
+### Kotlin Desktop track
+
+`kotlin/ledgera-ui` is the Kotlin Compose Multiplatform Desktop client track
+for v3. It is intentionally parallel to the Tkinter application during beta:
+Tkinter remains the primary production UI, while Kotlin grows from the first
+Operations screen toward full Desktop feature parity over Rust UniFFI.
+
+Current Kotlin/Rust contract:
+
+- `rust/ledgera_engine/kotlin_ffi` owns the UniFFI-exported `LedgeraEngine`
+  facade used by Kotlin
+- generated bindings live under the Kotlin package `app.ledgera.engine`
+- handwritten Kotlin adapter code lives under `app.ledgera.bridge` to avoid
+  namespace collisions with generated UniFFI code
+- Kotlin calls Rust through `RustEngineAdapter` and keeps UI state in
+  `OperationsViewModel`
+- the current Kotlin surface supports standalone `income` and `expense` record
+  listing and creation only
+- wallet balances exposed to Kotlin include both wallet initial balance and
+  record delta
+- Kotlin does not create production databases implicitly; manual smoke testing
+  needs an existing SQLite ledger database with at least one active wallet
+- the Gradle Desktop gate is `:ledgera-ui:desktopJar :ledgera-ui:desktopTest`
+  and CI runs it through the executable `gradlew` wrapper
+
+Deferred Kotlin scope:
+
+- all 9-tab Desktop feature parity is the beta.1 target
+- Android, iOS, CRDT sync, transfer/debt/budget/distribution Kotlin screens,
+  updater UI, import/export, and Tkinter deprecation remain later beta/RC
+  milestones
 
 ### Runtime currency configuration
 
@@ -171,6 +217,38 @@ There are three main read-only analytics layers:
 - `BalanceService` — balances and net worth
 - `MetricsService` — rates, category summaries, tag coverage, month summaries
 - `TimelineService` — month-by-month historical aggregates
+
+The Rust engine provides optional analytics paths beneath those Python services.
+Runtime ownership remains Python-first: callers keep using
+`MetricsService`, `TimelineService`, and the analytics controller facade, while
+`bridge.ledgera_bridge` loads the PyO3 `ledgera_core` extension only when the
+Rust feature gate is enabled and the required symbols are available.
+
+Current Rust analytics contract:
+
+- `MetricsService` can delegate savings rate, burn rate, category aggregates,
+  tag aggregates, tag coverage, monthly summaries, and period snapshots to
+  `rust/ledgera_engine/storage`
+- `TimelineService` can delegate monthly cashflow, cumulative totals, and
+  net-worth monthly deltas to Rust while Python still reconstructs public
+  dataclasses and keeps currency conversion ownership
+- the analytics tab can use a compact `AnalyticsRefreshSnapshot` for the GUI
+  refresh path, but it falls back to existing per-method calls when a controller
+  does not expose the snapshot method
+- `LEDGERA_FORCE_PYTHON_FALLBACK=1` must keep the Python path fully usable for
+  tests, local development, and safe rollout
+- Rust analytics reads are read-only; schema changes, migrations, and writes
+  remain outside this Rust path
+- seam-level bridge and service logs can report backend selection, fallback, and
+  elapsed timing for diagnostics, but not full query payloads or local DB paths
+
+Benchmarking note:
+
+- `tools/bench_alpha2_analytics.py` measures the GUI-like analytics refresh
+  path and prints the installed extension timestamp before timing so stale
+  `ledgera_core` wheels are visible before interpreting results
+- analytics speedup evidence depends on running against a freshly built and
+  installed wheel, not just modified Rust sources in the checkout
 
 Report UI uses:
 
@@ -318,6 +396,13 @@ As of the current working tree, the subsystem supports:
 
 Tag budgets reuse the same pace/forecast pipeline, but their spend queries are resolved through `record_tags` rather than direct category predicates.
 
+`BudgetService` has an optional Rust-backed BudgetEngine write path. Python
+keeps date parsing, scope/tag normalization, positive limit validation,
+`Budget` / `BudgetResult` reconstruction, and forecast/status assembly. Rust
+owns selected atomic SQLite mutations and read helpers for budget
+create/list/delete/update-limit/replace, overlap checks, and spent-minor
+calculation when the bridge is enabled.
+
 ### 4.3 Debts and Loans
 
 Core modules:
@@ -328,6 +413,14 @@ Core modules:
 - `utils/finance/debt_report.py`
 
 This subsystem links debt payments to cashflow records and affects net worth and report exports.
+
+`DebtService` has an optional Rust-backed DebtEngine write path. Python keeps
+wallet lookup, balance checks, payment validation, record semantics, and
+`Debt` / `DebtPayment` reconstruction. Rust performs the atomic SQLite write
+for debt/loan creation, cash payment, write-off, payment deletion, debt
+deletion, row replacement, and history reads when the bridge is enabled.
+Debt-created cashflow records are the only record writes intentionally included
+in this Rust path because they must stay atomic with debt/payment rows.
 
 ### 4.4 Mandatory Expenses
 
@@ -349,6 +442,12 @@ Core modules:
 - `gui/tabs/distribution/`
 
 This subsystem calculates monthly net-income allocation and supports frozen snapshot rows.
+
+`DistributionService` has an optional Rust-backed DistributionEngine write
+path. Python keeps public models and validation helpers, while Rust can own
+item/subitem CRUD, structure replacement, monthly payload reads, frozen-row
+operations, freeze/unfreeze checks, and history reads through atomic SQLite
+operations.
 
 ### 4.6 Assets / Goals / Dashboard
 
@@ -373,6 +472,41 @@ Core modules:
 - `app/runtime/audit.py`
 
 Audit is intentionally read-only and validates runtime integrity without mutating data.
+
+`AuditService` has an optional Rust-backed AuditEngine v2 batch path. The Rust
+path returns the same ordered 15-check finding contract as the Python
+implementation, including OK findings. Python still owns
+`AuditReport`, `AuditFinding`, `AuditSeverity`, GUI dialogs, and
+`FinancialController.run_audit()`. Rust audit remains strictly read-only and
+does not run migrations, repair actions, or cache writes.
+
+### 4.7.1 Local Sync
+
+Core modules:
+
+- `services/sync/service.py`
+- `gui/controllers_pkg/delegates.py`
+- `rust/ledgera_engine/sync`
+
+Local sync currently provides the first Desktop-to-Desktop MVP for instances on
+the same LAN.
+
+Current sync contract:
+
+- `SyncService` exposes start/stop/status, peer discovery, and one-shot push
+- `FinancialController` exposes the same sync operations to GUI/controller callers
+- Rust sync uses newline-delimited JSON over TCP plus lightweight UDP discovery
+- only standalone `records` rows are synchronized: `transfer_id IS NULL`,
+  `related_debt_id IS NULL`, and type is `income` or `expense`
+- remote records are inserted as new local IDs; duplicate detection uses
+  canonical fingerprint counts so repeated pushes skip records already present
+  on the receiver without collapsing distinct identical records in one inbound
+  batch
+- transfers, debt-linked records, mandatory templates, budgets, distribution,
+  tags, assets, goals, updates, deletes, conflict resolution, CRDT, cloud relay,
+  credentials, and pairing UI are out of the current sync scope
+- if discovery is enabled and the UDP discovery port cannot be bound, daemon
+  startup fails instead of reporting a listening but undiscoverable instance
 
 ### 4.8 Import / Backup Reliability
 
@@ -510,6 +644,12 @@ This subsystem is responsible for:
 - optionally enabling `CBRProvider` for `RUB`-base or explicit provider-order configurations
 - keeping offline defaults and cached rates available when online providers fail
 - exposing a whitelist-aware `display_currency` selector instead of blindly surfacing every cached currency code
+
+`CurrencyService` has an optional Rust-backed currency core below the Python
+service contract. Rust currently handles safe deterministic helper behavior:
+currency-code normalization, rate selection, provider-order decisions, and
+default-rate derivation. Python still owns provider HTTP requests, API keys,
+runtime config persistence, cache files, and user-facing service contracts.
 
 Provider hierarchy:
 

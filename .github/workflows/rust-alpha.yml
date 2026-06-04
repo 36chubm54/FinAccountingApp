@@ -1,0 +1,157 @@
+name: Rust Alpha
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - v3.0.0-alpha
+      - v3.0.0-alpha.1
+      - v3.0.0-alpha.2
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  alpha-seam:
+    name: alpha-seam-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install maturin
+          python -m pip install -r requirements-dev.txt
+          python -m pip install .
+
+      - name: Cargo check
+        working-directory: rust/ledgera_engine
+        run: cargo check
+
+      - name: Cargo test
+        working-directory: rust/ledgera_engine
+        run: cargo test
+
+      - name: Cargo clippy
+        working-directory: rust/ledgera_engine
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Cargo bench compile
+        working-directory: rust/ledgera_engine
+        run: cargo bench --no-run
+
+      - name: Build Rust extension
+        working-directory: rust/ledgera_engine
+        run: |
+          maturin build --out dist/wheels
+          python -c "import glob, subprocess, sys; wheels = glob.glob('dist/wheels/*.whl'); assert wheels, 'No wheel built'; subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--ignore-installed', '--no-deps', wheels[0]])"
+          python -c "import ledgera_core; print(ledgera_core.convert_amount(2.0, 3.0))"
+
+      - name: Run targeted pytest slice
+        env:
+          LEDGERA_ENABLE_RUST_CORE: "1"
+        run: >
+          python -m pytest -q --tb=short
+          tests/test_ledgera_bridge.py
+          tests/test_money_core_wrapper.py
+          tests/test_balance_core_wrapper.py
+          tests/test_record_core_wrapper.py
+          tests/test_metrics_core_wrapper.py
+          tests/test_timeline_core_wrapper.py
+          tests/test_currency_core_wrapper.py
+          tests/test_metrics_service.py
+          tests/test_timeline_service.py
+          tests/test_online_mode.py
+          tests/test_currency.py
+          rust/ledgera_engine/python/tests/test_all.py
+
+      - name: Run forced Python fallback pytest slice
+        env:
+          LEDGERA_ENABLE_RUST_CORE: "1"
+          LEDGERA_FORCE_PYTHON_FALLBACK: "1"
+        run: >
+          python -m pytest -q --tb=short
+          tests/test_ledgera_bridge.py
+          tests/test_money_core_wrapper.py
+          tests/test_balance_core_wrapper.py
+          tests/test_record_core_wrapper.py
+          tests/test_metrics_core_wrapper.py
+          tests/test_timeline_core_wrapper.py
+          tests/test_currency_core_wrapper.py
+
+      - name: Run pyright
+        run: >
+          npx -y pyright
+          ./bridge
+          ./utils/finance/money.py
+          ./services/analytics/balance.py
+          ./services/analytics/metrics.py
+          ./services/analytics/timeline.py
+          ./app/services.py
+          ./infrastructure/sqlite/records_wallets.py
+          ./tests/test_ledgera_bridge.py
+          ./tests/test_metrics_core_wrapper.py
+          ./tests/test_timeline_core_wrapper.py
+          ./tests/test_currency_core_wrapper.py
+          ./tools/bench_alpha2_analytics.py
+          ./rust/ledgera_engine
+
+  kotlin-alpha4:
+    name: kotlin-alpha4-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.5.1"
+
+      - name: Build Kotlin Desktop alpha.4
+        run: ./gradlew :ledgera-ui:desktopJar :ledgera-ui:desktopTest --no-daemon
+
+      - name: Upload Kotlin Desktop jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ledgera-kotlin-alpha4-${{ matrix.os }}
+          path: kotlin/ledgera-ui/build/compose/jars/*.jar
+          if-no-files-found: warn
