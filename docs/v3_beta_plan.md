@@ -23,9 +23,13 @@ Current status:
 
 - Foundation shell is started: Kotlin Desktop has beta.1 runtime framing,
   navigation entries for all 9 roadmap sections, shared engine status/error
-  state, and Operations remains the only fully connected workflow.
+  state, and Operations is the active functional workflow.
+- Operations standalone record CRUD is wired for income/expense rows, including
+  create/list/update/delete, tag replacement, and Rust-side rejection for
+  transfer/debt-linked rows.
 - Remaining beta.1 work is capability wiring and screen parity for the other
-  sections through Rust/Kotlin UniFFI, not a Kotlin-to-Python runtime bridge.
+  Operations flows and the other sections through Rust/Kotlin UniFFI, not a
+  Kotlin-to-Python runtime bridge.
 
 Scope:
 

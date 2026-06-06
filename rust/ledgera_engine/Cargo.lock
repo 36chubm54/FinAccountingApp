@@ -525,7 +525,9 @@ version = "0.7.0"
 dependencies = [
  "criterion",
  "ledgera_engine_core",
+ "libc",
  "rusqlite",
+ "windows-sys",
 ]
 
 [[package]]

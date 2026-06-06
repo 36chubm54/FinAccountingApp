@@ -83,9 +83,12 @@ Current Kotlin/Rust contract:
   full native adapter
 - `AppShellViewModel` owns beta.1 section selection and engine status/error
   state for the Kotlin Desktop shell
-- the current Kotlin shell exposes all 9 roadmap sections, while the connected
-  data surface still supports standalone `income` and `expense` record listing
-  and creation only
+- the current Kotlin shell exposes all 9 roadmap sections, while Operations
+  supports standalone `income` and `expense` record listing, creation, update,
+  delete, tag replacement, and basic wallet/date/type filters
+- Kotlin Operations rejects transfer-linked and debt-linked record edits at the
+  Rust storage boundary; transfer CRUD, import/export, and full inline editor
+  keyboard parity remain separate beta.1 slices
 - wallet balances exposed to Kotlin include both wallet initial balance and
   record delta
 - Kotlin does not create production databases implicitly; manual smoke testing
@@ -97,8 +100,9 @@ Deferred Kotlin scope:
 
 - all 9-tab Desktop feature parity is the beta.1 target
 - reports, analytics, dashboard, budget, debts, distribution, mandatory,
-  settings, transfer, import/export, updater, and broader operations workflows
-  still need Rust UniFFI capability wiring before beta.1 parity can be claimed
+  settings, transfer CRUD, import/export, updater, and broader operations
+  workflows still need Rust UniFFI capability wiring before beta.1 parity can
+  be claimed
 - Android, iOS, CRDT sync, and Tkinter deprecation remain later beta/RC
   milestones
 

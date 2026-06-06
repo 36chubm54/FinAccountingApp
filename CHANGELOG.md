@@ -14,6 +14,7 @@ This project adheres to Semantic Versioning.
 - Added the first beta.1 Kotlin Desktop shell with navigation entries for the 9 roadmap sections: Operations, Reports, Analytics, Dashboard, Budget, Debts, Distribution, Mandatory, and Settings.
 - Added shared Kotlin shell state for section selection and Rust engine status/error reporting while preserving the existing Operations workflow.
 - Added Kotlin shell ViewModel coverage for section order, navigation state, engine status mapping, and engine failure mapping.
+- Added beta.1 Kotlin Operations standalone record CRUD for income/expense records, including edit/delete UI, wallet/date/type filters, tag replacement, category/tag lookups, and Rust-side rejection for transfer/debt-linked rows.
 
 ### Changed
 
@@ -21,6 +22,7 @@ This project adheres to Semantic Versioning.
 - Removed legacy `app/*` compatibility shims and `gui/tabs/*_tab.py` wrappers in favor of direct package entrypoints and `core/` + `support/` ownership.
 - Reorganized analytics, planning, import, shell, settings, report, operations, backup, export, spreadsheet, finance, and records helpers into clearer package clusters with narrower ownership boundaries.
 - Renamed the Kotlin Desktop runtime framing from alpha.4 to beta.1 and split the Kotlin adapter contract into runtime and operations capability groups so ViewModels depend only on the surfaces they use.
+- Extended the Kotlin UniFFI Operations contract with standalone record get/update/delete methods plus tag and category lookup surfaces.
 
 ### Fixed
 
@@ -37,6 +39,7 @@ This project adheres to Semantic Versioning.
 
 - Validated the beta.1 Kotlin shell with `cargo test --manifest-path rust\ledgera_engine\Cargo.toml -p ledgera_engine_kotlin_ffi --lib --bins`.
 - Validated `:ledgera-ui:desktopTest` from an ASCII `subst` path because the local Windows Gradle/JUnit worker still cannot load test classes reliably from the Cyrillic checkout path.
+- Validated the standalone Operations CRUD slice with targeted `ledgera_engine_storage` record tests and the full `ledgera_engine_kotlin_ffi` lib/bin test gate.
 
 ## [3.0.0-alpha.4] - 2026-06-03
 

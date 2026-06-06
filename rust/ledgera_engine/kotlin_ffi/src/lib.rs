@@ -1,13 +1,16 @@
 use ledgera_engine_storage::{
-    RecordFilterPayload, RecordRow, StandaloneRecordCreatePayload, WalletBalanceRow, WalletRow,
-    create_standalone_record, filtered_record_list_rows, wallet_balance_rows, wallet_list_rows,
+    RecordFilterPayload, RecordRow, StandaloneRecordCreatePayload, StandaloneRecordUpdatePayload,
+    WalletBalanceRow, WalletRow, base_currency_code, create_standalone_record, current_local_date,
+    delete_standalone_record, distinct_record_categories, filtered_record_list_rows,
+    standalone_record_get_row, tag_names, update_standalone_record, wallet_balance_rows,
+    wallet_list_rows,
 };
 use std::fmt;
 use std::path::Path;
 
 uniffi::include_scaffolding!("ledgera_engine");
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct RecordFilterDto {
     pub start_date: Option<String>,
     pub end_date: Option<String>,
@@ -17,6 +20,20 @@ pub struct RecordFilterDto {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateRecordRequest {
+    pub record_type: String,
+    pub date: String,
+    pub wallet_id: i64,
+    pub amount_original: String,
+    pub currency: String,
+    pub rate_at_operation: String,
+    pub amount_base: String,
+    pub category: String,
+    pub description: String,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdateRecordRequest {
     pub record_type: String,
     pub date: String,
     pub wallet_id: i64,
@@ -110,6 +127,10 @@ impl LedgeraEngine {
         }
     }
 
+    pub fn base_currency(&self) -> Result<String, LedgeraEngineError> {
+        base_currency_code(&self.db_path).map_err(storage_error)
+    }
+
     pub fn list_records(
         &self,
         filter: RecordFilterDto,
@@ -121,7 +142,18 @@ impl LedgeraEngine {
             record_type: filter.record_type,
         };
         filtered_record_list_rows(&self.db_path, &payload)
-            .map(|rows| rows.into_iter().map(record_to_dto).collect())
+            .map(|rows| {
+                rows.into_iter()
+                    .filter(|row| row.transfer_id.is_none() && row.related_debt_id.is_none())
+                    .map(record_to_dto)
+                    .collect()
+            })
+            .map_err(storage_error)
+    }
+
+    pub fn get_record(&self, record_id: i64) -> Result<Option<RecordDto>, LedgeraEngineError> {
+        standalone_record_get_row(&self.db_path, record_id)
+            .map(|row| row.map(record_to_dto))
             .map_err(storage_error)
     }
 
@@ -145,6 +177,41 @@ impl LedgeraEngine {
         create_standalone_record(&self.db_path, &payload)
             .map(record_to_dto)
             .map_err(storage_error)
+    }
+
+    pub fn update_record(
+        &self,
+        record_id: i64,
+        request: UpdateRecordRequest,
+    ) -> Result<RecordDto, LedgeraEngineError> {
+        validate_update_request(&request)?;
+        let payload = StandaloneRecordUpdatePayload {
+            record_type: request.record_type,
+            date: request.date,
+            wallet_id: request.wallet_id,
+            amount_original: request.amount_original,
+            currency: request.currency,
+            rate_at_operation: request.rate_at_operation,
+            amount_base: request.amount_base,
+            category: request.category,
+            description: request.description,
+            tags: request.tags,
+        };
+        update_standalone_record(&self.db_path, record_id, &payload)
+            .map(record_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn delete_record(&self, record_id: i64) -> Result<bool, LedgeraEngineError> {
+        delete_standalone_record(&self.db_path, record_id).map_err(storage_error)
+    }
+
+    pub fn list_tags(&self) -> Result<Vec<String>, LedgeraEngineError> {
+        tag_names(&self.db_path).map_err(storage_error)
+    }
+
+    pub fn list_categories(&self, record_type: String) -> Result<Vec<String>, LedgeraEngineError> {
+        distinct_record_categories(&self.db_path, &record_type).map_err(storage_error)
     }
 
     pub fn list_wallets(&self) -> Result<Vec<WalletDto>, LedgeraEngineError> {
@@ -180,13 +247,107 @@ fn validate_create_request(request: &CreateRecordRequest) -> Result<(), LedgeraE
     if request.date.trim().is_empty() {
         return Err(validation_error("Record date is required"));
     }
+    validate_ymd_date(request.date.trim())?;
     if request.wallet_id <= 0 {
         return Err(validation_error("wallet_id must be positive"));
     }
+    validate_currency_code(&request.currency)?;
     if request.category.trim().is_empty() {
         return Err(validation_error("Category is required"));
     }
     Ok(())
+}
+
+fn validate_update_request(request: &UpdateRecordRequest) -> Result<(), LedgeraEngineError> {
+    let record_type = request.record_type.trim().to_lowercase();
+    if record_type != "income" && record_type != "expense" {
+        return Err(validation_error(
+            "Only income and expense records are supported in beta.1 Operations",
+        ));
+    }
+    if request.date.trim().is_empty() {
+        return Err(validation_error("Record date is required"));
+    }
+    validate_ymd_date(request.date.trim())?;
+    if request.wallet_id <= 0 {
+        return Err(validation_error("wallet_id must be positive"));
+    }
+    validate_currency_code(&request.currency)?;
+    if request.category.trim().is_empty() {
+        return Err(validation_error("Category is required"));
+    }
+    Ok(())
+}
+
+fn validate_ymd_date(value: &str) -> Result<(), LedgeraEngineError> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return Err(validation_error("Date must use YYYY-MM-DD format"));
+    }
+    let year = parse_date_part(value, 0, 4, "year")?;
+    let month = parse_date_part(value, 5, 7, "month")?;
+    let day = parse_date_part(value, 8, 10, "day")?;
+    if !(1..=12).contains(&month) {
+        return Err(validation_error("Date month must be between 01 and 12"));
+    }
+    let max_day = days_in_month(year, month);
+    if day < 1 || day > max_day {
+        return Err(validation_error(&format!(
+            "Date day must be between 01 and {max_day:02}"
+        )));
+    }
+    if (year, month, day) > current_local_date() {
+        return Err(validation_error("Date cannot be in the future"));
+    }
+    Ok(())
+}
+
+fn parse_date_part(
+    value: &str,
+    start: usize,
+    end: usize,
+    name: &str,
+) -> Result<i32, LedgeraEngineError> {
+    let part = &value[start..end];
+    if !part.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(validation_error(&format!(
+            "Date {name} must contain digits only"
+        )));
+    }
+    part.parse::<i32>()
+        .map_err(|_| validation_error(&format!("Date {name} is invalid")))
+}
+
+fn days_in_month(year: i32, month: i32) -> i32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn is_leap_year(year: i32) -> bool {
+    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+}
+
+fn validate_currency_code(value: &str) -> Result<(), LedgeraEngineError> {
+    let currency = value.trim();
+    if currency.len() != 3 || !currency.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+        return Err(validation_error("Currency code must contain 3 letters"));
+    }
+    if !is_supported_currency(currency) {
+        return Err(validation_error("Unsupported currency"));
+    }
+    Ok(())
+}
+
+fn is_supported_currency(value: &str) -> bool {
+    matches!(
+        value.to_ascii_uppercase().as_str(),
+        "KZT" | "USD" | "EUR" | "RUB"
+    )
 }
 
 fn record_to_dto(row: RecordRow) -> RecordDto {
@@ -289,6 +450,20 @@ mod tests {
                 period TEXT,
                 FOREIGN KEY(wallet_id) REFERENCES wallets(id)
             );
+            CREATE TABLE transfers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                from_wallet_id INTEGER NOT NULL,
+                to_wallet_id INTEGER NOT NULL,
+                date TEXT NOT NULL,
+                amount_original REAL NOT NULL,
+                amount_original_minor INTEGER DEFAULT NULL,
+                currency TEXT NOT NULL,
+                rate_at_operation REAL NOT NULL,
+                rate_at_operation_text TEXT DEFAULT NULL,
+                amount_base REAL NOT NULL,
+                amount_base_minor INTEGER DEFAULT NULL,
+                description TEXT NOT NULL DEFAULT ''
+            );
             CREATE TABLE tags (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
@@ -342,6 +517,417 @@ mod tests {
             .unwrap();
         assert_eq!(rows, vec![created]);
         assert_eq!(engine.wallet_balance(1).unwrap().unwrap().balance, "110.01");
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_updates_and_deletes_standalone_record() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+        let created = engine
+            .create_record(CreateRecordRequest {
+                record_type: "expense".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "25".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "25".to_owned(),
+                category: "Food".to_owned(),
+                description: "Lunch".to_owned(),
+                tags: vec!["food".to_owned()],
+            })
+            .unwrap();
+
+        let updated = engine
+            .update_record(
+                created.id,
+                UpdateRecordRequest {
+                    record_type: "income".to_owned(),
+                    date: "2026-01-02".to_owned(),
+                    wallet_id: 1,
+                    amount_original: "30.125".to_owned(),
+                    currency: "kzt".to_owned(),
+                    rate_at_operation: "1".to_owned(),
+                    amount_base: "30.125".to_owned(),
+                    category: "Bonus".to_owned(),
+                    description: "Updated".to_owned(),
+                    tags: vec!["Work".to_owned(), "food".to_owned()],
+                },
+            )
+            .unwrap();
+        assert_eq!(updated.amount_base, "30.13");
+        assert_eq!(updated.category, "Bonus");
+        assert_eq!(updated.tags, vec!["food", "work"]);
+        assert_eq!(engine.get_record(created.id).unwrap(), Some(updated));
+        assert_eq!(engine.list_tags().unwrap(), vec!["food", "work"]);
+        assert_eq!(
+            engine.list_categories("income".to_owned()).unwrap(),
+            vec!["Bonus"]
+        );
+
+        assert!(engine.delete_record(created.id).unwrap());
+        assert_eq!(engine.get_record(created.id).unwrap(), None);
+        assert!(
+            engine
+                .list_records(RecordFilterDto::default())
+                .unwrap()
+                .is_empty()
+        );
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_rejects_invalid_record_dates() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+
+        let create_error = engine
+            .create_record(CreateRecordRequest {
+                record_type: "income".to_owned(),
+                date: "2026-13-32".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Salary".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            })
+            .unwrap_err();
+        assert!(
+            create_error
+                .to_string()
+                .contains("Date month must be between 01 and 12")
+        );
+
+        let created = engine
+            .create_record(CreateRecordRequest {
+                record_type: "expense".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Food".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            })
+            .unwrap();
+        let update_error = engine
+            .update_record(
+                created.id,
+                UpdateRecordRequest {
+                    record_type: "expense".to_owned(),
+                    date: "2026-02-30".to_owned(),
+                    wallet_id: 1,
+                    amount_original: "10".to_owned(),
+                    currency: "KZT".to_owned(),
+                    rate_at_operation: "1".to_owned(),
+                    amount_base: "10".to_owned(),
+                    category: "Food".to_owned(),
+                    description: "".to_owned(),
+                    tags: vec![],
+                },
+            )
+            .unwrap_err();
+        assert!(
+            update_error
+                .to_string()
+                .contains("Date day must be between 01 and 28")
+        );
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_rejects_future_record_dates() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+
+        let create_error = engine
+            .create_record(CreateRecordRequest {
+                record_type: "income".to_owned(),
+                date: "2999-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Salary".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            })
+            .unwrap_err();
+        assert!(
+            create_error
+                .to_string()
+                .contains("Date cannot be in the future")
+        );
+
+        let created = engine
+            .create_record(CreateRecordRequest {
+                record_type: "expense".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Food".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            })
+            .unwrap();
+        let update_error = engine
+            .update_record(
+                created.id,
+                UpdateRecordRequest {
+                    record_type: "expense".to_owned(),
+                    date: "2999-01-01".to_owned(),
+                    wallet_id: 1,
+                    amount_original: "10".to_owned(),
+                    currency: "KZT".to_owned(),
+                    rate_at_operation: "1".to_owned(),
+                    amount_base: "10".to_owned(),
+                    category: "Food".to_owned(),
+                    description: "".to_owned(),
+                    tags: vec![],
+                },
+            )
+            .unwrap_err();
+        assert!(
+            update_error
+                .to_string()
+                .contains("Date cannot be in the future")
+        );
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_rejects_invalid_currency_codes() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+
+        let create_error = engine
+            .create_record(CreateRecordRequest {
+                record_type: "income".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "K1T".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Salary".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            })
+            .unwrap_err();
+        assert!(
+            create_error
+                .to_string()
+                .contains("Currency code must contain 3 letters")
+        );
+
+        let created = engine
+            .create_record(CreateRecordRequest {
+                record_type: "expense".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Food".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            })
+            .unwrap();
+        let update_error = engine
+            .update_record(
+                created.id,
+                UpdateRecordRequest {
+                    record_type: "expense".to_owned(),
+                    date: "2026-01-01".to_owned(),
+                    wallet_id: 1,
+                    amount_original: "10".to_owned(),
+                    currency: "US1".to_owned(),
+                    rate_at_operation: "1".to_owned(),
+                    amount_base: "10".to_owned(),
+                    category: "Food".to_owned(),
+                    description: "".to_owned(),
+                    tags: vec![],
+                },
+            )
+            .unwrap_err();
+        assert!(
+            update_error
+                .to_string()
+                .contains("Currency code must contain 3 letters")
+        );
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_rejects_unsupported_currency_codes() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+
+        let create_error = engine
+            .create_record(CreateRecordRequest {
+                record_type: "income".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "AAA".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Salary".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            })
+            .unwrap_err();
+        assert!(create_error.to_string().contains("Unsupported currency"));
+
+        let created = engine
+            .create_record(CreateRecordRequest {
+                record_type: "expense".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Food".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            })
+            .unwrap();
+        let update_error = engine
+            .update_record(
+                created.id,
+                UpdateRecordRequest {
+                    record_type: "expense".to_owned(),
+                    date: "2026-01-01".to_owned(),
+                    wallet_id: 1,
+                    amount_original: "10".to_owned(),
+                    currency: "AAA".to_owned(),
+                    rate_at_operation: "1".to_owned(),
+                    amount_base: "10".to_owned(),
+                    category: "Food".to_owned(),
+                    description: "".to_owned(),
+                    tags: vec![],
+                },
+            )
+            .unwrap_err();
+        assert!(update_error.to_string().contains("Unsupported currency"));
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_rejects_non_base_currency_records() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+        assert_eq!(engine.base_currency().unwrap(), "KZT");
+
+        let create_error = engine
+            .create_record(CreateRecordRequest {
+                record_type: "income".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "USD".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Salary".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            })
+            .unwrap_err();
+        assert!(
+            create_error
+                .to_string()
+                .contains("base-currency records only (KZT)")
+        );
+
+        let created = engine
+            .create_record(CreateRecordRequest {
+                record_type: "income".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Salary".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            })
+            .unwrap();
+        let update_error = engine
+            .update_record(
+                created.id,
+                UpdateRecordRequest {
+                    record_type: "income".to_owned(),
+                    date: "2026-01-01".to_owned(),
+                    wallet_id: 1,
+                    amount_original: "10".to_owned(),
+                    currency: "USD".to_owned(),
+                    rate_at_operation: "1".to_owned(),
+                    amount_base: "10".to_owned(),
+                    category: "Salary".to_owned(),
+                    description: "".to_owned(),
+                    tags: vec![],
+                },
+            )
+            .unwrap_err();
+        assert!(
+            update_error
+                .to_string()
+                .contains("base-currency records only (KZT)")
+        );
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_rejects_linked_record_update_and_delete() {
+        let db_path = fixture_db();
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute(
+            "INSERT INTO transfers (
+                id, from_wallet_id, to_wallet_id, date, amount_original, amount_original_minor,
+                currency, rate_at_operation, rate_at_operation_text, amount_base, amount_base_minor, description
+             ) VALUES (1, 1, 1, '2026-01-01', 10.0, 1000, 'KZT', 1.0, '1.000000', 10.0, 1000, '')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO records (
+                id, type, date, wallet_id, transfer_id, amount_original, amount_original_minor,
+                currency, rate_at_operation, rate_at_operation_text, amount_base, amount_base_minor,
+                category, description
+             ) VALUES (1, 'expense', '2026-01-01', 1, 1, 10.0, 1000, 'KZT', 1.0, '1.000000', 10.0, 1000, 'Transfer', '')",
+            [],
+        )
+        .unwrap();
+        let engine = LedgeraEngine::new(db_path.clone());
+        let request = UpdateRecordRequest {
+            record_type: "expense".to_owned(),
+            date: "2026-01-01".to_owned(),
+            wallet_id: 1,
+            amount_original: "10".to_owned(),
+            currency: "KZT".to_owned(),
+            rate_at_operation: "1".to_owned(),
+            amount_base: "10".to_owned(),
+            category: "Transfer".to_owned(),
+            description: "".to_owned(),
+            tags: vec![],
+        };
+
+        assert!(engine.update_record(1, request).is_err());
+        assert!(engine.delete_record(1).is_err());
+        assert!(engine.get_record(1).is_err());
         fs::remove_file(db_path).ok();
     }
 }

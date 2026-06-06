@@ -5,7 +5,11 @@ edition.workspace = true
 
 [dependencies]
 ledgera_engine_core.workspace = true
+libc.workspace = true
 rusqlite.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

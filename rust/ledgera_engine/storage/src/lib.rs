@@ -5,6 +5,9 @@ use ledgera_engine_core::{
 use rusqlite::{Connection, OptionalExtension};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(windows)]
+use windows_sys::Win32::{Foundation::SYSTEMTIME, System::SystemInformation::GetLocalTime};
 
 pub type StorageResult<T> = Result<T, String>;
 pub type WalletBalanceRow = (i64, String, String, f64, f64);
@@ -76,6 +79,20 @@ pub struct RecordFilterPayload {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StandaloneRecordCreatePayload {
+    pub record_type: String,
+    pub date: String,
+    pub wallet_id: i64,
+    pub amount_original: String,
+    pub currency: String,
+    pub rate_at_operation: String,
+    pub amount_base: String,
+    pub category: String,
+    pub description: String,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StandaloneRecordUpdatePayload {
     pub record_type: String,
     pub date: String,
     pub wallet_id: i64,
@@ -773,6 +790,20 @@ pub fn record_get_row(db_path: &str, record_id: i64) -> StorageResult<Option<Rec
     Ok(rows.pop())
 }
 
+pub fn standalone_record_get_row(
+    db_path: &str,
+    record_id: i64,
+) -> StorageResult<Option<RecordRow>> {
+    let row = record_get_row(db_path, record_id)?;
+    match row {
+        Some(record) if record.transfer_id.is_none() && record.related_debt_id.is_none() => {
+            Ok(Some(record))
+        }
+        Some(_) => Err("Only standalone records can be edited from Kotlin Operations".to_owned()),
+        None => Ok(None),
+    }
+}
+
 pub fn record_rows_by_tag(db_path: &str, tag_name: &str) -> StorageResult<Vec<RecordRow>> {
     let conn = open_sqlite_connection(db_path)?;
     record_row_dicts(
@@ -808,6 +839,7 @@ pub fn create_standalone_record(
     if payload.date.trim().is_empty() {
         return Err("Record date is required".to_owned());
     }
+    validate_ymd_date(payload.date.trim())?;
     if payload.wallet_id <= 0 {
         return Err("wallet_id must be positive".to_owned());
     }
@@ -816,9 +848,9 @@ pub fn create_standalone_record(
         return Err("Category is required".to_owned());
     }
     let currency = payload.currency.trim().to_uppercase();
-    if currency.len() != 3 {
-        return Err("Currency code must contain 3 letters".to_owned());
-    }
+    validate_currency_code(&currency)?;
+    let base_currency = base_currency_code_in_tx(&tx)?;
+    validate_base_currency_only(&currency, &base_currency)?;
 
     let wallet_exists = tx
         .query_row(
@@ -835,8 +867,8 @@ pub fn create_standalone_record(
 
     let amount_original_minor = to_minor_units(&payload.amount_original)?;
     let amount_base_minor = to_minor_units(&payload.amount_base)?;
-    if amount_original_minor < 0 || amount_base_minor < 0 {
-        return Err("Record amount must not be negative".to_owned());
+    if amount_original_minor <= 0 || amount_base_minor <= 0 {
+        return Err("Record amount must be positive".to_owned());
     }
     let amount_original = quantize_money_text(&payload.amount_original)?
         .parse::<f64>()
@@ -896,6 +928,389 @@ pub fn create_standalone_record(
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
     record_get_row(db_path, record_id)?.ok_or_else(|| format!("Record not found: {record_id}"))
+}
+
+pub fn update_standalone_record(
+    db_path: &str,
+    record_id: i64,
+    payload: &StandaloneRecordUpdatePayload,
+) -> StorageResult<RecordRow> {
+    let mut conn = open_sqlite_connection(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(sqlite_err)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    ensure_standalone_record_exists_in_tx(&tx, record_id)?;
+
+    let record_type = payload.record_type.trim().to_lowercase();
+    if record_type != "income" && record_type != "expense" {
+        return Err("Unsupported record type for Kotlin Operations".to_owned());
+    }
+    if payload.date.trim().is_empty() {
+        return Err("Record date is required".to_owned());
+    }
+    validate_ymd_date(payload.date.trim())?;
+    if payload.wallet_id <= 0 {
+        return Err("wallet_id must be positive".to_owned());
+    }
+    let category = payload.category.trim();
+    if category.is_empty() {
+        return Err("Category is required".to_owned());
+    }
+    let currency = payload.currency.trim().to_uppercase();
+    validate_currency_code(&currency)?;
+    let base_currency = base_currency_code_in_tx(&tx)?;
+    validate_base_currency_only(&currency, &base_currency)?;
+    let wallet_exists = tx
+        .query_row(
+            "SELECT 1 FROM wallets WHERE id = ?1",
+            [payload.wallet_id],
+            |_row| Ok(()),
+        )
+        .optional()
+        .map_err(sqlite_err)?
+        .is_some();
+    if !wallet_exists {
+        return Err(format!("Wallet not found: {}", payload.wallet_id));
+    }
+
+    let amount_original_minor = to_minor_units(&payload.amount_original)?;
+    let amount_base_minor = to_minor_units(&payload.amount_base)?;
+    if amount_original_minor <= 0 || amount_base_minor <= 0 {
+        return Err("Record amount must be positive".to_owned());
+    }
+    let amount_original = quantize_money_text(&payload.amount_original)?
+        .parse::<f64>()
+        .map_err(|_| "invalid amount_original".to_owned())?;
+    let amount_base = quantize_money_text(&payload.amount_base)?
+        .parse::<f64>()
+        .map_err(|_| "invalid amount_base".to_owned())?;
+    let rate_at_operation_text = quantize_rate_text(&payload.rate_at_operation)?;
+    let rate_at_operation = rate_at_operation_text
+        .parse::<f64>()
+        .map_err(|_| "invalid rate_at_operation".to_owned())?;
+    if rate_at_operation <= 0.0 {
+        return Err("rate_at_operation must be positive".to_owned());
+    }
+
+    let updated = tx
+        .execute(
+            "UPDATE records
+             SET type = ?1,
+                 date = ?2,
+                 wallet_id = ?3,
+                 amount_original = ?4,
+                 amount_original_minor = ?5,
+                 currency = ?6,
+                 rate_at_operation = ?7,
+                 rate_at_operation_text = ?8,
+                 amount_base = ?9,
+                 amount_base_minor = ?10,
+                 category = ?11,
+                 description = ?12
+             WHERE id = ?13
+               AND transfer_id IS NULL
+               AND related_debt_id IS NULL",
+            (
+                record_type.as_str(),
+                payload.date.trim(),
+                payload.wallet_id,
+                amount_original,
+                amount_original_minor,
+                currency.as_str(),
+                rate_at_operation,
+                rate_at_operation_text.as_str(),
+                amount_base,
+                amount_base_minor,
+                category,
+                payload.description.as_str(),
+                record_id,
+            ),
+        )
+        .map_err(sqlite_err)?;
+    if updated != 1 {
+        return Err(format!("Record not found: {record_id}"));
+    }
+    replace_record_tags_in_tx(&tx, record_id, &payload.tags)?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    record_get_row(db_path, record_id)?.ok_or_else(|| format!("Record not found: {record_id}"))
+}
+
+pub fn delete_standalone_record(db_path: &str, record_id: i64) -> StorageResult<bool> {
+    let mut conn = open_sqlite_connection(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(sqlite_err)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    ensure_standalone_record_exists_in_tx(&tx, record_id)?;
+    tx.execute("DELETE FROM record_tags WHERE record_id = ?1", [record_id])
+        .map_err(sqlite_err)?;
+    let deleted = tx
+        .execute(
+            "DELETE FROM records
+             WHERE id = ?1
+               AND transfer_id IS NULL
+               AND related_debt_id IS NULL",
+            [record_id],
+        )
+        .map_err(sqlite_err)?;
+    refresh_tag_metrics_in_tx(&tx)?;
+    prune_orphan_tags_in_tx(&tx)?;
+    tx.commit().map_err(sqlite_err)?;
+    if deleted > 0 {
+        storage_clear_read_connection_cache();
+    }
+    Ok(deleted > 0)
+}
+
+pub fn base_currency_code(db_path: &str) -> StorageResult<String> {
+    let conn = open_sqlite_connection(db_path)?;
+    base_currency_code_in_conn(&conn)
+}
+
+pub fn tag_names(db_path: &str) -> StorageResult<Vec<String>> {
+    let conn = open_sqlite_connection(db_path)?;
+    let mut stmt = conn
+        .prepare("SELECT name FROM tags ORDER BY usage_count DESC, name COLLATE NOCASE, name")
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(sqlite_err)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_err)
+}
+
+pub fn distinct_record_categories(db_path: &str, record_type: &str) -> StorageResult<Vec<String>> {
+    let conn = open_sqlite_connection(db_path)?;
+    let normalized_type = record_type.trim().to_lowercase();
+    if normalized_type != "income" && normalized_type != "expense" {
+        return Err("record_type must be income or expense".to_owned());
+    }
+    let mut stmt = conn
+        .prepare(
+            "SELECT DISTINCT category
+             FROM records
+             WHERE type = ?1
+               AND TRIM(category) <> ''
+               AND transfer_id IS NULL
+               AND related_debt_id IS NULL
+             ORDER BY category COLLATE NOCASE, category",
+        )
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([normalized_type.as_str()], |row| row.get::<_, String>(0))
+        .map_err(sqlite_err)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_err)
+}
+
+fn ensure_standalone_record_exists_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    record_id: i64,
+) -> StorageResult<()> {
+    let row = tx
+        .query_row(
+            "SELECT transfer_id, related_debt_id FROM records WHERE id = ?1",
+            [record_id],
+            |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?)),
+        )
+        .optional()
+        .map_err(sqlite_err)?;
+    match row {
+        Some((None, None)) => Ok(()),
+        Some(_) => Err("Only standalone records can be edited from Kotlin Operations".to_owned()),
+        None => Err(format!("Record not found: {record_id}")),
+    }
+}
+
+fn base_currency_code_in_tx(tx: &rusqlite::Transaction<'_>) -> StorageResult<String> {
+    let has_schema_meta = tx
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_meta'",
+            [],
+            |_row| Ok(()),
+        )
+        .optional()
+        .map_err(sqlite_err)?
+        .is_some();
+    if !has_schema_meta {
+        return Ok("KZT".to_owned());
+    }
+    let value = tx
+        .query_row(
+            "SELECT value FROM schema_meta WHERE key = 'base_currency' LIMIT 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(sqlite_err)?
+        .unwrap_or_else(|| "KZT".to_owned());
+    normalize_base_currency_code(&value)
+}
+
+fn base_currency_code_in_conn(conn: &Connection) -> StorageResult<String> {
+    let has_schema_meta = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_meta'",
+            [],
+            |_row| Ok(()),
+        )
+        .optional()
+        .map_err(sqlite_err)?
+        .is_some();
+    if !has_schema_meta {
+        return Ok("KZT".to_owned());
+    }
+    let value = conn
+        .query_row(
+            "SELECT value FROM schema_meta WHERE key = 'base_currency' LIMIT 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(sqlite_err)?
+        .unwrap_or_else(|| "KZT".to_owned());
+    normalize_base_currency_code(&value)
+}
+
+fn normalize_base_currency_code(value: &str) -> StorageResult<String> {
+    let normalized = value.trim().to_uppercase();
+    if normalized.is_empty() {
+        return Ok("KZT".to_owned());
+    }
+    validate_currency_code(&normalized)?;
+    Ok(normalized)
+}
+
+fn validate_base_currency_only(currency: &str, base_currency: &str) -> StorageResult<()> {
+    if currency.eq_ignore_ascii_case(base_currency) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Standalone Operations currently supports base-currency records only ({base_currency})"
+        ))
+    }
+}
+
+fn validate_ymd_date(value: &str) -> StorageResult<()> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return Err("Date must use YYYY-MM-DD format".to_owned());
+    }
+    let year = parse_date_part(value, 0, 4, "year")?;
+    let month = parse_date_part(value, 5, 7, "month")?;
+    let day = parse_date_part(value, 8, 10, "day")?;
+    if !(1..=12).contains(&month) {
+        return Err("Date month must be between 01 and 12".to_owned());
+    }
+    let max_day = days_in_month(year, month);
+    if day < 1 || day > max_day {
+        return Err(format!("Date day must be between 01 and {max_day:02}"));
+    }
+    if (year, month, day) > current_local_date() {
+        return Err("Date cannot be in the future".to_owned());
+    }
+    Ok(())
+}
+
+fn parse_date_part(value: &str, start: usize, end: usize, name: &str) -> StorageResult<i32> {
+    let part = &value[start..end];
+    if !part.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(format!("Date {name} must contain digits only"));
+    }
+    part.parse::<i32>()
+        .map_err(|_| format!("Date {name} is invalid"))
+}
+
+fn days_in_month(year: i32, month: i32) -> i32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn is_leap_year(year: i32) -> bool {
+    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+}
+
+fn validate_currency_code(value: &str) -> StorageResult<()> {
+    if value.len() != 3 || !value.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+        return Err("Currency code must contain 3 letters".to_owned());
+    }
+    if !is_supported_currency(value) {
+        return Err("Unsupported currency".to_owned());
+    }
+    Ok(())
+}
+
+fn is_supported_currency(value: &str) -> bool {
+    matches!(
+        value.to_ascii_uppercase().as_str(),
+        "KZT" | "USD" | "EUR" | "RUB"
+    )
+}
+
+pub fn current_local_date() -> (i32, i32, i32) {
+    current_local_date_impl().unwrap_or_else(today_utc)
+}
+
+#[cfg(windows)]
+fn current_local_date_impl() -> Option<(i32, i32, i32)> {
+    let mut local_time = SYSTEMTIME::default();
+    unsafe {
+        GetLocalTime(&mut local_time);
+    }
+    Some((
+        i32::from(local_time.wYear),
+        i32::from(local_time.wMonth),
+        i32::from(local_time.wDay),
+    ))
+}
+
+#[cfg(unix)]
+fn current_local_date_impl() -> Option<(i32, i32, i32)> {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| libc::time_t::try_from(duration.as_secs()).ok())?;
+    let mut local_time = std::mem::MaybeUninit::<libc::tm>::uninit();
+    let result = unsafe { libc::localtime_r(&timestamp, local_time.as_mut_ptr()) };
+    if result.is_null() {
+        return None;
+    }
+    let local_time = unsafe { local_time.assume_init() };
+    Some((
+        local_time.tm_year + 1900,
+        local_time.tm_mon + 1,
+        local_time.tm_mday,
+    ))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn current_local_date_impl() -> Option<(i32, i32, i32)> {
+    None
+}
+
+fn today_utc() -> (i32, i32, i32) {
+    let days_since_epoch = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| (duration.as_secs() / 86_400) as i64)
+        .unwrap_or(0);
+    civil_from_days(days_since_epoch)
+}
+
+fn civil_from_days(days_since_epoch: i64) -> (i32, i32, i32) {
+    let z = days_since_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    let year = y + i64::from(month <= 2);
+    (year as i32, month as i32, day as i32)
 }
 
 fn replace_record_tags_in_tx(
@@ -1093,7 +1508,10 @@ mod tests {
             );
             CREATE TABLE tags (
                 id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL
+                name TEXT NOT NULL,
+                color TEXT NOT NULL DEFAULT '',
+                usage_count INTEGER NOT NULL DEFAULT 0,
+                last_used_at TEXT DEFAULT NULL
             );
             CREATE TABLE record_tags (
                 record_id INTEGER NOT NULL,
@@ -1218,6 +1636,350 @@ mod tests {
             cashflow_sum(&db_path, "expense", "2026-01-01", "2026-01-31").unwrap(),
             75.0
         );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn standalone_record_update_replaces_tags_and_category_lookup_excludes_linked_rows() {
+        let db_path = create_balance_test_db();
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute(
+            "UPDATE records SET category = 'Transfer Mirror' WHERE id = 4",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let updated = update_standalone_record(
+            &db_path,
+            2,
+            &StandaloneRecordUpdatePayload {
+                record_type: "expense".to_owned(),
+                date: "2026-02-10".to_owned(),
+                wallet_id: 2,
+                amount_original: "75.25".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "75.25".to_owned(),
+                category: "Dining".to_owned(),
+                description: "Updated dinner".to_owned(),
+                tags: vec!["work".to_owned(), "dining".to_owned(), "work".to_owned()],
+            },
+        )
+        .unwrap();
+
+        assert_eq!(updated.date, "2026-02-10");
+        assert_eq!(updated.wallet_id, 2);
+        assert_eq!(updated.amount_original, 75.25);
+        assert_eq!(updated.category, "Dining");
+        assert_eq!(updated.description, "Updated dinner");
+        assert_eq!(updated.tags, vec!["dining".to_owned(), "work".to_owned()]);
+        assert_eq!(
+            tag_names(&db_path).unwrap(),
+            vec!["dining".to_owned(), "work".to_owned()]
+        );
+        assert_eq!(
+            distinct_record_categories(&db_path, "expense").unwrap(),
+            vec!["Dining".to_owned()]
+        );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn standalone_record_create_and_update_reject_invalid_dates() {
+        let db_path = create_balance_test_db();
+        let create_error = create_standalone_record(
+            &db_path,
+            &StandaloneRecordCreatePayload {
+                record_type: "income".to_owned(),
+                date: "2026-13-32".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Salary".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            },
+        )
+        .unwrap_err();
+        assert!(create_error.contains("Date month must be between 01 and 12"));
+
+        let update_error = update_standalone_record(
+            &db_path,
+            2,
+            &StandaloneRecordUpdatePayload {
+                record_type: "expense".to_owned(),
+                date: "2026-02-30".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Food".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            },
+        )
+        .unwrap_err();
+        assert!(update_error.contains("Date day must be between 01 and 28"));
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn standalone_record_create_and_update_reject_future_dates() {
+        let db_path = create_balance_test_db();
+        let create_error = create_standalone_record(
+            &db_path,
+            &StandaloneRecordCreatePayload {
+                record_type: "income".to_owned(),
+                date: "2999-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Salary".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            },
+        )
+        .unwrap_err();
+        assert!(create_error.contains("Date cannot be in the future"));
+
+        let update_error = update_standalone_record(
+            &db_path,
+            2,
+            &StandaloneRecordUpdatePayload {
+                record_type: "expense".to_owned(),
+                date: "2999-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Food".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            },
+        )
+        .unwrap_err();
+        assert!(update_error.contains("Date cannot be in the future"));
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn standalone_record_create_and_update_reject_invalid_currency() {
+        let db_path = create_balance_test_db();
+        let create_error = create_standalone_record(
+            &db_path,
+            &StandaloneRecordCreatePayload {
+                record_type: "income".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "K1T".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Salary".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            },
+        )
+        .unwrap_err();
+        assert!(create_error.contains("Currency code must contain 3 letters"));
+
+        let update_error = update_standalone_record(
+            &db_path,
+            2,
+            &StandaloneRecordUpdatePayload {
+                record_type: "expense".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "US1".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Food".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            },
+        )
+        .unwrap_err();
+        assert!(update_error.contains("Currency code must contain 3 letters"));
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn standalone_record_create_and_update_reject_unsupported_currency() {
+        let db_path = create_balance_test_db();
+        let create_error = create_standalone_record(
+            &db_path,
+            &StandaloneRecordCreatePayload {
+                record_type: "income".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "AAA".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Salary".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            },
+        )
+        .unwrap_err();
+        assert!(create_error.contains("Unsupported currency"));
+
+        let update_error = update_standalone_record(
+            &db_path,
+            2,
+            &StandaloneRecordUpdatePayload {
+                record_type: "expense".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "AAA".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Food".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            },
+        )
+        .unwrap_err();
+        assert!(update_error.contains("Unsupported currency"));
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn standalone_record_create_and_update_reject_non_base_currency() {
+        let db_path = create_balance_test_db();
+        let create_error = create_standalone_record(
+            &db_path,
+            &StandaloneRecordCreatePayload {
+                record_type: "income".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "USD".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Salary".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            },
+        )
+        .unwrap_err();
+        assert!(create_error.contains("base-currency records only (KZT)"));
+
+        let update_error = update_standalone_record(
+            &db_path,
+            2,
+            &StandaloneRecordUpdatePayload {
+                record_type: "expense".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "USD".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Food".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            },
+        )
+        .unwrap_err();
+        assert!(update_error.contains("base-currency records only (KZT)"));
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn standalone_record_create_and_update_reject_non_positive_amounts() {
+        let db_path = create_balance_test_db();
+        let create_error = create_standalone_record(
+            &db_path,
+            &StandaloneRecordCreatePayload {
+                record_type: "income".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "0".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "0".to_owned(),
+                category: "Salary".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            },
+        )
+        .unwrap_err();
+        assert!(create_error.contains("Record amount must be positive"));
+
+        let update_error = update_standalone_record(
+            &db_path,
+            2,
+            &StandaloneRecordUpdatePayload {
+                record_type: "expense".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "-1".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "-1".to_owned(),
+                category: "Food".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            },
+        )
+        .unwrap_err();
+        assert!(update_error.contains("Record amount must be positive"));
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn standalone_record_delete_removes_tags_and_rejects_linked_rows() {
+        let db_path = create_balance_test_db();
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute(
+            "INSERT INTO records (
+                id, type, date, wallet_id, related_debt_id, amount_original,
+                amount_original_minor, amount_base, amount_base_minor, category
+             ) VALUES (6, 'expense', '2026-01-05', 1, 10, 20.0, 2000, 20.0, 2000, 'Debt')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        assert!(
+            update_standalone_record(
+                &db_path,
+                4,
+                &StandaloneRecordUpdatePayload {
+                    record_type: "expense".to_owned(),
+                    date: "2026-01-10".to_owned(),
+                    wallet_id: 1,
+                    amount_original: "10".to_owned(),
+                    currency: "KZT".to_owned(),
+                    rate_at_operation: "1".to_owned(),
+                    amount_base: "10".to_owned(),
+                    category: "Blocked".to_owned(),
+                    description: "".to_owned(),
+                    tags: vec![],
+                },
+            )
+            .unwrap_err()
+            .contains("Only standalone records")
+        );
+        assert!(
+            delete_standalone_record(&db_path, 6)
+                .unwrap_err()
+                .contains("Only standalone records")
+        );
+
+        assert!(delete_standalone_record(&db_path, 2).unwrap());
+        assert!(standalone_record_get_row(&db_path, 2).unwrap().is_none());
+        assert!(tag_names(&db_path).unwrap().is_empty());
         remove_test_db(&db_path);
     }
 
