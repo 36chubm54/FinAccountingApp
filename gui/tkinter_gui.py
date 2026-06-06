@@ -12,6 +12,7 @@ from typing import Any, cast
 
 from app.services import CurrencyService
 from app_paths import get_icons_dir
+from app_single_instance import SingleInstance
 from bootstrap import bootstrap_repository
 from domain.import_policy import ImportPolicy
 from gui.controllers import FinancialController
@@ -370,9 +371,19 @@ class FinancialApp(tk.Tk):
         launch_owner_installer_and_exit(self, installer_path)
 
 
-def main(*, initial_base_currency: str | None = None) -> None:
+def main(
+    *,
+    initial_base_currency: str | None = None,
+    single_instance: SingleInstance | None = None,
+) -> None:
     try:
         app = FinancialApp(initial_base_currency=initial_base_currency)
+        if single_instance is not None:
+
+            def activate_existing_window() -> None:
+                app.after(0, lambda: activate_main_window(app))
+
+            single_instance.set_activation_callback(activate_existing_window)
         app.mainloop()
     except KeyboardInterrupt:
         show_info(

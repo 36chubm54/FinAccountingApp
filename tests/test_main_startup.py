@@ -5,6 +5,20 @@ from types import ModuleType
 import main as app_main
 
 
+class FakeSingleInstance:
+    def __init__(self) -> None:
+        self.callback = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        pass
+
+    def set_activation_callback(self, callback) -> None:
+        self.callback = callback
+
+
 def test_run_app_passes_initial_base_currency(monkeypatch) -> None:
     called: list[str] = []
 
@@ -25,6 +39,7 @@ def test_run_app_passes_initial_base_currency(monkeypatch) -> None:
         str(kwargs.get("initial_base_currency"))
     )
 
+    monkeypatch.setattr(app_main, "acquire_single_instance", lambda: FakeSingleInstance())
     monkeypatch.setitem(__import__("sys").modules, "gui.i18n", i18n)
     monkeypatch.setitem(__import__("sys").modules, "gui.shell.windowing.window", shell_window)
     monkeypatch.setitem(__import__("sys").modules, "gui.ui_theme", ui_theme)
@@ -53,6 +68,7 @@ def test_run_app_stops_when_initial_setup_is_cancelled(monkeypatch) -> None:
     tkinter_gui = ModuleType("gui.tkinter_gui")
     tkinter_gui.main = lambda **kwargs: called.append("launched")  # type: ignore[attr-defined]
 
+    monkeypatch.setattr(app_main, "acquire_single_instance", lambda: FakeSingleInstance())
     monkeypatch.setitem(__import__("sys").modules, "gui.i18n", i18n)
     monkeypatch.setitem(__import__("sys").modules, "gui.shell.windowing.window", shell_window)
     monkeypatch.setitem(__import__("sys").modules, "gui.ui_theme", ui_theme)
@@ -61,3 +77,9 @@ def test_run_app_stops_when_initial_setup_is_cancelled(monkeypatch) -> None:
 
     assert app_main.run_app() is False
     assert called == []
+
+
+def test_run_app_stops_when_existing_instance_is_running(monkeypatch) -> None:
+    monkeypatch.setattr(app_main, "acquire_single_instance", lambda: None)
+
+    assert app_main.run_app() is False

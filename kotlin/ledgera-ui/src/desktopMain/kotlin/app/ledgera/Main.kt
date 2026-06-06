@@ -11,7 +11,19 @@ import app.ledgera.shell.AppShellViewModel
 import app.ledgera.theme.LedgeraTheme
 import java.io.File
 
-fun main(args: Array<String>) = application {
+fun main(args: Array<String>) {
+    val singleInstance = SingleInstanceSupport.acquire()
+    if (singleInstance == null) {
+        SingleInstanceSupport.requestActivation()
+        return
+    }
+
+    singleInstance.use {
+        runApplication(args)
+    }
+}
+
+private fun runApplication(args: Array<String>) = application {
     val dbPath = args.asList().windowed(2, 1)
         .firstOrNull { it.first() == "--db-path" }
         ?.last()
