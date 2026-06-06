@@ -2,11 +2,16 @@ package app.ledgera.operations
 
 import app.ledgera.bridge.EngineAdapter
 import app.ledgera.model.CreateOperationRequest
+import app.ledgera.model.CreateTransferRequest
+import app.ledgera.model.CreateTransferResult
+import app.ledgera.model.CreateWalletRequest
 import app.ledgera.model.EngineStatus
 import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationRecord
 import app.ledgera.model.UpdateOperationRequest
 import app.ledgera.model.WalletOption
+import app.ledgera.model.WalletSettingsItem
+import java.util.Locale
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlinx.coroutines.CoroutineScope
@@ -274,6 +279,100 @@ class OperationsViewModelTest {
     }
 
     @Test
+    fun createTransferRejectsSameWalletBeforeEngineCall() {
+        val adapter = FakeEngineAdapter()
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.createTransfer(validTransferRequest(toWalletId = 1))
+
+        assertEquals("Transfer wallets must be different", viewModel.state.value.error)
+        assertEquals(0, adapter.createTransferCalls)
+    }
+
+    @Test
+    fun createTransferRejectsInvalidAmountBeforeEngineCall() {
+        val adapter = FakeEngineAdapter()
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.createTransfer(validTransferRequest(amount = "0"))
+
+        assertEquals("Amount must be a positive number", viewModel.state.value.error)
+        assertEquals(0, adapter.createTransferCalls)
+    }
+
+    @Test
+    fun createTransferRejectsNegativeCommissionBeforeEngineCall() {
+        val adapter = FakeEngineAdapter()
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.createTransfer(validTransferRequest(commissionAmount = "-1"))
+
+        assertEquals("Amount must be zero or a positive number", viewModel.state.value.error)
+        assertEquals(0, adapter.createTransferCalls)
+    }
+
+    @Test
+    fun createTransferRejectsNonBaseCurrencyBeforeEngineCall() {
+        val adapter = FakeEngineAdapter()
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.createTransfer(validTransferRequest(currency = "USD"))
+
+        assertEquals(
+            "Transfer creator currently supports base-currency transfers only (KZT)",
+            viewModel.state.value.error,
+        )
+        assertEquals(0, adapter.createTransferCalls)
+    }
+
+    @Test
+    fun createTransferSuccessRefreshesStateAndShowsNotice() {
+        val adapter = FakeEngineAdapter(records = mutableListOf())
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.createTransfer(validTransferRequest())
+
+        assertEquals(1, adapter.createTransferCalls)
+        assertEquals("Transfer created (id=42): Cash -> Card, 10 KZT", viewModel.state.value.notice)
+        assertEquals(
+            listOf("90.00", "10.00"),
+            viewModel.state.value.wallets.map { it.balance },
+        )
+        assertEquals(
+            listOf("expense:42", "income:42"),
+            viewModel.state.value.records.map { "${it.type}:${it.transferId}" },
+        )
+        assertEquals(2, adapter.refreshCalls)
+    }
+
+    @Test
+    fun selectTransferLinkedRecordShowsReadOnlyNotice() {
+        val adapter = FakeEngineAdapter(
+            records = mutableListOf(operationRecord(id = 7, transferId = 42, category = "Transfer"))
+        )
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.select(7)
+
+        assertEquals("Transfer-linked rows are read-only in this beta.1 slice", viewModel.state.value.notice)
+        assertEquals(null, viewModel.state.value.editDraft)
+        assertEquals(null, viewModel.state.value.selectedRecordId)
+    }
+
+    @Test
+    fun createTransferEngineErrorSurfacesInState() {
+        val adapter = FakeEngineAdapter(transferError = IllegalStateException("insufficient funds"))
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.createTransfer(validTransferRequest())
+
+        assertEquals("insufficient funds", viewModel.state.value.error)
+        assertEquals(null, viewModel.state.value.notice)
+    }
+
+    @Test
     fun selectPopulatesEditDraft() {
         val adapter = FakeEngineAdapter(
             records = mutableListOf(
@@ -461,16 +560,26 @@ private class FakeEngineAdapter(
     private val records: MutableList<OperationRecord> = mutableListOf(operationRecord(id = 1)),
     private val createError: Throwable? = null,
     private val updateError: Throwable? = null,
+    private val transferError: Throwable? = null,
+    private val wallets: MutableList<WalletOption> = mutableListOf(
+        WalletOption(id = 1, name = "Cash", currency = "KZT", balance = "100.00"),
+        WalletOption(id = 2, name = "Card", currency = "KZT", balance = "0.00"),
+    ),
 ) : EngineAdapter {
     var createCalls = 0
+    var createTransferCalls = 0
     var updateCalls = 0
     var deleteCalls = 0
+    var refreshCalls = 0
 
     override suspend fun status() = EngineStatus(true, "test.db", "ready")
 
     override suspend fun baseCurrency(): String = "KZT"
 
-    override suspend fun listRecords(filter: OperationFilter): List<OperationRecord> = records.toList()
+    override suspend fun listRecords(filter: OperationFilter): List<OperationRecord> {
+        refreshCalls += 1
+        return records.toList()
+    }
 
     override suspend fun getRecord(recordId: Long): OperationRecord? =
         records.firstOrNull { it.id == recordId }
@@ -523,15 +632,86 @@ private class FakeEngineAdapter(
         return records.removeIf { it.id == recordId }
     }
 
+    override suspend fun createTransfer(request: CreateTransferRequest): CreateTransferResult {
+        transferError?.let { throw it }
+        createTransferCalls += 1
+        val transferId = 42L
+        val amount = request.amount.toDouble()
+        replaceWalletBalance(request.fromWalletId) { balance -> balance - amount }
+        replaceWalletBalance(request.toWalletId) { balance -> balance + amount }
+        records += operationRecord(
+            id = (records.maxOfOrNull { it.id } ?: 0) + 1,
+            type = "expense",
+            walletId = request.fromWalletId,
+            amountOriginal = request.amount,
+            amountBase = request.amount,
+            category = "Transfer",
+            description = request.description,
+            transferId = transferId,
+        )
+        records += operationRecord(
+            id = (records.maxOfOrNull { it.id } ?: 0) + 1,
+            type = "income",
+            walletId = request.toWalletId,
+            amountOriginal = request.amount,
+            amountBase = request.amount,
+            category = "Transfer",
+            description = request.description,
+            transferId = transferId,
+        )
+        return CreateTransferResult(transferId = transferId)
+    }
+
     override suspend fun listTags(): List<String> = listOf("home")
 
     override suspend fun listCategories(recordType: String): List<String> = listOf("Food")
 
     override suspend fun listWallets(): List<WalletOption> = emptyList()
 
-    override suspend fun walletBalances(): List<WalletOption> =
-        listOf(WalletOption(id = 1, name = "Cash", currency = "KZT"))
+    override suspend fun walletBalances(): List<WalletOption> = wallets.toList()
+
+    override suspend fun listWalletsForSettings(): List<WalletSettingsItem> = emptyList()
+
+    override suspend fun createWallet(request: CreateWalletRequest): WalletSettingsItem =
+        WalletSettingsItem(
+            id = 1,
+            name = request.name,
+            currency = request.currency,
+            initialBalance = request.initialBalance,
+            balance = request.initialBalance,
+            system = false,
+            allowNegative = request.allowNegative,
+            active = true,
+        )
+
+    private fun replaceWalletBalance(walletId: Long, update: (Double) -> Double) {
+        val index = wallets.indexOfFirst { it.id == walletId }
+        if (index < 0) {
+            return
+        }
+        val wallet = wallets[index]
+        wallets[index] = wallet.copy(balance = String.format(Locale.US, "%.2f", update(wallet.balance.toDouble())))
+    }
 }
+
+private fun validTransferRequest(
+    fromWalletId: Long = 1,
+    toWalletId: Long = 2,
+    date: String = "2026-01-01",
+    amount: String = "10",
+    currency: String = "KZT",
+    commissionAmount: String = "0",
+    commissionCurrency: String = "KZT",
+) = CreateTransferRequest(
+    fromWalletId = fromWalletId,
+    toWalletId = toWalletId,
+    date = date,
+    amount = amount,
+    currency = currency,
+    description = "Move",
+    commissionAmount = commissionAmount,
+    commissionCurrency = commissionCurrency,
+)
 
 private fun operationRecord(
     id: Long,
@@ -545,11 +725,15 @@ private fun operationRecord(
     category: String = "General",
     description: String = "",
     tags: List<String> = emptyList(),
+    transferId: Long? = null,
+    relatedDebtId: Long? = null,
 ) = OperationRecord(
     id = id,
     type = type,
     date = date,
     walletId = walletId,
+    transferId = transferId,
+    relatedDebtId = relatedDebtId,
     amountOriginal = amountOriginal,
     currency = currency,
     rateAtOperation = rateAtOperation,

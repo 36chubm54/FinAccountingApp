@@ -1,0 +1,217 @@
+package app.ledgera.settings
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import app.ledgera.model.CreateWalletRequest
+import app.ledgera.model.WalletSettingsItem
+
+@Composable
+fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) {
+    val state by viewModel.state.collectAsState()
+    var showCreateWalletDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        viewModel.refresh()
+    }
+    LaunchedEffect(showCreateWalletDialog, state.notice) {
+        if (showCreateWalletDialog && state.notice?.startsWith("Wallet created") == true) {
+            showCreateWalletDialog = false
+        }
+    }
+
+    Column(
+        modifier = modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text("Settings", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        state.notice?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+
+        WalletsSection(
+            wallets = state.wallets,
+            loading = state.loading,
+            onAddWallet = {
+                viewModel.clearFeedback()
+                showCreateWalletDialog = true
+            },
+        )
+    }
+
+    if (showCreateWalletDialog) {
+        CreateWalletDialog(
+            baseCurrency = state.baseCurrency,
+            engineError = state.error,
+            submitting = state.loading,
+            onSubmit = viewModel::createWallet,
+            onCancel = { showCreateWalletDialog = false },
+        )
+    }
+}
+
+@Composable
+private fun WalletsSection(
+    wallets: List<WalletSettingsItem>,
+    loading: Boolean,
+    onAddWallet: () -> Unit,
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Wallets", style = MaterialTheme.typography.titleMedium)
+                Button(onClick = onAddWallet) { Text("Add wallet") }
+            }
+            if (loading) {
+                CircularProgressIndicator()
+            } else if (wallets.isEmpty()) {
+                Text("No wallets found in the selected database.")
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(wallets, key = { it.id }) { wallet ->
+                        WalletRow(wallet)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WalletRow(wallet: WalletSettingsItem) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(wallet.name, fontWeight = FontWeight.SemiBold)
+                Text("${wallet.balance} ${wallet.currency}")
+            }
+            Text("Initial ${wallet.initialBalance} ${wallet.currency}")
+            Text(
+                listOfNotNull(
+                    if (wallet.system) "system" else null,
+                    if (wallet.allowNegative) "allow negative" else "no negative",
+                    if (wallet.active) "active" else "inactive",
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CreateWalletDialog(
+    baseCurrency: String,
+    engineError: String?,
+    submitting: Boolean,
+    onSubmit: (CreateWalletRequest) -> Unit,
+    onCancel: () -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var initialBalance by remember { mutableStateOf("0") }
+    var allowNegative by remember { mutableStateOf(false) }
+    val currency = baseCurrency.ifBlank { "KZT" }
+    val validationError = SettingsValidation.validateWalletFields(
+        name = name,
+        currency = currency,
+        initialBalance = initialBalance,
+        baseCurrency = baseCurrency,
+    )
+
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Add wallet") },
+        text = {
+            Column(
+                modifier = Modifier.width(DialogContentWidth).heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Name") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = currency,
+                    onValueChange = {},
+                    label = { Text("Currency") },
+                    enabled = false,
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = initialBalance,
+                    onValueChange = { initialBalance = it },
+                    label = { Text("Initial balance") },
+                    singleLine = true,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = allowNegative, onCheckedChange = { allowNegative = it })
+                    Text("Allow negative balance")
+                }
+                Spacer(Modifier.height(2.dp))
+                (validationError ?: engineError)?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onSubmit(
+                        CreateWalletRequest(
+                            name = name,
+                            currency = currency,
+                            initialBalance = initialBalance.ifBlank { "0" },
+                            allowNegative = allowNegative,
+                        )
+                    )
+                },
+                enabled = validationError == null && !submitting,
+            ) {
+                Text(if (submitting) "Creating..." else "Create")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Cancel") }
+        },
+    )
+}
+
+private val DialogContentWidth = 360.dp

@@ -1,6 +1,7 @@
 use ledgera_engine_storage::{
     RecordFilterPayload, RecordRow, StandaloneRecordCreatePayload, StandaloneRecordUpdatePayload,
-    WalletBalanceRow, WalletRow, base_currency_code, create_standalone_record, current_local_date,
+    TransferCreatePayload, WalletBalanceRow, WalletCreatePayload, WalletRow, base_currency_code,
+    create_standalone_record, create_transfer, create_wallet, current_local_date,
     delete_standalone_record, distinct_record_categories, filtered_record_list_rows,
     standalone_record_get_row, tag_names, update_standalone_record, wallet_balance_rows,
     wallet_list_rows,
@@ -47,11 +48,38 @@ pub struct UpdateRecordRequest {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct CreateTransferRequest {
+    pub from_wallet_id: i64,
+    pub to_wallet_id: i64,
+    pub date: String,
+    pub amount: String,
+    pub currency: String,
+    pub description: String,
+    pub commission_amount: String,
+    pub commission_currency: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateTransferResult {
+    pub transfer_id: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateWalletRequest {
+    pub name: String,
+    pub currency: String,
+    pub initial_balance: String,
+    pub allow_negative: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct RecordDto {
     pub id: i64,
     pub record_type: String,
     pub date: String,
     pub wallet_id: i64,
+    pub transfer_id: Option<i64>,
+    pub related_debt_id: Option<i64>,
     pub amount_original: String,
     pub currency: String,
     pub rate_at_operation: String,
@@ -144,7 +172,7 @@ impl LedgeraEngine {
         filtered_record_list_rows(&self.db_path, &payload)
             .map(|rows| {
                 rows.into_iter()
-                    .filter(|row| row.transfer_id.is_none() && row.related_debt_id.is_none())
+                    .filter(|row| row.related_debt_id.is_none())
                     .map(record_to_dto)
                     .collect()
             })
@@ -206,6 +234,27 @@ impl LedgeraEngine {
         delete_standalone_record(&self.db_path, record_id).map_err(storage_error)
     }
 
+    pub fn create_transfer(
+        &self,
+        request: CreateTransferRequest,
+    ) -> Result<CreateTransferResult, LedgeraEngineError> {
+        let payload = TransferCreatePayload {
+            from_wallet_id: request.from_wallet_id,
+            to_wallet_id: request.to_wallet_id,
+            date: request.date,
+            amount: request.amount,
+            currency: request.currency,
+            description: request.description,
+            commission_amount: request.commission_amount,
+            commission_currency: request.commission_currency,
+        };
+        create_transfer(&self.db_path, &payload)
+            .map(|row| CreateTransferResult {
+                transfer_id: row.id,
+            })
+            .map_err(storage_error)
+    }
+
     pub fn list_tags(&self) -> Result<Vec<String>, LedgeraEngineError> {
         tag_names(&self.db_path).map_err(storage_error)
     }
@@ -217,6 +266,21 @@ impl LedgeraEngine {
     pub fn list_wallets(&self) -> Result<Vec<WalletDto>, LedgeraEngineError> {
         wallet_list_rows(&self.db_path)
             .map(|rows| rows.into_iter().map(wallet_to_dto).collect())
+            .map_err(storage_error)
+    }
+
+    pub fn create_wallet(
+        &self,
+        request: CreateWalletRequest,
+    ) -> Result<WalletDto, LedgeraEngineError> {
+        let payload = WalletCreatePayload {
+            name: request.name,
+            currency: request.currency,
+            initial_balance: request.initial_balance,
+            allow_negative: request.allow_negative,
+        };
+        create_wallet(&self.db_path, &payload)
+            .map(wallet_to_dto)
             .map_err(storage_error)
     }
 
@@ -356,6 +420,8 @@ fn record_to_dto(row: RecordRow) -> RecordDto {
         record_type: row.record_type,
         date: row.date,
         wallet_id: row.wallet_id,
+        transfer_id: row.transfer_id,
+        related_debt_id: row.related_debt_id,
         amount_original: format_money(row.amount_original),
         currency: row.currency,
         rate_at_operation: format_rate(row.rate_at_operation),
@@ -478,6 +544,8 @@ mod tests {
             );
             INSERT INTO wallets (id, name, currency, initial_balance, initial_balance_minor, is_active)
             VALUES (1, 'Main', 'KZT', 100.0, 10000, 1);
+            INSERT INTO wallets (id, name, currency, initial_balance, initial_balance_minor, is_active)
+            VALUES (2, 'Savings', 'KZT', 0.0, 0, 1);
             ",
         )
         .unwrap();
@@ -766,6 +834,102 @@ mod tests {
                 .to_string()
                 .contains("Currency code must contain 3 letters")
         );
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_creates_base_currency_transfer() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+
+        let result = engine
+            .create_transfer(CreateTransferRequest {
+                from_wallet_id: 1,
+                to_wallet_id: 2,
+                date: "2026-01-01".to_owned(),
+                amount: "20".to_owned(),
+                currency: "KZT".to_owned(),
+                description: "Move".to_owned(),
+                commission_amount: "0".to_owned(),
+                commission_currency: "KZT".to_owned(),
+            })
+            .unwrap();
+
+        assert_eq!(result.transfer_id, 1);
+        assert_eq!(engine.wallet_balance(1).unwrap().unwrap().balance, "80.00");
+        let records = engine.list_records(RecordFilterDto::default()).unwrap();
+        assert_eq!(records.len(), 2);
+        assert!(records.iter().any(|record| {
+            record.record_type == "expense" && record.transfer_id == Some(result.transfer_id)
+        }));
+        assert!(records.iter().any(|record| {
+            record.record_type == "income" && record.transfer_id == Some(result.transfer_id)
+        }));
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_creates_wallet() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+
+        let wallet = engine
+            .create_wallet(CreateWalletRequest {
+                name: "Savings".to_owned(),
+                currency: "kzt".to_owned(),
+                initial_balance: "12.345".to_owned(),
+                allow_negative: true,
+            })
+            .unwrap();
+
+        assert_eq!(wallet.id, 3);
+        assert_eq!(wallet.name, "Savings");
+        assert_eq!(wallet.currency, "KZT");
+        assert_eq!(wallet.initial_balance, "12.35");
+        assert!(!wallet.system);
+        assert!(wallet.allow_negative);
+        assert!(wallet.is_active);
+        assert_eq!(engine.list_wallets().unwrap().len(), 3);
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_surfaces_wallet_storage_errors() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+
+        let error = engine
+            .create_wallet(CreateWalletRequest {
+                name: " ".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "0".to_owned(),
+                allow_negative: false,
+            })
+            .unwrap_err();
+
+        assert!(error.to_string().contains("Wallet name is required"));
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_surfaces_transfer_storage_errors() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+
+        let error = engine
+            .create_transfer(CreateTransferRequest {
+                from_wallet_id: 1,
+                to_wallet_id: 1,
+                date: "2026-01-01".to_owned(),
+                amount: "20".to_owned(),
+                currency: "KZT".to_owned(),
+                description: "Move".to_owned(),
+                commission_amount: "0".to_owned(),
+                commission_currency: "KZT".to_owned(),
+            })
+            .unwrap_err();
+
+        assert!(error.to_string().contains("must be different"));
         fs::remove_file(db_path).ok();
     }
 

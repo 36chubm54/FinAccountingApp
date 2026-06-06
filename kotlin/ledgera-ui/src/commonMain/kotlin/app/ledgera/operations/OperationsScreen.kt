@@ -11,9 +11,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -36,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.ledgera.model.CreateOperationRequest
+import app.ledgera.model.CreateTransferRequest
 import app.ledgera.model.OperationDraft
 import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationRecord
@@ -45,6 +48,7 @@ import app.ledgera.model.WalletOption
 fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifier) {
     val state by viewModel.state.collectAsState()
     var showCreateDialog by remember { mutableStateOf(false) }
+    var showTransferDialog by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         viewModel.refresh()
@@ -52,6 +56,11 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
     LaunchedEffect(showCreateDialog, state.notice) {
         if (showCreateDialog && state.notice == "Operation added") {
             showCreateDialog = false
+        }
+    }
+    LaunchedEffect(showTransferDialog, state.notice) {
+        if (showTransferDialog && state.notice?.startsWith("Transfer created") == true) {
+            showTransferDialog = false
         }
     }
 
@@ -79,10 +88,14 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 AddOperationLauncher(
-                    walletCount = state.wallets.size,
-                    onClick = {
+                    wallets = state.wallets,
+                    onAddOperation = {
                         viewModel.clearFeedback()
                         showCreateDialog = true
+                    },
+                    onAddTransfer = {
+                        viewModel.clearFeedback()
+                        showTransferDialog = true
                     },
                 )
             }
@@ -98,15 +111,15 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
                 } else if (state.records.isEmpty()) {
                     Text("No operations for the selected filter.")
                 } else {
+                    val journalItems = operationJournalItems(state.records, state.selectedRecordId)
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        items(state.records, key = { it.id }) { record ->
+                        items(journalItems, key = { it.key }) { item ->
                             OperationRow(
-                                record = record,
-                                selected = state.selectedRecordId == record.id,
-                                onClick = { viewModel.select(record.id) },
+                                item = item,
+                                onClick = { item.selectableRecordId?.let(viewModel::select) },
                             )
                         }
                     }
@@ -125,6 +138,16 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
                 viewModel.create(request)
             },
             onCancel = { showCreateDialog = false },
+        )
+    }
+    if (showTransferDialog) {
+        CreateTransferDialog(
+            wallets = state.wallets,
+            baseCurrency = state.baseCurrency,
+            engineError = state.error,
+            submitting = state.loading,
+            onSubmit = viewModel::createTransfer,
+            onCancel = { showTransferDialog = false },
         )
     }
     state.editDraft?.let { draft ->
@@ -153,13 +176,29 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun AddOperationLauncher(walletCount: Int, onClick: () -> Unit) {
+private fun AddOperationLauncher(
+    wallets: List<WalletOption>,
+    onAddOperation: () -> Unit,
+    onAddTransfer: () -> Unit,
+) {
+    val walletCount = wallets.size
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Operations", style = MaterialTheme.typography.titleMedium)
             Text("$walletCount active wallet${if (walletCount == 1) "" else "s"} available.")
-            Button(onClick = onClick, enabled = walletCount > 0) {
-                Text("Add operation")
+            wallets.forEach { wallet ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(wallet.name)
+                    Text("${wallet.balance} ${wallet.currency}")
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onAddOperation, enabled = walletCount > 0) {
+                    Text("Add operation")
+                }
+                Button(onClick = onAddTransfer, enabled = walletCount >= 2) {
+                    Text("Add transfer")
+                }
             }
         }
     }
@@ -192,19 +231,24 @@ private fun OperationFilters(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
+                modifier = Modifier.weight(1f),
                 value = filter.startDate.orEmpty(),
                 onValueChange = { onFilterChanged(filter.copy(startDate = it.ifBlank { null })) },
                 label = { Text("From") },
                 singleLine = true,
             )
             OutlinedTextField(
+                modifier = Modifier.weight(1f),
                 value = filter.endDate.orEmpty(),
                 onValueChange = { onFilterChanged(filter.copy(endDate = it.ifBlank { null })) },
                 label = { Text("To") },
                 singleLine = true,
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             FilterChip(
                 selected = filter.walletId == null,
                 onClick = { onFilterChanged(filter.copy(walletId = null)) },
@@ -220,6 +264,170 @@ private fun OperationFilters(
         }
         if (categories.isNotEmpty()) {
             Text("Categories: ${categories.joinToString(", ")}", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun CreateTransferDialog(
+    wallets: List<WalletOption>,
+    baseCurrency: String,
+    engineError: String?,
+    submitting: Boolean,
+    onSubmit: (CreateTransferRequest) -> Unit,
+    onCancel: () -> Unit,
+) {
+    var fromWalletId by remember { mutableStateOf(wallets.firstOrNull()?.id ?: 0L) }
+    var toWalletId by remember { mutableStateOf(wallets.drop(1).firstOrNull()?.id ?: 0L) }
+    var date by remember { mutableStateOf("2026-01-01") }
+    var amount by remember { mutableStateOf("") }
+    var currency by remember { mutableStateOf(baseCurrency) }
+    var commissionAmount by remember { mutableStateOf("0") }
+    var commissionCurrency by remember { mutableStateOf(baseCurrency) }
+    var description by remember { mutableStateOf("") }
+
+    LaunchedEffect(wallets, baseCurrency) {
+        if (wallets.none { it.id == fromWalletId }) {
+            fromWalletId = wallets.firstOrNull()?.id ?: 0L
+        }
+        if (wallets.none { it.id == toWalletId } || toWalletId == fromWalletId) {
+            toWalletId = wallets.firstOrNull { it.id != fromWalletId }?.id ?: 0L
+        }
+        if (currency.isBlank()) {
+            currency = baseCurrency
+        }
+        if (commissionCurrency.isBlank()) {
+            commissionCurrency = baseCurrency
+        }
+    }
+
+    val validationError = OperationValidation.validateTransferFields(
+        fromWalletId = fromWalletId,
+        toWalletId = toWalletId,
+        date = date,
+        amount = amount,
+        currency = currency,
+        commissionAmount = commissionAmount,
+        commissionCurrency = commissionCurrency,
+        baseCurrency = baseCurrency,
+    )
+
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Add transfer") },
+        text = {
+            Column(
+                modifier = dialogFormModifier(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                if (wallets.size < 2) {
+                    Text(
+                        "At least two active wallets are required to create a transfer.",
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                } else {
+                    Text("From wallet", style = MaterialTheme.typography.labelLarge)
+                    WalletChips(wallets, fromWalletId) { wallet ->
+                        fromWalletId = wallet.id
+                        if (toWalletId == wallet.id) {
+                            toWalletId = wallets.firstOrNull { it.id != wallet.id }?.id ?: 0L
+                        }
+                    }
+                    Text("To wallet", style = MaterialTheme.typography.labelLarge)
+                    WalletChips(wallets, toWalletId) { wallet ->
+                        toWalletId = wallet.id
+                    }
+                }
+                OutlinedTextField(
+                    modifier = dialogFieldModifier(),
+                    value = date,
+                    onValueChange = { date = it },
+                    label = { Text("Date YYYY-MM-DD") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    modifier = dialogFieldModifier(),
+                    value = amount,
+                    onValueChange = { amount = it },
+                    label = { Text("Amount") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    modifier = dialogFieldModifier(),
+                    value = currency,
+                    onValueChange = { currency = OperationValidation.normalizeCurrency(it) },
+                    label = { Text("Currency") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    modifier = dialogFieldModifier(),
+                    value = commissionAmount,
+                    onValueChange = { commissionAmount = it },
+                    label = { Text("Commission") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    modifier = dialogFieldModifier(),
+                    value = commissionCurrency,
+                    onValueChange = { commissionCurrency = OperationValidation.normalizeCurrency(it) },
+                    label = { Text("Commission currency") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    modifier = dialogFieldModifier(),
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description") },
+                    singleLine = true,
+                )
+                (validationError ?: engineError)?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onSubmit(
+                        CreateTransferRequest(
+                            fromWalletId = fromWalletId,
+                            toWalletId = toWalletId,
+                            date = date,
+                            amount = amount,
+                            currency = currency,
+                            description = description,
+                            commissionAmount = commissionAmount.ifBlank { "0" },
+                            commissionCurrency = commissionCurrency.ifBlank { baseCurrency },
+                        )
+                    )
+                },
+                enabled = validationError == null && !submitting,
+            ) {
+                Text(if (submitting) "Creating..." else "Create")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun WalletChips(
+    wallets: List<WalletOption>,
+    selectedWalletId: Long,
+    onWalletChanged: (WalletOption) -> Unit,
+) {
+    Row(
+        modifier = Modifier.width(DialogContentWidth).horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        wallets.forEach { wallet ->
+            FilterChip(
+                selected = wallet.id == selectedWalletId,
+                onClick = { onWalletChanged(wallet) },
+                label = { Text("${wallet.name} · ${wallet.currency}") },
+            )
         }
     }
 }
@@ -345,7 +553,7 @@ private fun CreateOperationForm(
     onCurrencyChanged: (String) -> Unit,
 ) {
     Column(
-        modifier = Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
+        modifier = dialogFormModifier(),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         if (wallets.isEmpty()) {
@@ -354,8 +562,15 @@ private fun CreateOperationForm(
                 color = MaterialTheme.colorScheme.error,
             )
         } else {
-            Text("Wallet", style = MaterialTheme.typography.labelLarge)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(type == "income", { onTypeChanged("income") }, label = { Text("Income") })
+                FilterChip(type == "expense", { onTypeChanged("expense") }, label = { Text("Expense") })
+            }
+            Text("Wallet", style = MaterialTheme.typography.labelLarge)
+            Row(
+                modifier = Modifier.width(DialogContentWidth).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 wallets.forEach { wallet ->
                     FilterChip(
                         selected = wallet.id == walletId,
@@ -365,21 +580,48 @@ private fun CreateOperationForm(
                 }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(type == "income", { onTypeChanged("income") }, label = { Text("Income") })
-            FilterChip(type == "expense", { onTypeChanged("expense") }, label = { Text("Expense") })
-        }
-        OutlinedTextField(date, onDateChanged, label = { Text("Date YYYY-MM-DD") }, singleLine = true)
-        OutlinedTextField(amount, onAmountChanged, label = { Text("Amount") }, singleLine = true)
         OutlinedTextField(
+            modifier = dialogFieldModifier(),
+            value = date,
+            onValueChange = onDateChanged,
+            label = { Text("Date YYYY-MM-DD") },
+            singleLine = true,
+        )
+        OutlinedTextField(
+            modifier = dialogFieldModifier(),
+            value = amount,
+            onValueChange = onAmountChanged,
+            label = { Text("Amount") },
+            singleLine = true,
+        )
+        OutlinedTextField(
+            modifier = dialogFieldModifier(),
             value = currency,
             onValueChange = onCurrencyChanged,
             label = { Text("Currency") },
             singleLine = true,
         )
-        OutlinedTextField(category, onCategoryChanged, label = { Text("Category") }, singleLine = true)
-        OutlinedTextField(description, onDescriptionChanged, label = { Text("Description") }, singleLine = true)
-        OutlinedTextField(tags, onTagsChanged, label = { Text("Tags, comma-separated") }, singleLine = true)
+        OutlinedTextField(
+            modifier = dialogFieldModifier(),
+            value = category,
+            onValueChange = onCategoryChanged,
+            label = { Text("Category") },
+            singleLine = true,
+        )
+        OutlinedTextField(
+            modifier = dialogFieldModifier(),
+            value = description,
+            onValueChange = onDescriptionChanged,
+            label = { Text("Description") },
+            singleLine = true,
+        )
+        OutlinedTextField(
+            modifier = dialogFieldModifier(),
+            value = tags,
+            onValueChange = onTagsChanged,
+            label = { Text("Tags, comma-separated") },
+            singleLine = true,
+        )
         (validationError ?: engineError)?.let {
             Text(it, color = MaterialTheme.colorScheme.error)
         }
@@ -412,7 +654,7 @@ private fun EditOperationDialog(
         title = { Text("Edit operation") },
         text = {
             Column(
-                modifier = Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
+                modifier = dialogFormModifier(),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 EditOperationFields(
@@ -448,7 +690,10 @@ private fun EditOperationFields(
             FilterChip(draft.type == "income", { onDraftChanged(draft.copy(type = "income")) }, label = { Text("Income") })
             FilterChip(draft.type == "expense", { onDraftChanged(draft.copy(type = "expense")) }, label = { Text("Expense") })
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.width(DialogContentWidth).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             wallets.forEach { wallet ->
                 FilterChip(
                     selected = wallet.id == draft.walletId,
@@ -459,19 +704,61 @@ private fun EditOperationFields(
                 )
             }
         }
-        OutlinedTextField(draft.date, { onDraftChanged(draft.copy(date = it)) }, label = { Text("Date YYYY-MM-DD") }, singleLine = true)
-        OutlinedTextField(draft.amountOriginal, { onDraftChanged(draft.copy(amountOriginal = it)) }, label = { Text("Amount") }, singleLine = true)
         OutlinedTextField(
+            modifier = dialogFieldModifier(),
+            value = draft.date,
+            onValueChange = { onDraftChanged(draft.copy(date = it)) },
+            label = { Text("Date YYYY-MM-DD") },
+            singleLine = true,
+        )
+        OutlinedTextField(
+            modifier = dialogFieldModifier(),
+            value = draft.amountOriginal,
+            onValueChange = { onDraftChanged(draft.copy(amountOriginal = it)) },
+            label = { Text("Amount") },
+            singleLine = true,
+        )
+        OutlinedTextField(
+            modifier = dialogFieldModifier(),
             value = draft.currency,
             onValueChange = { onDraftChanged(draft.copy(currency = OperationValidation.normalizeCurrency(it))) },
             label = { Text("Currency") },
             singleLine = true,
         )
-        OutlinedTextField(draft.category, { onDraftChanged(draft.copy(category = it)) }, label = { Text("Category") }, singleLine = true)
-        OutlinedTextField(draft.description, { onDraftChanged(draft.copy(description = it)) }, label = { Text("Description") }, singleLine = true)
-        OutlinedTextField(draft.tagsText, { onDraftChanged(draft.copy(tagsText = it)) }, label = { Text("Tags, comma-separated") }, singleLine = true)
+        OutlinedTextField(
+            modifier = dialogFieldModifier(),
+            value = draft.category,
+            onValueChange = { onDraftChanged(draft.copy(category = it)) },
+            label = { Text("Category") },
+            singleLine = true,
+        )
+        OutlinedTextField(
+            modifier = dialogFieldModifier(),
+            value = draft.description,
+            onValueChange = { onDraftChanged(draft.copy(description = it)) },
+            label = { Text("Description") },
+            singleLine = true,
+        )
+        OutlinedTextField(
+            modifier = dialogFieldModifier(),
+            value = draft.tagsText,
+            onValueChange = { onDraftChanged(draft.copy(tagsText = it)) },
+            label = { Text("Tags, comma-separated") },
+            singleLine = true,
+        )
     }
 }
+
+private val DialogContentWidth = 360.dp
+
+private fun dialogFieldModifier(): Modifier = Modifier.fillMaxWidth()
+
+@Composable
+private fun dialogFormModifier(): Modifier =
+    Modifier
+        .width(DialogContentWidth)
+        .heightIn(max = 560.dp)
+        .verticalScroll(rememberScrollState())
 
 @Composable
 private fun DeleteConfirmDialog(onConfirm: () -> Unit, onCancel: () -> Unit) {
@@ -489,23 +776,30 @@ private fun DeleteConfirmDialog(onConfirm: () -> Unit, onCancel: () -> Unit) {
 }
 
 @Composable
-private fun OperationRow(record: OperationRecord, selected: Boolean, onClick: () -> Unit) {
+private fun OperationRow(item: OperationJournalItem, onClick: () -> Unit) {
     Card(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Column(Modifier.padding(14.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
-                    if (selected) "${record.category} · selected" else record.category,
+                    item.title,
                     fontWeight = FontWeight.SemiBold,
                 )
-                Text("${record.amountOriginal} ${record.currency}")
+                Text(item.amount)
             }
             Spacer(Modifier.height(4.dp))
-            Text("${record.date} · ${record.type} · wallet #${record.walletId}")
-            if (record.description.isNotBlank()) {
-                Text(record.description)
+            Text(item.meta)
+            if (item.transferId != null) {
+                Text(
+                    "Transfer-linked · read-only",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            if (record.tags.isNotEmpty()) {
-                Text(record.tags.joinToString(" ") { "#$it" }, color = MaterialTheme.colorScheme.secondary)
+            if (item.description.isNotBlank()) {
+                Text(item.description)
+            }
+            if (item.tags.isNotEmpty()) {
+                Text(item.tags.joinToString(" ") { "#$it" }, color = MaterialTheme.colorScheme.secondary)
             }
         }
     }

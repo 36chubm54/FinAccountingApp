@@ -106,6 +106,26 @@ pub struct StandaloneRecordUpdatePayload {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct TransferCreatePayload {
+    pub from_wallet_id: i64,
+    pub to_wallet_id: i64,
+    pub date: String,
+    pub amount: String,
+    pub currency: String,
+    pub description: String,
+    pub commission_amount: String,
+    pub commission_currency: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WalletCreatePayload {
+    pub name: String,
+    pub currency: String,
+    pub initial_balance: String,
+    pub allow_negative: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct CategoryMetricRow {
     pub category: String,
     pub total_base: f64,
@@ -494,6 +514,58 @@ pub fn wallet_list_rows(db_path: &str) -> StorageResult<Vec<WalletRow>> {
     Ok(result)
 }
 
+pub fn create_wallet(db_path: &str, payload: &WalletCreatePayload) -> StorageResult<WalletRow> {
+    let mut conn = open_sqlite_connection(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(sqlite_err)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+
+    let name = payload.name.trim();
+    if name.is_empty() {
+        return Err("Wallet name is required".to_owned());
+    }
+    let currency = payload.currency.trim().to_uppercase();
+    validate_currency_code(&currency)?;
+    let base_currency = base_currency_code_in_tx(&tx)?;
+    validate_wallet_base_currency_only(&currency, &base_currency)?;
+
+    let initial_balance_minor = to_minor_units(&payload.initial_balance)?;
+    if initial_balance_minor < 0 {
+        return Err("Initial balance must be zero or a positive number".to_owned());
+    }
+    let initial_balance = quantize_money_text(&payload.initial_balance)?
+        .parse::<f64>()
+        .map_err(|_| "invalid initial_balance".to_owned())?;
+
+    tx.execute(
+        "INSERT INTO wallets (
+            name,
+            currency,
+            initial_balance,
+            initial_balance_minor,
+            system,
+            allow_negative,
+            is_active
+        )
+        VALUES (?1, ?2, ?3, ?4, 0, ?5, 1)",
+        (
+            name,
+            currency.as_str(),
+            initial_balance,
+            initial_balance_minor,
+            i64::from(payload.allow_negative),
+        ),
+    )
+    .map_err(sqlite_err)?;
+    let wallet_id = tx.last_insert_rowid();
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    wallet_list_rows(db_path)?
+        .into_iter()
+        .find(|row| row.id == wallet_id)
+        .ok_or_else(|| format!("Wallet not found: {wallet_id}"))
+}
+
 pub fn transfer_list_rows(db_path: &str) -> StorageResult<Vec<TransferRow>> {
     let conn = open_sqlite_connection(db_path)?;
     let mut stmt = conn
@@ -554,6 +626,163 @@ pub fn transfer_id_by_record_index(db_path: &str, index: i64) -> StorageResult<O
     .optional()
     .map_err(sqlite_err)
     .map(|value| value.flatten())
+}
+
+pub fn create_transfer(
+    db_path: &str,
+    payload: &TransferCreatePayload,
+) -> StorageResult<TransferRow> {
+    let mut conn = open_sqlite_connection(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(sqlite_err)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+
+    if payload.from_wallet_id <= 0 || payload.to_wallet_id <= 0 {
+        return Err("Transfer wallets are required".to_owned());
+    }
+    if payload.from_wallet_id == payload.to_wallet_id {
+        return Err("Transfer wallets must be different".to_owned());
+    }
+    if payload.date.trim().is_empty() {
+        return Err("Transfer date is required".to_owned());
+    }
+    validate_ymd_date(payload.date.trim())?;
+
+    let from_wallet = active_wallet_in_tx(&tx, payload.from_wallet_id, "source")?;
+    active_wallet_in_tx(&tx, payload.to_wallet_id, "target")?;
+
+    let base_currency = base_currency_code_in_tx(&tx)?;
+    let currency = payload.currency.trim().to_uppercase();
+    validate_currency_code(&currency)?;
+    validate_transfer_base_currency_only(&currency, &base_currency)?;
+    let commission_currency = if payload.commission_currency.trim().is_empty() {
+        base_currency.clone()
+    } else {
+        payload.commission_currency.trim().to_uppercase()
+    };
+    validate_currency_code(&commission_currency)?;
+    validate_transfer_base_currency_only(&commission_currency, &base_currency)?;
+
+    let amount_minor = to_minor_units(&payload.amount)?;
+    if amount_minor <= 0 {
+        return Err("Transfer amount must be positive".to_owned());
+    }
+    let commission_text = payload.commission_amount.trim();
+    let commission_minor = if commission_text.is_empty() {
+        0
+    } else {
+        to_minor_units(commission_text)?
+    };
+    if commission_minor < 0 {
+        return Err("Commission amount must be non-negative".to_owned());
+    }
+    if !from_wallet.allow_negative {
+        let balance_minor = wallet_balance_minor_in_tx(&tx, payload.from_wallet_id)?;
+        if balance_minor - amount_minor - commission_minor < 0 {
+            return Err("Insufficient funds in source wallet".to_owned());
+        }
+    }
+
+    let amount_text = quantize_money_text(&payload.amount)?;
+    let amount_value = amount_text
+        .parse::<f64>()
+        .map_err(|_| "invalid transfer amount".to_owned())?;
+    let commission_value = if commission_minor > 0 {
+        quantize_money_text(commission_text)?
+            .parse::<f64>()
+            .map_err(|_| "invalid commission amount".to_owned())?
+    } else {
+        0.0
+    };
+    let rate_text = quantize_rate_text("1")?;
+    let rate_value = rate_text
+        .parse::<f64>()
+        .map_err(|_| "invalid transfer rate".to_owned())?;
+    let description = payload.description.trim();
+
+    tx.execute(
+        "INSERT INTO transfers (
+            from_wallet_id,
+            to_wallet_id,
+            date,
+            amount_original,
+            amount_original_minor,
+            currency,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_base,
+            amount_base_minor,
+            description
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        (
+            payload.from_wallet_id,
+            payload.to_wallet_id,
+            payload.date.trim(),
+            amount_value,
+            amount_minor,
+            currency.as_str(),
+            rate_value,
+            rate_text.as_str(),
+            amount_value,
+            amount_minor,
+            description,
+        ),
+    )
+    .map_err(sqlite_err)?;
+    let transfer_id = tx.last_insert_rowid();
+
+    insert_transfer_record_in_tx(
+        &tx,
+        "expense",
+        payload.date.trim(),
+        payload.from_wallet_id,
+        Some(transfer_id),
+        amount_value,
+        amount_minor,
+        currency.as_str(),
+        rate_value,
+        rate_text.as_str(),
+        "Transfer",
+        description,
+    )?;
+    insert_transfer_record_in_tx(
+        &tx,
+        "income",
+        payload.date.trim(),
+        payload.to_wallet_id,
+        Some(transfer_id),
+        amount_value,
+        amount_minor,
+        currency.as_str(),
+        rate_value,
+        rate_text.as_str(),
+        "Transfer",
+        description,
+    )?;
+    if commission_minor > 0 {
+        insert_transfer_record_in_tx(
+            &tx,
+            "expense",
+            payload.date.trim(),
+            payload.from_wallet_id,
+            None,
+            commission_value,
+            commission_minor,
+            commission_currency.as_str(),
+            rate_value,
+            rate_text.as_str(),
+            "Commission",
+            &format!("[transfer:{transfer_id}]"),
+        )?;
+    }
+
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    transfer_list_rows(db_path)?
+        .into_iter()
+        .find(|row| row.id == transfer_id)
+        .ok_or_else(|| format!("Transfer not found: {transfer_id}"))
 }
 
 fn mandatory_expense_select_sql(conn: &Connection, filter_by_id: bool) -> StorageResult<String> {
@@ -1120,6 +1349,115 @@ fn ensure_standalone_record_exists_in_tx(
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct TransferWallet {
+    id: i64,
+    allow_negative: bool,
+}
+
+fn active_wallet_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    wallet_id: i64,
+    role: &str,
+) -> StorageResult<TransferWallet> {
+    let wallet = tx
+        .query_row(
+            "SELECT id, allow_negative, is_active FROM wallets WHERE id = ?1",
+            [wallet_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)? != 0,
+                    row.get::<_, i64>(2)? != 0,
+                ))
+            },
+        )
+        .optional()
+        .map_err(sqlite_err)?;
+    let Some((id, allow_negative, is_active)) = wallet else {
+        return Err(format!("Transfer {role} wallet not found"));
+    };
+    if !is_active {
+        return Err(format!("Transfer {role} wallet is inactive"));
+    }
+    Ok(TransferWallet { id, allow_negative })
+}
+
+fn wallet_balance_minor_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    wallet_id: i64,
+) -> StorageResult<i64> {
+    let initial_minor = tx
+        .query_row(
+            "SELECT COALESCE(initial_balance_minor, CAST(ROUND(initial_balance * 100.0) AS INTEGER), 0)
+             FROM wallets
+             WHERE id = ?1 AND is_active = 1",
+            [wallet_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(sqlite_err)?;
+    let signed_expr = signed_minor_amount_expr("amount_base", "type");
+    let sql = format!("SELECT COALESCE(SUM({signed_expr}), 0) FROM records WHERE wallet_id = ?1");
+    let delta_minor = tx
+        .query_row(&sql, [wallet_id], |row| row.get::<_, i64>(0))
+        .map_err(sqlite_err)?;
+    Ok(initial_minor + delta_minor)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_transfer_record_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    record_type: &str,
+    date: &str,
+    wallet_id: i64,
+    transfer_id: Option<i64>,
+    amount_value: f64,
+    amount_minor: i64,
+    currency: &str,
+    rate_value: f64,
+    rate_text: &str,
+    category: &str,
+    description: &str,
+) -> StorageResult<()> {
+    tx.execute(
+        "INSERT INTO records (
+            type,
+            date,
+            wallet_id,
+            transfer_id,
+            related_debt_id,
+            amount_original,
+            amount_original_minor,
+            currency,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_base,
+            amount_base_minor,
+            category,
+            description,
+            period
+        )
+        VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL)",
+        (
+            record_type,
+            date,
+            wallet_id,
+            transfer_id,
+            amount_value,
+            amount_minor,
+            currency,
+            rate_value,
+            rate_text,
+            amount_value,
+            amount_minor,
+            category,
+            description,
+        ),
+    )
+    .map_err(sqlite_err)?;
+    Ok(())
+}
+
 fn base_currency_code_in_tx(tx: &rusqlite::Transaction<'_>) -> StorageResult<String> {
     let has_schema_meta = tx
         .query_row(
@@ -1185,6 +1523,26 @@ fn validate_base_currency_only(currency: &str, base_currency: &str) -> StorageRe
     } else {
         Err(format!(
             "Standalone Operations currently supports base-currency records only ({base_currency})"
+        ))
+    }
+}
+
+fn validate_transfer_base_currency_only(currency: &str, base_currency: &str) -> StorageResult<()> {
+    if currency.eq_ignore_ascii_case(base_currency) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Transfer creator currently supports base-currency transfers only ({base_currency})"
+        ))
+    }
+}
+
+fn validate_wallet_base_currency_only(currency: &str, base_currency: &str) -> StorageResult<()> {
+    if currency.eq_ignore_ascii_case(base_currency) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Kotlin Settings currently supports base-currency wallets only ({base_currency})"
         ))
     }
 }
@@ -1626,6 +1984,95 @@ mod tests {
     }
 
     #[test]
+    fn create_wallet_creates_active_non_system_wallet_with_minor_balance() {
+        let db_path = create_balance_test_db();
+        let wallet = create_wallet(
+            &db_path,
+            &WalletCreatePayload {
+                name: "Savings".to_owned(),
+                currency: "kzt".to_owned(),
+                initial_balance: "10.005".to_owned(),
+                allow_negative: true,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(wallet.id, 4);
+        assert_eq!(wallet.name, "Savings");
+        assert_eq!(wallet.currency, "KZT");
+        assert_eq!(wallet.initial_balance, 10.01);
+        assert!(!wallet.system);
+        assert!(wallet.allow_negative);
+        assert!(wallet.is_active);
+        assert_eq!(
+            wallet_balance_rows(&db_path, None)
+                .unwrap()
+                .into_iter()
+                .find(|row| row.0 == wallet.id)
+                .unwrap(),
+            (4, "Savings".to_owned(), "KZT".to_owned(), 10.01, 0.0)
+        );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn create_wallet_rejects_invalid_inputs() {
+        let db_path = create_balance_test_db();
+        let request = WalletCreatePayload {
+            name: "Savings".to_owned(),
+            currency: "KZT".to_owned(),
+            initial_balance: "0".to_owned(),
+            allow_negative: false,
+        };
+
+        assert!(
+            create_wallet(
+                &db_path,
+                &WalletCreatePayload {
+                    name: " ".to_owned(),
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("Wallet name is required")
+        );
+        assert!(
+            create_wallet(
+                &db_path,
+                &WalletCreatePayload {
+                    initial_balance: "-1".to_owned(),
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("Initial balance must be zero or a positive number")
+        );
+        assert!(
+            create_wallet(
+                &db_path,
+                &WalletCreatePayload {
+                    currency: "AAA".to_owned(),
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("Unsupported currency")
+        );
+        assert!(
+            create_wallet(
+                &db_path,
+                &WalletCreatePayload {
+                    currency: "USD".to_owned(),
+                    ..request
+                }
+            )
+            .unwrap_err()
+            .contains("base-currency wallets only (KZT)")
+        );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
     fn cashflow_excludes_transfer_linked_records() {
         let db_path = create_balance_test_db();
         assert_eq!(
@@ -1980,6 +2427,204 @@ mod tests {
         assert!(delete_standalone_record(&db_path, 2).unwrap());
         assert!(standalone_record_get_row(&db_path, 2).unwrap().is_none());
         assert!(tag_names(&db_path).unwrap().is_empty());
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn create_transfer_creates_transfer_and_linked_records() {
+        let db_path = create_balance_test_db();
+        let created = create_transfer(
+            &db_path,
+            &TransferCreatePayload {
+                from_wallet_id: 1,
+                to_wallet_id: 2,
+                date: "2026-02-01".to_owned(),
+                amount: "125.505".to_owned(),
+                currency: "kzt".to_owned(),
+                description: "Move funds".to_owned(),
+                commission_amount: "".to_owned(),
+                commission_currency: "".to_owned(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(created.id, 2);
+        assert_eq!(created.from_wallet_id, 1);
+        assert_eq!(created.to_wallet_id, 2);
+        assert_eq!(created.amount_original, 125.51);
+        assert_eq!(created.currency, "KZT");
+        assert_eq!(created.description, "Move funds");
+
+        let linked: Vec<RecordRow> =
+            filtered_record_list_rows(&db_path, &RecordFilterPayload::default())
+                .unwrap()
+                .into_iter()
+                .filter(|record| record.transfer_id == Some(created.id))
+                .collect();
+        assert_eq!(linked.len(), 2);
+        assert!(
+            linked
+                .iter()
+                .any(|record| record.record_type == "expense" && record.wallet_id == 1)
+        );
+        assert!(
+            linked
+                .iter()
+                .any(|record| record.record_type == "income" && record.wallet_id == 2)
+        );
+        assert_eq!(
+            wallet_balance_rows(&db_path, None).unwrap()[0],
+            (1, "Cash".to_owned(), "KZT".to_owned(), 1000.0, -275.51)
+        );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn create_transfer_with_commission_creates_standalone_marker_record() {
+        let db_path = create_balance_test_db();
+        let created = create_transfer(
+            &db_path,
+            &TransferCreatePayload {
+                from_wallet_id: 1,
+                to_wallet_id: 2,
+                date: "2026-02-01".to_owned(),
+                amount: "100".to_owned(),
+                currency: "KZT".to_owned(),
+                description: "Move funds".to_owned(),
+                commission_amount: "3.5".to_owned(),
+                commission_currency: "kzt".to_owned(),
+            },
+        )
+        .unwrap();
+
+        let rows = filtered_record_list_rows(&db_path, &RecordFilterPayload::default()).unwrap();
+        let commission = rows
+            .iter()
+            .find(|record| {
+                record.transfer_id.is_none()
+                    && record.description == format!("[transfer:{}]", created.id)
+            })
+            .unwrap();
+        assert_eq!(commission.record_type, "expense");
+        assert_eq!(commission.wallet_id, 1);
+        assert_eq!(commission.amount_base, 3.5);
+        assert_eq!(commission.category, "Commission");
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn create_transfer_rejects_invalid_inputs() {
+        let db_path = create_balance_test_db();
+        let request = TransferCreatePayload {
+            from_wallet_id: 1,
+            to_wallet_id: 2,
+            date: "2026-02-01".to_owned(),
+            amount: "100".to_owned(),
+            currency: "KZT".to_owned(),
+            description: "".to_owned(),
+            commission_amount: "0".to_owned(),
+            commission_currency: "KZT".to_owned(),
+        };
+
+        assert!(
+            create_transfer(
+                &db_path,
+                &TransferCreatePayload {
+                    to_wallet_id: 1,
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("must be different")
+        );
+        assert!(
+            create_transfer(
+                &db_path,
+                &TransferCreatePayload {
+                    to_wallet_id: 3,
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("target wallet is inactive")
+        );
+        assert!(
+            create_transfer(
+                &db_path,
+                &TransferCreatePayload {
+                    to_wallet_id: 99,
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("target wallet not found")
+        );
+        assert!(
+            create_transfer(
+                &db_path,
+                &TransferCreatePayload {
+                    date: "2026-02-30".to_owned(),
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("Date day must be between")
+        );
+        assert!(
+            create_transfer(
+                &db_path,
+                &TransferCreatePayload {
+                    date: "2999-01-01".to_owned(),
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("Date cannot be in the future")
+        );
+        assert!(
+            create_transfer(
+                &db_path,
+                &TransferCreatePayload {
+                    amount: "0".to_owned(),
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("Transfer amount must be positive")
+        );
+        assert!(
+            create_transfer(
+                &db_path,
+                &TransferCreatePayload {
+                    commission_amount: "-1".to_owned(),
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("Commission amount must be non-negative")
+        );
+        assert!(
+            create_transfer(
+                &db_path,
+                &TransferCreatePayload {
+                    currency: "USD".to_owned(),
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("base-currency transfers only (KZT)")
+        );
+        assert!(
+            create_transfer(
+                &db_path,
+                &TransferCreatePayload {
+                    amount: "2000".to_owned(),
+                    ..request
+                }
+            )
+            .unwrap_err()
+            .contains("Insufficient funds")
+        );
         remove_test_db(&db_path);
     }
 

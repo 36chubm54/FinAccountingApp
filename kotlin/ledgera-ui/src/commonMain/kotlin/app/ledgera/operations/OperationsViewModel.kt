@@ -2,6 +2,7 @@ package app.ledgera.operations
 
 import app.ledgera.bridge.OperationsEngine
 import app.ledgera.model.CreateOperationRequest
+import app.ledgera.model.CreateTransferRequest
 import app.ledgera.model.OperationDraft
 import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationRecord
@@ -77,6 +78,24 @@ class OperationsViewModel(
 
     fun select(recordId: Long) {
         val record = mutableState.value.records.firstOrNull { it.id == recordId }
+        if (record?.transferId != null) {
+            mutableState.value = mutableState.value.copy(
+                selectedRecordId = null,
+                editDraft = null,
+                error = null,
+                notice = "Transfer-linked rows are read-only in this beta.1 slice",
+            )
+            return
+        }
+        if (record?.relatedDebtId != null) {
+            mutableState.value = mutableState.value.copy(
+                selectedRecordId = null,
+                editDraft = null,
+                error = null,
+                notice = "Debt-linked rows are read-only in this beta.1 slice",
+            )
+            return
+        }
         mutableState.value = mutableState.value.copy(
             selectedRecordId = recordId,
             editDraft = record?.toDraft(),
@@ -108,6 +127,27 @@ class OperationsViewModel(
             runCatching {
                 engine.createRecord(request)
                 refresh(notice = "Operation added")
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
+    fun createTransfer(request: CreateTransferRequest) {
+        val validationError = validate(request)
+        if (validationError != null) {
+            mutableState.value = mutableState.value.copy(error = validationError, notice = null)
+            return
+        }
+        mutableState.value = mutableState.value.copy(loading = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                val result = engine.createTransfer(request)
+                refresh(notice = transferNotice(result.transferId, request, mutableState.value.wallets))
             }.onFailure { error ->
                 mutableState.value = mutableState.value.copy(
                     loading = false,
@@ -192,6 +232,18 @@ class OperationsViewModel(
             baseCurrency = mutableState.value.baseCurrency,
         )
 
+    private fun validate(request: CreateTransferRequest): String? =
+        OperationValidation.validateTransferFields(
+            fromWalletId = request.fromWalletId,
+            toWalletId = request.toWalletId,
+            date = request.date,
+            amount = request.amount,
+            currency = request.currency,
+            commissionAmount = request.commissionAmount,
+            commissionCurrency = request.commissionCurrency,
+            baseCurrency = mutableState.value.baseCurrency,
+        )
+
     private fun validate(draft: OperationDraft): String? =
         OperationValidation.validateFields(
             type = draft.type,
@@ -203,6 +255,16 @@ class OperationsViewModel(
             tagsText = draft.tagsText,
             baseCurrency = mutableState.value.baseCurrency,
         )
+
+    private fun transferNotice(
+        transferId: Long,
+        request: CreateTransferRequest,
+        wallets: List<WalletOption>,
+    ): String {
+        val fromWallet = wallets.firstOrNull { it.id == request.fromWalletId }?.name ?: "wallet #${request.fromWalletId}"
+        val toWallet = wallets.firstOrNull { it.id == request.toWalletId }?.name ?: "wallet #${request.toWalletId}"
+        return "Transfer created (id=$transferId): $fromWallet -> $toWallet, ${request.amount} ${request.currency}"
+    }
 
     private fun OperationRecord.toDraft(): OperationDraft =
         OperationDraft(

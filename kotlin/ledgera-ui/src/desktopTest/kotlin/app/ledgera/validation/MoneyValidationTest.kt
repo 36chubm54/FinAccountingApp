@@ -19,4 +19,17 @@ class MoneyValidationTest {
         assertEquals(null, MoneyValidation.validatePositiveAmount("1."))
         assertEquals(null, MoneyValidation.validatePositiveAmount("10.005"))
     }
+
+    @Test
+    fun validateNonNegativeAmountAllowsZeroAndPositiveValues() {
+        assertEquals(null, MoneyValidation.validateNonNegativeAmount("0"))
+        assertEquals(null, MoneyValidation.validateNonNegativeAmount("0.004"))
+        assertEquals(null, MoneyValidation.validateNonNegativeAmount("+1.25"))
+    }
+
+    @Test
+    fun validateNonNegativeAmountRejectsInvalidAndNegativeValues() {
+        assertEquals("Amount must be zero or a positive number", MoneyValidation.validateNonNegativeAmount("ten"))
+        assertEquals("Amount must be zero or a positive number", MoneyValidation.validateNonNegativeAmount("-0.01"))
+    }
 }

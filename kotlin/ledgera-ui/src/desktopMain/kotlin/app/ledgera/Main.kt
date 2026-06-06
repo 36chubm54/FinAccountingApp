@@ -10,6 +10,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import app.ledgera.bridge.RustEngineAdapter
 import app.ledgera.operations.OperationsViewModel
+import app.ledgera.settings.SettingsViewModel
 import app.ledgera.shell.AppShell
 import app.ledgera.shell.AppShellViewModel
 import app.ledgera.theme.LedgeraTheme
@@ -50,6 +51,7 @@ private fun runApplication(args: Array<String>) = application {
                     AppShell(
                         viewModel = AppShellViewModel(engine),
                         operationsViewModel = OperationsViewModel(engine),
+                        settingsViewModel = SettingsViewModel(engine),
                     )
                 }
             }

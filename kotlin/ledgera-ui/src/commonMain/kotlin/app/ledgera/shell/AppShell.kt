@@ -26,11 +26,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.ledgera.operations.OperationsScreen
 import app.ledgera.operations.OperationsViewModel
+import app.ledgera.settings.SettingsScreen
+import app.ledgera.settings.SettingsViewModel
 
 @Composable
 fun AppShell(
     viewModel: AppShellViewModel,
     operationsViewModel: OperationsViewModel,
+    settingsViewModel: SettingsViewModel,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsState()
@@ -71,7 +74,7 @@ fun AppShell(
                     DesktopSection.Debts -> PendingSection(state.selectedSection)
                     DesktopSection.Distribution -> PendingSection(state.selectedSection)
                     DesktopSection.Mandatory -> PendingSection(state.selectedSection)
-                    DesktopSection.Settings -> PendingSection(state.selectedSection)
+                    DesktopSection.Settings -> SettingsScreen(settingsViewModel)
                 }
             }
         }

@@ -5,6 +5,8 @@ data class OperationRecord(
     val type: String,
     val date: String,
     val walletId: Long,
+    val transferId: Long? = null,
+    val relatedDebtId: Long? = null,
     val amountOriginal: String,
     val currency: String,
     val rateAtOperation: String,
@@ -52,6 +54,8 @@ data class UpdateOperationRequest(
     val type: String,
     val date: String,
     val walletId: Long,
+    val transferId: Long? = null,
+    val relatedDebtId: Long? = null,
     val amountOriginal: String,
     val currency: String,
     val rateAtOperation: String,
@@ -61,11 +65,44 @@ data class UpdateOperationRequest(
     val tags: List<String> = emptyList(),
 )
 
+data class CreateTransferRequest(
+    val fromWalletId: Long,
+    val toWalletId: Long,
+    val date: String,
+    val amount: String,
+    val currency: String,
+    val description: String,
+    val commissionAmount: String = "0",
+    val commissionCurrency: String = "",
+)
+
+data class CreateTransferResult(
+    val transferId: Long,
+)
+
 data class WalletOption(
     val id: Long,
     val name: String,
     val currency: String,
     val balance: String = "0.00",
+)
+
+data class WalletSettingsItem(
+    val id: Long,
+    val name: String,
+    val currency: String,
+    val initialBalance: String,
+    val balance: String,
+    val system: Boolean,
+    val allowNegative: Boolean,
+    val active: Boolean,
+)
+
+data class CreateWalletRequest(
+    val name: String,
+    val currency: String,
+    val initialBalance: String,
+    val allowNegative: Boolean,
 )
 
 data class EngineStatus(

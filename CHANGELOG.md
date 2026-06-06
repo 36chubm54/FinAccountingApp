@@ -15,6 +15,8 @@ This project adheres to Semantic Versioning.
 - Added shared Kotlin shell state for section selection and Rust engine status/error reporting while preserving the existing Operations workflow.
 - Added Kotlin shell ViewModel coverage for section order, navigation state, engine status mapping, and engine failure mapping.
 - Added beta.1 Kotlin Operations standalone record CRUD for income/expense records, including edit/delete UI, wallet/date/type filters, tag replacement, category/tag lookups, and Rust-side rejection for transfer/debt-linked rows.
+- Added a beta.1 Kotlin Operations base-currency transfer creator through Rust/Kotlin UniFFI, creating the transfer row plus linked source/target records and optional standalone commission marker records.
+- Added a beta.1 Kotlin Settings wallet slice for listing wallets and creating active base-currency wallets through Rust/Kotlin UniFFI.
 
 ### Changed
 
@@ -23,11 +25,14 @@ This project adheres to Semantic Versioning.
 - Reorganized analytics, planning, import, shell, settings, report, operations, backup, export, spreadsheet, finance, and records helpers into clearer package clusters with narrower ownership boundaries.
 - Renamed the Kotlin Desktop runtime framing from alpha.4 to beta.1 and split the Kotlin adapter contract into runtime and operations capability groups so ViewModels depend only on the surfaces they use.
 - Extended the Kotlin UniFFI Operations contract with standalone record get/update/delete methods plus tag and category lookup surfaces.
+- Extended the Kotlin UniFFI Operations contract with creator-only transfer support; transfer edit/delete/list parity and import/export remain pending beta.1 slices.
+- Extended the Kotlin adapter contract with a Settings capability group for wallet list/create flows; wallet edit/delete and broader Settings surfaces remain pending beta.1 slices.
 
 ### Fixed
 
 - Preserved distinct standalone records that have identical stable fields during local sync by treating canonical fingerprints as counts instead of dropping repeated fingerprints within the same inbound batch; repeated pushes remain idempotent against records already present on the receiver.
 - Restored the `utils.backup_utils.json` compatibility seam so backup-export tests that patch `backup_utils.json.dump` still exercise the atomic write path after the backup helper split.
+- Made Kotlin Operations transfer creation visibly reflected in the UI by showing wallet balances, a detailed transfer success notice, and an aggregated read-only transfer journal row with source/target wallet direction.
 
 ### Docs
 
@@ -40,6 +45,8 @@ This project adheres to Semantic Versioning.
 - Validated the beta.1 Kotlin shell with `cargo test --manifest-path rust\ledgera_engine\Cargo.toml -p ledgera_engine_kotlin_ffi --lib --bins`.
 - Validated `:ledgera-ui:desktopTest` from an ASCII `subst` path because the local Windows Gradle/JUnit worker still cannot load test classes reliably from the Cyrillic checkout path.
 - Validated the standalone Operations CRUD slice with targeted `ledgera_engine_storage` record tests and the full `ledgera_engine_kotlin_ffi` lib/bin test gate.
+- Validated the Operations transfer creator slice with targeted `ledgera_engine_storage` transfer tests, the full `ledgera_engine_kotlin_ffi` lib/bin gate, and `:ledgera-ui:desktopTest` from an ASCII `subst` path.
+- Validated the Settings wallet-create slice with targeted `ledgera_engine_storage` wallet tests, the full `ledgera_engine_kotlin_ffi` lib/bin gate, and `:ledgera-ui:desktopTest` from an ASCII `subst` path.
 
 ## [3.0.0-alpha.4] - 2026-06-03
 

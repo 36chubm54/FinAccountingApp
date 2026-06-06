@@ -27,6 +27,11 @@ Current status:
 - Operations standalone record CRUD is wired for income/expense rows, including
   create/list/update/delete, tag replacement, and Rust-side rejection for
   transfer/debt-linked rows.
+- Operations transfer creation is wired for base-currency source/target wallet
+  transfers with optional base-currency commission marker records; transfer
+  edit/delete/list parity remains a later Operations slice.
+- Settings wallet listing and active base-currency wallet creation are wired,
+  which unlocks manual transfer-creator smoke testing on copied ledger DBs.
 - Remaining beta.1 work is capability wiring and screen parity for the other
   Operations flows and the other sections through Rust/Kotlin UniFFI, not a
   Kotlin-to-Python runtime bridge.
