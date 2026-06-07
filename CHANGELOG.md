@@ -39,6 +39,7 @@ This project adheres to Semantic Versioning.
 - Added Kotlin Operations transfer delete UX through a transfer edit action and confirmation dialog, removing linked operation rows and commission markers through Rust storage integrity checks.
 - Clarified in the Kotlin transfer edit dialog that transfer commissions are edited as standalone operations and deleted together with the transfer.
 - Replaced Kotlin Operations delete placeholders with confirmation-backed delete-all and selective-delete flows that preserve unsupported linked records and report skipped rows.
+- Fixed Rust-backed Kotlin wallet creation so the first wallet in a new empty database is marked as the system wallet by default.
 
 ### Docs
 

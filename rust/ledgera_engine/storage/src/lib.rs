@@ -595,6 +595,12 @@ pub fn create_wallet(db_path: &str, payload: &WalletCreatePayload) -> StorageRes
     let initial_balance = quantize_money_text(&payload.initial_balance)?
         .parse::<f64>()
         .map_err(|_| "invalid initial_balance".to_owned())?;
+    let is_first_wallet = tx
+        .query_row("SELECT COUNT(*) FROM wallets", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .map_err(sqlite_err)?
+        == 0;
 
     tx.execute(
         "INSERT INTO wallets (
@@ -606,12 +612,13 @@ pub fn create_wallet(db_path: &str, payload: &WalletCreatePayload) -> StorageRes
             allow_negative,
             is_active
         )
-        VALUES (?1, ?2, ?3, ?4, 0, ?5, 1)",
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
         (
             name,
             currency.as_str(),
             initial_balance,
             initial_balance_minor,
+            i64::from(is_first_wallet),
             i64::from(payload.allow_negative),
         ),
     )
@@ -2864,6 +2871,47 @@ mod tests {
                 .unwrap(),
             (4, "Savings".to_owned(), "KZT".to_owned(), 10.01, 0.0)
         );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn create_wallet_marks_first_wallet_as_system() {
+        let db_path = create_balance_test_db();
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute("DELETE FROM record_tags", []).unwrap();
+        conn.execute("DELETE FROM records", []).unwrap();
+        conn.execute("DELETE FROM mandatory_expenses", []).unwrap();
+        conn.execute("DELETE FROM transfers", []).unwrap();
+        conn.execute("DELETE FROM wallets", []).unwrap();
+        conn.execute("DELETE FROM sqlite_sequence WHERE name = 'wallets'", [])
+            .unwrap();
+        drop(conn);
+
+        let first = create_wallet(
+            &db_path,
+            &WalletCreatePayload {
+                name: "Main".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "0".to_owned(),
+                allow_negative: false,
+            },
+        )
+        .unwrap();
+        let second = create_wallet(
+            &db_path,
+            &WalletCreatePayload {
+                name: "Savings".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "0".to_owned(),
+                allow_negative: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(first.id, 1);
+        assert!(first.system);
+        assert_eq!(second.id, 2);
+        assert!(!second.system);
         remove_test_db(&db_path);
     }
 

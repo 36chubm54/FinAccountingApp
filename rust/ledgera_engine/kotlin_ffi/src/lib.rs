@@ -1357,6 +1357,40 @@ mod tests {
     }
 
     #[test]
+    fn engine_marks_first_created_wallet_as_system() {
+        let db_path = fixture_db();
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute("DELETE FROM wallets", []).unwrap();
+        conn.execute("DELETE FROM sqlite_sequence WHERE name = 'wallets'", [])
+            .unwrap();
+        drop(conn);
+        let engine = LedgeraEngine::new(db_path.clone());
+
+        let first = engine
+            .create_wallet(CreateWalletRequest {
+                name: "Main".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "0".to_owned(),
+                allow_negative: false,
+            })
+            .unwrap();
+        let second = engine
+            .create_wallet(CreateWalletRequest {
+                name: "Savings".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "0".to_owned(),
+                allow_negative: false,
+            })
+            .unwrap();
+
+        assert_eq!(first.id, 1);
+        assert!(first.system);
+        assert_eq!(second.id, 2);
+        assert!(!second.system);
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
     fn engine_deletes_wallet_with_hard_and_soft_actions() {
         let db_path = fixture_db();
         let engine = LedgeraEngine::new(db_path.clone());
