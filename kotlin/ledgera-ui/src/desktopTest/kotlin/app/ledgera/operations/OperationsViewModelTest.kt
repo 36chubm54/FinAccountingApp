@@ -12,6 +12,7 @@ import app.ledgera.model.TransferDetails
 import app.ledgera.model.UpdateOperationRequest
 import app.ledgera.model.UpdateTransferRequest
 import app.ledgera.model.UpdateTransferResult
+import app.ledgera.model.WalletDeleteResult
 import app.ledgera.model.WalletOption
 import app.ledgera.model.WalletSettingsItem
 import java.util.Locale
@@ -863,6 +864,9 @@ private class FakeEngineAdapter(
             allowNegative = request.allowNegative,
             active = true,
         )
+
+    override suspend fun deleteWallet(walletId: Long): WalletDeleteResult =
+        WalletDeleteResult(walletId, "hard_deleted")
 
     private fun replaceWalletBalance(walletId: Long, update: (Double) -> Double) {
         val index = wallets.indexOfFirst { it.id == walletId }

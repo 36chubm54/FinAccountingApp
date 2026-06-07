@@ -12,6 +12,7 @@ import app.ledgera.model.UpdateOperationRequest
 import app.ledgera.model.UpdateTransferRequest
 import app.ledgera.model.UpdateTransferResult
 import app.ledgera.model.WalletOption
+import app.ledgera.model.WalletDeleteResult
 import app.ledgera.model.WalletSettingsItem
 
 interface RuntimeEngine {
@@ -39,6 +40,7 @@ interface SettingsEngine {
     suspend fun baseCurrency(): String
     suspend fun listWalletsForSettings(): List<WalletSettingsItem>
     suspend fun createWallet(request: CreateWalletRequest): WalletSettingsItem
+    suspend fun deleteWallet(walletId: Long): WalletDeleteResult
 }
 
 interface EngineAdapter : RuntimeEngine, OperationsEngine, SettingsEngine

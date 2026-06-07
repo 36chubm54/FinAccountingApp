@@ -140,6 +140,11 @@ data class CreateWalletRequest(
     val allowNegative: Boolean,
 )
 
+data class WalletDeleteResult(
+    val walletId: Long,
+    val action: String,
+)
+
 data class EngineStatus(
     val ok: Boolean,
     val dbPath: String,

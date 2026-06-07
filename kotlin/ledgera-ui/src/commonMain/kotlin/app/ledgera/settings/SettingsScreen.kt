@@ -41,6 +41,7 @@ import app.ledgera.model.WalletSettingsItem
 fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) {
     val state by viewModel.state.collectAsState()
     var showCreateWalletDialog by remember { mutableStateOf(false) }
+    var walletPendingDelete by remember { mutableStateOf<WalletSettingsItem?>(null) }
 
     LaunchedEffect(Unit) {
         viewModel.refresh()
@@ -48,6 +49,15 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
     LaunchedEffect(showCreateWalletDialog, state.notice) {
         if (showCreateWalletDialog && state.notice?.startsWith("Wallet created") == true) {
             showCreateWalletDialog = false
+        }
+    }
+    LaunchedEffect(walletPendingDelete, state.notice) {
+        if (
+            walletPendingDelete != null &&
+            (state.notice?.startsWith("Wallet deleted") == true ||
+                state.notice?.startsWith("Wallet deactivated") == true)
+        ) {
+            walletPendingDelete = null
         }
     }
 
@@ -66,6 +76,10 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
                 viewModel.clearFeedback()
                 showCreateWalletDialog = true
             },
+            onDeleteWallet = { wallet ->
+                viewModel.clearFeedback()
+                walletPendingDelete = wallet
+            },
         )
     }
 
@@ -78,6 +92,15 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
             onCancel = { showCreateWalletDialog = false },
         )
     }
+    walletPendingDelete?.let { wallet ->
+        DeleteWalletConfirmDialog(
+            wallet = wallet,
+            engineError = state.error,
+            submitting = state.loading,
+            onConfirm = { viewModel.deleteWallet(wallet.id) },
+            onCancel = { walletPendingDelete = null },
+        )
+    }
 }
 
 @Composable
@@ -85,6 +108,7 @@ private fun WalletsSection(
     wallets: List<WalletSettingsItem>,
     loading: Boolean,
     onAddWallet: () -> Unit,
+    onDeleteWallet: (WalletSettingsItem) -> Unit,
 ) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -102,7 +126,7 @@ private fun WalletsSection(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(wallets, key = { it.id }) { wallet ->
-                        WalletRow(wallet)
+                        WalletRow(wallet, onDeleteWallet)
                     }
                 }
             }
@@ -111,7 +135,7 @@ private fun WalletsSection(
 }
 
 @Composable
-private fun WalletRow(wallet: WalletSettingsItem) {
+private fun WalletRow(wallet: WalletSettingsItem, onDeleteWallet: (WalletSettingsItem) -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -128,8 +152,47 @@ private fun WalletRow(wallet: WalletSettingsItem) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (wallet.active && !wallet.system) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { onDeleteWallet(wallet) }) {
+                        Text("Delete")
+                    }
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun DeleteWalletConfirmDialog(
+    wallet: WalletSettingsItem,
+    engineError: String?,
+    submitting: Boolean,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Delete wallet") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(wallet.name, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Delete wallet? Empty wallets without history are removed permanently. " +
+                        "Wallets with zero balance and history are deactivated."
+                )
+                engineError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm, enabled = !submitting) {
+                Text(if (submitting) "Deleting..." else "Delete")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable

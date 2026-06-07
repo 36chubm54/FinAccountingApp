@@ -74,6 +74,11 @@ dictionary CreateWalletRequest {
     boolean allow_negative;
 };
 
+dictionary WalletDeleteResultDto {
+    i64 wallet_id;
+    string action;
+};
+
 dictionary RecordDto {
     i64 id;
     string record_type;
@@ -157,6 +162,8 @@ interface LedgeraEngine {
     sequence<WalletDto> list_wallets();
     [Throws=LedgeraEngineError]
     WalletDto create_wallet(CreateWalletRequest request);
+    [Throws=LedgeraEngineError]
+    WalletDeleteResultDto delete_wallet(i64 wallet_id);
     [Throws=LedgeraEngineError]
     sequence<WalletBalanceDto> wallet_balances();
     [Throws=LedgeraEngineError]

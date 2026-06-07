@@ -2,6 +2,7 @@ package app.ledgera.settings
 
 import app.ledgera.bridge.SettingsEngine
 import app.ledgera.model.CreateWalletRequest
+import app.ledgera.model.WalletDeleteResult
 import app.ledgera.model.WalletSettingsItem
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -79,13 +80,69 @@ class SettingsViewModelTest {
         assertEquals("storage failed", viewModel.state.value.error)
         assertEquals(null, viewModel.state.value.notice)
     }
+
+    @Test
+    fun deleteWalletRejectsInvalidIdBeforeEngineCall() {
+        val engine = FakeSettingsEngine()
+        val viewModel = SettingsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.deleteWallet(0)
+
+        assertEquals("Wallet is required", viewModel.state.value.error)
+        assertEquals(0, engine.deleteCalls)
+    }
+
+    @Test
+    fun deleteWalletHardSuccessRefreshesWalletsAndShowsNotice() {
+        val engine = FakeSettingsEngine(
+            wallets = mutableListOf(walletSettingsItem(system = false, balance = "0.00")),
+            deleteAction = "hard_deleted",
+        )
+        val viewModel = SettingsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.deleteWallet(1)
+
+        assertEquals(1, engine.deleteCalls)
+        assertEquals("Wallet deleted (id=1)", viewModel.state.value.notice)
+        assertEquals(emptyList(), viewModel.state.value.wallets)
+    }
+
+    @Test
+    fun deleteWalletSoftSuccessRefreshesWalletsAndShowsNotice() {
+        val engine = FakeSettingsEngine(
+            wallets = mutableListOf(walletSettingsItem(system = false, balance = "0.00")),
+            deleteAction = "soft_deleted",
+        )
+        val viewModel = SettingsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.deleteWallet(1)
+
+        assertEquals("Wallet deactivated (id=1)", viewModel.state.value.notice)
+        assertEquals(false, viewModel.state.value.wallets.single().active)
+    }
+
+    @Test
+    fun deleteWalletEngineErrorSurfacesAndKeepsWalletList() {
+        val engine = FakeSettingsEngine(deleteError = IllegalStateException("non-zero balance"))
+        val viewModel = SettingsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.deleteWallet(1)
+
+        assertEquals("non-zero balance", viewModel.state.value.error)
+        assertEquals(listOf("Cash"), viewModel.state.value.wallets.map { it.name })
+        assertEquals(null, viewModel.state.value.notice)
+    }
 }
 
 private class FakeSettingsEngine(
     private val wallets: MutableList<WalletSettingsItem> = mutableListOf(walletSettingsItem()),
     private val createError: Throwable? = null,
+    private val deleteError: Throwable? = null,
+    private val deleteAction: String = "hard_deleted",
 ) : SettingsEngine {
     var createCalls = 0
+    var deleteCalls = 0
 
     override suspend fun baseCurrency(): String = "KZT"
 
@@ -103,6 +160,19 @@ private class FakeSettingsEngine(
         )
         wallets += wallet
         return wallet
+    }
+
+    override suspend fun deleteWallet(walletId: Long): WalletDeleteResult {
+        deleteError?.let { throw it }
+        deleteCalls += 1
+        val existing = wallets.first { it.id == walletId }
+        if (deleteAction == "hard_deleted") {
+            wallets.removeIf { it.id == walletId }
+        } else {
+            val index = wallets.indexOfFirst { it.id == walletId }
+            wallets[index] = existing.copy(active = false)
+        }
+        return WalletDeleteResult(walletId, deleteAction)
     }
 }
 

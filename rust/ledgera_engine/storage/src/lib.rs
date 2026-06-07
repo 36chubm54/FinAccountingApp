@@ -24,6 +24,12 @@ pub struct WalletRow {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct WalletDeleteResult {
+    pub wallet_id: i64,
+    pub action: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct TransferRow {
     pub id: i64,
     pub from_wallet_id: i64,
@@ -610,6 +616,57 @@ pub fn create_wallet(db_path: &str, payload: &WalletCreatePayload) -> StorageRes
         .into_iter()
         .find(|row| row.id == wallet_id)
         .ok_or_else(|| format!("Wallet not found: {wallet_id}"))
+}
+
+pub fn delete_wallet(db_path: &str, wallet_id: i64) -> StorageResult<WalletDeleteResult> {
+    if wallet_id <= 0 {
+        return Err("Wallet id is required".to_owned());
+    }
+    let mut conn = open_sqlite_connection(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(sqlite_err)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+
+    let wallet = tx
+        .query_row(
+            "SELECT system, is_active FROM wallets WHERE id = ?1",
+            [wallet_id],
+            |row| Ok((row.get::<_, i64>(0)? != 0, row.get::<_, i64>(1)? != 0)),
+        )
+        .optional()
+        .map_err(sqlite_err)?;
+    let Some((system, active)) = wallet else {
+        return Err(format!("Wallet not found: {wallet_id}"));
+    };
+    if system {
+        return Err("System wallet cannot be deleted".to_owned());
+    }
+    if !active {
+        return Err(format!("Wallet already inactive: {wallet_id}"));
+    }
+
+    let balance_minor = wallet_balance_minor_in_tx(&tx, wallet_id)?;
+    if balance_minor != 0 {
+        return Err("Wallet with non-zero balance cannot be deleted".to_owned());
+    }
+
+    let history_count = wallet_history_count_in_tx(&tx, wallet_id)?;
+    let action = if history_count == 0 {
+        tx.execute("DELETE FROM wallets WHERE id = ?1", [wallet_id])
+            .map_err(sqlite_err)?;
+        "hard_deleted"
+    } else {
+        tx.execute("UPDATE wallets SET is_active = 0 WHERE id = ?1", [wallet_id])
+            .map_err(sqlite_err)?;
+        "soft_deleted"
+    };
+
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    Ok(WalletDeleteResult {
+        wallet_id,
+        action: action.to_owned(),
+    })
 }
 
 pub fn transfer_list_rows(db_path: &str) -> StorageResult<Vec<TransferRow>> {
@@ -1806,6 +1863,34 @@ fn wallet_balance_minor_in_tx(
     Ok(initial_minor + delta_minor)
 }
 
+fn wallet_history_count_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    wallet_id: i64,
+) -> StorageResult<i64> {
+    let records_count = tx
+        .query_row(
+            "SELECT COUNT(*) FROM records WHERE wallet_id = ?1",
+            [wallet_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(sqlite_err)?;
+    let transfer_count = tx
+        .query_row(
+            "SELECT COUNT(*) FROM transfers WHERE from_wallet_id = ?1 OR to_wallet_id = ?1",
+            [wallet_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(sqlite_err)?;
+    let mandatory_count = tx
+        .query_row(
+            "SELECT COUNT(*) FROM mandatory_expenses WHERE wallet_id = ?1",
+            [wallet_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(sqlite_err)?;
+    Ok(records_count + transfer_count + mandatory_count)
+}
+
 fn wallet_balance_minor_excluding_transfer_in_tx(
     tx: &rusqlite::Transaction<'_>,
     wallet_id: i64,
@@ -2544,6 +2629,158 @@ mod tests {
             )
             .unwrap_err()
             .contains("base-currency wallets only (KZT)")
+        );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn delete_wallet_hard_deletes_zero_wallet_without_history() {
+        let db_path = create_balance_test_db();
+        let wallet = create_wallet(
+            &db_path,
+            &WalletCreatePayload {
+                name: "Mistake".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "0".to_owned(),
+                allow_negative: false,
+            },
+        )
+        .unwrap();
+
+        let result = delete_wallet(&db_path, wallet.id).unwrap();
+
+        assert_eq!(result.wallet_id, wallet.id);
+        assert_eq!(result.action, "hard_deleted");
+        assert!(!wallet_list_rows(&db_path)
+            .unwrap()
+            .iter()
+            .any(|row| row.id == wallet.id));
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn delete_wallet_soft_deletes_zero_wallet_with_record_history() {
+        let db_path = create_balance_test_db();
+        let wallet = create_wallet(
+            &db_path,
+            &WalletCreatePayload {
+                name: "Archive".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "0".to_owned(),
+                allow_negative: false,
+            },
+        )
+        .unwrap();
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute(
+            "INSERT INTO records (type, date, wallet_id, amount_original, amount_original_minor, amount_base, amount_base_minor, category, description)
+             VALUES ('income', '2026-01-05', ?1, 10.0, 1000, 10.0, 1000, 'Test', 'In')",
+            [wallet.id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO records (type, date, wallet_id, amount_original, amount_original_minor, amount_base, amount_base_minor, category, description)
+             VALUES ('expense', '2026-01-06', ?1, 10.0, 1000, 10.0, 1000, 'Test', 'Out')",
+            [wallet.id],
+        )
+        .unwrap();
+        drop(conn);
+
+        let result = delete_wallet(&db_path, wallet.id).unwrap();
+
+        assert_eq!(result.action, "soft_deleted");
+        let wallet = wallet_list_rows(&db_path)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == wallet.id)
+            .unwrap();
+        assert!(!wallet.is_active);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn delete_wallet_rejects_missing_system_inactive_and_non_zero_wallets() {
+        let db_path = create_balance_test_db();
+
+        assert!(delete_wallet(&db_path, 99)
+            .unwrap_err()
+            .contains("Wallet not found: 99"));
+        assert!(delete_wallet(&db_path, 1)
+            .unwrap_err()
+            .contains("System wallet cannot be deleted"));
+        assert!(delete_wallet(&db_path, 3)
+            .unwrap_err()
+            .contains("Wallet already inactive: 3"));
+        assert!(delete_wallet(&db_path, 2)
+            .unwrap_err()
+            .contains("Wallet with non-zero balance cannot be deleted"));
+
+        let wallet = create_wallet(
+            &db_path,
+            &WalletCreatePayload {
+                name: "Initial".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "1".to_owned(),
+                allow_negative: false,
+            },
+        )
+        .unwrap();
+        assert!(delete_wallet(&db_path, wallet.id)
+            .unwrap_err()
+            .contains("Wallet with non-zero balance cannot be deleted"));
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn delete_wallet_treats_transfer_and_mandatory_rows_as_history() {
+        let db_path = create_balance_test_db();
+        let transfer_wallet = create_wallet(
+            &db_path,
+            &WalletCreatePayload {
+                name: "TransferArchive".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "0".to_owned(),
+                allow_negative: true,
+            },
+        )
+        .unwrap();
+        let mandatory_wallet = create_wallet(
+            &db_path,
+            &WalletCreatePayload {
+                name: "MandatoryArchive".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "0".to_owned(),
+                allow_negative: false,
+            },
+        )
+        .unwrap();
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute(
+            "INSERT INTO transfers (
+                from_wallet_id, to_wallet_id, date, amount_original, amount_original_minor,
+                currency, rate_at_operation, rate_at_operation_text, amount_base, amount_base_minor, description
+             ) VALUES (?1, 1, '2026-01-07', 0.0, 0, 'KZT', 1.0, '1.000000', 0.0, 0, 'Zero transfer')",
+            [transfer_wallet.id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO mandatory_expenses (
+                wallet_id, amount_original, amount_original_minor, currency, rate_at_operation,
+                rate_at_operation_text, amount_base, amount_base_minor, category, description,
+                period, date, auto_pay
+             ) VALUES (?1, 0.0, 0, 'KZT', 1.0, '1.000000', 0.0, 0, 'Zero', 'History', 'monthly', '2026-01-08', 0)",
+            [mandatory_wallet.id],
+        )
+        .unwrap();
+        drop(conn);
+
+        assert_eq!(
+            delete_wallet(&db_path, transfer_wallet.id).unwrap().action,
+            "soft_deleted"
+        );
+        assert_eq!(
+            delete_wallet(&db_path, mandatory_wallet.id).unwrap().action,
+            "soft_deleted"
         );
         remove_test_db(&db_path);
     }

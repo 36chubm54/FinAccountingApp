@@ -72,6 +72,27 @@ class SettingsViewModel(
         }
     }
 
+    fun deleteWallet(walletId: Long) {
+        if (walletId <= 0) {
+            mutableState.value = mutableState.value.copy(error = "Wallet is required", notice = null)
+            return
+        }
+        mutableState.value = mutableState.value.copy(loading = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                val result = engine.deleteWallet(walletId)
+                val baseCurrency = engine.baseCurrency()
+                val wallets = engine.listWalletsForSettings()
+                mutableState.value = SettingsUiState(
+                    loading = false,
+                    wallets = wallets,
+                    baseCurrency = baseCurrency,
+                    notice = walletDeleteNotice(result.walletId, result.action),
+                )
+            }.onFailure(::showError)
+        }
+    }
+
     private fun showError(error: Throwable) {
         mutableState.value = mutableState.value.copy(
             loading = false,
@@ -87,4 +108,11 @@ class SettingsViewModel(
             showError(error)
         }
     }
+
+    private fun walletDeleteNotice(walletId: Long, action: String): String =
+        when (action) {
+            "hard_deleted" -> "Wallet deleted (id=$walletId)"
+            "soft_deleted" -> "Wallet deactivated (id=$walletId)"
+            else -> "Wallet updated (id=$walletId)"
+        }
 }

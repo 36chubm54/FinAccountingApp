@@ -18,6 +18,7 @@ import app.ledgera.model.TransferDetails
 import app.ledgera.model.UpdateOperationRequest
 import app.ledgera.model.UpdateTransferRequest
 import app.ledgera.model.UpdateTransferResult
+import app.ledgera.model.WalletDeleteResult
 import app.ledgera.model.WalletOption
 import app.ledgera.model.WalletSettingsItem
 import kotlinx.coroutines.Dispatchers
@@ -193,6 +194,14 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
                 active = created.isActive,
             )
         }
+
+    override suspend fun deleteWallet(walletId: Long): WalletDeleteResult = withContext(Dispatchers.IO) {
+        val result = engine.deleteWallet(walletId)
+        WalletDeleteResult(
+            walletId = result.walletId,
+            action = result.action,
+        )
+    }
 
     private fun toOperationRecord(record: app.ledgera.engine.RecordDto): OperationRecord =
         OperationRecord(

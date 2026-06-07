@@ -1,9 +1,9 @@
 use ledgera_engine_storage::{
     base_currency_code, create_standalone_record, create_transfer, create_wallet,
-    current_local_date, delete_standalone_record, delete_transfer, distinct_record_categories,
-    filtered_record_list_rows, standalone_record_get_row, tag_names, transfer_get_row,
-    update_standalone_record, update_transfer, wallet_balance_row, wallet_balance_rows,
-    wallet_list_rows,
+    current_local_date, delete_standalone_record, delete_transfer, delete_wallet,
+    distinct_record_categories, filtered_record_list_rows, standalone_record_get_row, tag_names,
+    transfer_get_row, update_standalone_record, update_transfer, wallet_balance_row,
+    wallet_balance_rows, wallet_list_rows,
     RecordFilterPayload, RecordRow, StandaloneRecordCreatePayload, StandaloneRecordUpdatePayload,
     TransferCreatePayload, TransferRow, TransferUpdatePayload, WalletBalanceRow,
     WalletCreatePayload, WalletRow,
@@ -87,6 +87,12 @@ pub struct CreateWalletRequest {
     pub currency: String,
     pub initial_balance: String,
     pub allow_negative: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WalletDeleteResultDto {
+    pub wallet_id: i64,
+    pub action: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -344,6 +350,15 @@ impl LedgeraEngine {
         };
         create_wallet(&self.db_path, &payload)
             .map(wallet_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn delete_wallet(&self, wallet_id: i64) -> Result<WalletDeleteResultDto, LedgeraEngineError> {
+        delete_wallet(&self.db_path, wallet_id)
+            .map(|result| WalletDeleteResultDto {
+                wallet_id: result.wallet_id,
+                action: result.action,
+            })
             .map_err(storage_error)
     }
 
@@ -605,6 +620,22 @@ mod tests {
                 amount_base REAL NOT NULL,
                 amount_base_minor INTEGER DEFAULT NULL,
                 description TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE mandatory_expenses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                wallet_id INTEGER NOT NULL,
+                amount_original REAL NOT NULL,
+                amount_original_minor INTEGER DEFAULT NULL,
+                currency TEXT NOT NULL,
+                rate_at_operation REAL NOT NULL,
+                rate_at_operation_text TEXT DEFAULT NULL,
+                amount_base REAL NOT NULL,
+                amount_base_minor INTEGER DEFAULT NULL,
+                category TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                period TEXT DEFAULT NULL,
+                date TEXT DEFAULT NULL,
+                auto_pay INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE tags (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1073,6 +1104,62 @@ mod tests {
     }
 
     #[test]
+    fn engine_deletes_wallet_with_hard_and_soft_actions() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+        let empty_wallet = engine
+            .create_wallet(CreateWalletRequest {
+                name: "Empty".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "0".to_owned(),
+                allow_negative: false,
+            })
+            .unwrap();
+        let result = engine.delete_wallet(empty_wallet.id).unwrap();
+        assert_eq!(result.wallet_id, empty_wallet.id);
+        assert_eq!(result.action, "hard_deleted");
+        assert!(engine
+            .list_wallets()
+            .unwrap()
+            .iter()
+            .all(|wallet| wallet.id != empty_wallet.id));
+
+        let archived_wallet = engine
+            .create_wallet(CreateWalletRequest {
+                name: "Archive".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "0".to_owned(),
+                allow_negative: false,
+            })
+            .unwrap();
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute(
+            "INSERT INTO records (type, date, wallet_id, amount_original, amount_original_minor, currency, rate_at_operation, rate_at_operation_text, amount_base, amount_base_minor, category, description)
+             VALUES ('income', '2026-01-01', ?1, 1.0, 100, 'KZT', 1.0, '1.000000', 1.0, 100, 'Test', 'In')",
+            [archived_wallet.id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO records (type, date, wallet_id, amount_original, amount_original_minor, currency, rate_at_operation, rate_at_operation_text, amount_base, amount_base_minor, category, description)
+             VALUES ('expense', '2026-01-01', ?1, 1.0, 100, 'KZT', 1.0, '1.000000', 1.0, 100, 'Test', 'Out')",
+            [archived_wallet.id],
+        )
+        .unwrap();
+        drop(conn);
+
+        let result = engine.delete_wallet(archived_wallet.id).unwrap();
+        assert_eq!(result.action, "soft_deleted");
+        assert!(!engine
+            .list_wallets()
+            .unwrap()
+            .into_iter()
+            .find(|wallet| wallet.id == archived_wallet.id)
+            .unwrap()
+            .is_active);
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
     fn engine_surfaces_wallet_storage_errors() {
         let db_path = fixture_db();
         let engine = LedgeraEngine::new(db_path.clone());
@@ -1087,6 +1174,12 @@ mod tests {
             .unwrap_err();
 
         assert!(error.to_string().contains("Wallet name is required"));
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute("UPDATE wallets SET system = 1 WHERE id = 1", [])
+            .unwrap();
+        drop(conn);
+        let error = engine.delete_wallet(1).unwrap_err();
+        assert!(error.to_string().contains("System wallet cannot be deleted"));
         fs::remove_file(db_path).ok();
     }
 
