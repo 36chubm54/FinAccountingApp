@@ -44,7 +44,6 @@ import app.ledgera.model.OperationDraft
 import app.ledgera.model.OperationFilter
 import app.ledgera.model.TransferDraft
 import app.ledgera.model.WalletOption
-import app.ledgera.ui.ToastHost
 
 @Composable
 fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifier) {
@@ -69,94 +68,88 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
         }
     }
 
-    ToastHost(
-        message = state.notice,
-        modifier = modifier.fillMaxSize(),
-        onDismiss = viewModel::clearNotice,
+    Column(
+        modifier = modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+        Text("Operations", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+        OperationFilters(
+            filter = state.filter,
+            wallets = state.wallets,
+            categories = state.categories,
+            onFilterChanged = { filter -> viewModel.refresh(filter) },
+        )
+
+        Row(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text("Operations", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-            OperationFilters(
-                filter = state.filter,
-                wallets = state.wallets,
-                categories = state.categories,
-                onFilterChanged = { filter -> viewModel.refresh(filter) },
-            )
-
-            Row(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            Column(
+                modifier = Modifier
+                    .widthIn(min = 360.dp, max = 460.dp)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Column(
-                    modifier = Modifier
-                        .widthIn(min = 360.dp, max = 460.dp)
-                        .fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    AddOperationLauncher(
-                        wallets = state.wallets,
-                        onAddOperation = {
-                            viewModel.clearFeedback()
-                            showCreateDialog = true
-                        },
-                        onAddTransfer = {
-                            viewModel.clearFeedback()
-                            showTransferDialog = true
-                        },
-                        onImport = viewModel::showImportPlaceholder,
-                        onExport = viewModel::showExportPlaceholder,
-                        selectiveDeleteMode = state.selectiveDeleteMode,
-                        selectedCount = state.selectedBulkRecordIds.size + state.selectedBulkTransferIds.size,
-                        hasBulkDeleteCandidates = state.hasBulkDeleteCandidates,
-                        onDeleteAll = { confirmDeleteAll = true },
-                        onSelectiveDelete = viewModel::startSelectiveDelete,
-                        onDeleteSelected = { confirmSelectiveDelete = true },
-                        onCancelSelectiveDelete = viewModel::cancelSelectiveDelete,
-                    )
-                }
+                AddOperationLauncher(
+                    wallets = state.wallets,
+                    onAddOperation = {
+                        viewModel.clearFeedback()
+                        showCreateDialog = true
+                    },
+                    onAddTransfer = {
+                        viewModel.clearFeedback()
+                        showTransferDialog = true
+                    },
+                    onImport = viewModel::showImportPlaceholder,
+                    onExport = viewModel::showExportPlaceholder,
+                    selectiveDeleteMode = state.selectiveDeleteMode,
+                    selectedCount = state.selectedBulkRecordIds.size + state.selectedBulkTransferIds.size,
+                    hasBulkDeleteCandidates = state.hasBulkDeleteCandidates,
+                    onDeleteAll = { confirmDeleteAll = true },
+                    onSelectiveDelete = viewModel::startSelectiveDelete,
+                    onDeleteSelected = { confirmSelectiveDelete = true },
+                    onCancelSelectiveDelete = viewModel::cancelSelectiveDelete,
+                )
+            }
 
-                Column(
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                    if (state.loading) {
-                        CircularProgressIndicator()
-                    } else if (state.records.isEmpty()) {
-                        Text("No operations for the selected filter.")
-                    } else {
-                        val journalItems = operationJournalItems(
-                            records = state.records,
-                            selectedRecordId = state.selectedRecordId,
-                            selectedBulkRecordIds = state.selectedBulkRecordIds,
-                            selectedBulkTransferIds = state.selectedBulkTransferIds,
-                        )
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            items(journalItems, key = { it.key }) { item ->
-                                OperationRow(
-                                    item = item,
-                                    selectiveDeleteMode = state.selectiveDeleteMode,
-                                    onClick = {
-                                        if (state.selectiveDeleteMode) {
-                                            if (item.transferId != null) {
-                                                viewModel.toggleBulkTransfer(item.transferId)
-                                            } else {
-                                                item.selectableRecordId?.let(viewModel::toggleBulkRecord)
-                                            }
-                                        } else if (item.transferId != null) {
-                                            viewModel.selectTransfer(item.transferId)
+            Column(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                if (state.loading) {
+                    CircularProgressIndicator()
+                } else if (state.records.isEmpty()) {
+                    Text("No operations for the selected filter.")
+                } else {
+                    val journalItems = operationJournalItems(
+                        records = state.records,
+                        selectedRecordId = state.selectedRecordId,
+                        selectedBulkRecordIds = state.selectedBulkRecordIds,
+                        selectedBulkTransferIds = state.selectedBulkTransferIds,
+                    )
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(journalItems, key = { it.key }) { item ->
+                            OperationRow(
+                                item = item,
+                                selectiveDeleteMode = state.selectiveDeleteMode,
+                                onClick = {
+                                    if (state.selectiveDeleteMode) {
+                                        if (item.transferId != null) {
+                                            viewModel.toggleBulkTransfer(item.transferId)
                                         } else {
-                                            item.selectableRecordId?.let(viewModel::select)
+                                            item.selectableRecordId?.let(viewModel::toggleBulkRecord)
                                         }
-                                    },
-                                )
-                            }
+                                    } else if (item.transferId != null) {
+                                        viewModel.selectTransfer(item.transferId)
+                                    } else {
+                                        item.selectableRecordId?.let(viewModel::select)
+                                    }
+                                },
+                            )
                         }
                     }
                 }

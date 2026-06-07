@@ -22,6 +22,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.delay
 
 @Composable
@@ -42,18 +44,22 @@ fun ToastHost(
                 delay(140)
                 onDismiss()
             }
-            AnimatedVisibility(
-                visible = visible,
-                enter = fadeIn(animationSpec = tween(180)) +
-                    slideInVertically(animationSpec = tween(180)) { height -> height / 2 },
-                exit = fadeOut(animationSpec = tween(140)) +
-                    slideOutVertically(animationSpec = tween(140)) { height -> height / 2 },
-                modifier = Modifier.align(Alignment.BottomCenter),
+            Popup(
+                alignment = Alignment.BottomCenter,
+                properties = PopupProperties(focusable = false),
             ) {
-                ToastNotification(
-                    message = text,
-                    modifier = Modifier.padding(24.dp),
-                )
+                AnimatedVisibility(
+                    visible = visible,
+                    enter = fadeIn(animationSpec = tween(180)) +
+                        slideInVertically(animationSpec = tween(180)) { height -> height / 2 },
+                    exit = fadeOut(animationSpec = tween(140)) +
+                        slideOutVertically(animationSpec = tween(140)) { height -> height / 2 },
+                ) {
+                    ToastNotification(
+                        message = text,
+                        modifier = Modifier.padding(24.dp),
+                    )
+                }
             }
         }
     }

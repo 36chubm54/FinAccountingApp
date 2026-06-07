@@ -40,7 +40,6 @@ import app.ledgera.model.AuditFinding
 import app.ledgera.model.AuditSummary
 import app.ledgera.model.CreateWalletRequest
 import app.ledgera.model.WalletSettingsItem
-import app.ledgera.ui.ToastHost
 
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) {
@@ -67,42 +66,35 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
         }
     }
 
-    ToastHost(
-        message = state.notice,
-        modifier = modifier.fillMaxSize(),
-        onDismiss = viewModel::clearNotice,
+    Column(
+        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Column(
-            // modifier = Modifier.fillMaxSize().padding(24.dp),
-            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Text("Settings", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        Text("Settings", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
-            WalletsSection(
-                wallets = state.wallets,
-                loading = state.loading,
-                onAddWallet = {
-                    viewModel.clearFeedback()
-                    showCreateWalletDialog = true
-                },
-                onDeleteWallet = { wallet ->
-                    viewModel.clearFeedback()
-                    walletPendingDelete = wallet
-                },
-            )
-            AuditSection(
-                running = state.auditRunning,
-                summary = state.auditSummary,
-                hasFindings = state.auditFindings.isNotEmpty(),
-                onRunAudit = {
-                    viewModel.clearFeedback()
-                    viewModel.runAudit()
-                },
-                onViewReport = { showAuditReport = true },
-            )
-        }
+        WalletsSection(
+            wallets = state.wallets,
+            loading = state.loading,
+            onAddWallet = {
+                viewModel.clearFeedback()
+                showCreateWalletDialog = true
+            },
+            onDeleteWallet = { wallet ->
+                viewModel.clearFeedback()
+                walletPendingDelete = wallet
+            },
+        )
+        AuditSection(
+            running = state.auditRunning,
+            summary = state.auditSummary,
+            hasFindings = state.auditFindings.isNotEmpty(),
+            onRunAudit = {
+                viewModel.clearFeedback()
+                viewModel.runAudit()
+            },
+            onViewReport = { showAuditReport = true },
+        )
     }
 
     if (showCreateWalletDialog) {

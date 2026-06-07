@@ -28,6 +28,7 @@ import app.ledgera.operations.OperationsScreen
 import app.ledgera.operations.OperationsViewModel
 import app.ledgera.settings.SettingsScreen
 import app.ledgera.settings.SettingsViewModel
+import app.ledgera.ui.ToastHost
 
 @Composable
 fun AppShell(
@@ -37,46 +38,64 @@ fun AppShell(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsState()
+    val operationsState by operationsViewModel.state.collectAsState()
+    val settingsState by settingsViewModel.state.collectAsState()
     LaunchedEffect(Unit) {
         viewModel.refreshStatus()
     }
 
-    Row(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        NavigationRail(
-            modifier = Modifier.fillMaxHeight().width(176.dp),
-            header = {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Ledgera", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("Beta.1", style = MaterialTheme.typography.labelMedium)
+    ToastHost(
+        message = when (state.selectedSection) {
+            DesktopSection.Operations -> operationsState.notice
+            DesktopSection.Settings -> settingsState.notice
+            else -> null
+        },
+        modifier = modifier.fillMaxSize(),
+        onDismiss = {
+            when (state.selectedSection) {
+                DesktopSection.Operations -> operationsViewModel.clearNotice()
+                DesktopSection.Settings -> settingsViewModel.clearNotice()
+                else -> Unit
+            }
+        },
+    ) {
+        Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            NavigationRail(
+                modifier = Modifier.fillMaxHeight().width(176.dp),
+                header = {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Ledgera", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text("Beta.1", style = MaterialTheme.typography.labelMedium)
+                    }
+                },
+            ) {
+                state.sections.forEach { section ->
+                    NavigationRailItem(
+                        selected = state.selectedSection == section,
+                        onClick = { viewModel.select(section) },
+                        icon = { Text(section.label.take(1), fontWeight = FontWeight.Bold) },
+                        label = { Text(section.label) },
+                        alwaysShowLabel = true,
+                    )
                 }
-            },
-        ) {
-            state.sections.forEach { section ->
-                NavigationRailItem(
-                    selected = state.selectedSection == section,
-                    onClick = { viewModel.select(section) },
-                    icon = { Text(section.label.take(1), fontWeight = FontWeight.Bold) },
-                    label = { Text(section.label) },
-                    alwaysShowLabel = true,
-                )
             }
-        }
 
-        Column(Modifier.fillMaxSize()) {
-            if (state.error != null || state.engineMessage.isMeaningfulStatus()) {
-                StatusBanner(state.engineMessage, state.error)
-            }
-            Surface(Modifier.fillMaxSize()) {
-                when (state.selectedSection) {
-                    DesktopSection.Operations -> OperationsScreen(operationsViewModel)
-                    DesktopSection.Reports -> PendingSection(state.selectedSection)
-                    DesktopSection.Analytics -> PendingSection(state.selectedSection)
-                    DesktopSection.Dashboard -> PendingSection(state.selectedSection)
-                    DesktopSection.Budget -> PendingSection(state.selectedSection)
-                    DesktopSection.Debts -> PendingSection(state.selectedSection)
-                    DesktopSection.Distribution -> PendingSection(state.selectedSection)
-                    DesktopSection.Mandatory -> PendingSection(state.selectedSection)
-                    DesktopSection.Settings -> SettingsScreen(settingsViewModel)
+            Column(Modifier.fillMaxSize()) {
+                if (state.error != null || state.engineMessage.isMeaningfulStatus()) {
+                    StatusBanner(state.engineMessage, state.error)
+                }
+                Surface(Modifier.fillMaxSize()) {
+                    when (state.selectedSection) {
+                        DesktopSection.Operations -> OperationsScreen(operationsViewModel)
+                        DesktopSection.Reports -> PendingSection(state.selectedSection)
+                        DesktopSection.Analytics -> PendingSection(state.selectedSection)
+                        DesktopSection.Dashboard -> PendingSection(state.selectedSection)
+                        DesktopSection.Budget -> PendingSection(state.selectedSection)
+                        DesktopSection.Debts -> PendingSection(state.selectedSection)
+                        DesktopSection.Distribution -> PendingSection(state.selectedSection)
+                        DesktopSection.Mandatory -> PendingSection(state.selectedSection)
+                        DesktopSection.Settings -> SettingsScreen(settingsViewModel)
+                    }
                 }
             }
         }
