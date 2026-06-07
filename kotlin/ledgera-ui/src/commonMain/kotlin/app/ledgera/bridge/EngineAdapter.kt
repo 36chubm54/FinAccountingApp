@@ -6,6 +6,7 @@ import app.ledgera.model.CreateTransferResult
 import app.ledgera.model.CreateWalletRequest
 import app.ledgera.model.EngineStatus
 import app.ledgera.model.OperationFilter
+import app.ledgera.model.OperationDeleteResult
 import app.ledgera.model.OperationRecord
 import app.ledgera.model.TransferDetails
 import app.ledgera.model.UpdateOperationRequest
@@ -30,6 +31,8 @@ interface OperationsEngine {
     suspend fun getTransfer(transferId: Long): TransferDetails?
     suspend fun updateTransfer(transferId: Long, request: UpdateTransferRequest): UpdateTransferResult
     suspend fun deleteTransfer(transferId: Long): Boolean
+    suspend fun deleteAllOperations(): OperationDeleteResult
+    suspend fun deleteOperationsSelection(recordIds: List<Long>, transferIds: List<Long>): OperationDeleteResult
     suspend fun listTags(): List<String>
     suspend fun listCategories(recordType: String): List<String>
     suspend fun listWallets(): List<WalletOption>

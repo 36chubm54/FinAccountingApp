@@ -21,6 +21,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -51,6 +52,8 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
     var showTransferDialog by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var confirmTransferDelete by remember { mutableStateOf(false) }
+    var confirmDeleteAll by remember { mutableStateOf(false) }
+    var confirmSelectiveDelete by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         viewModel.refresh()
     }
@@ -99,8 +102,12 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
                     },
                     onImport = viewModel::showImportPlaceholder,
                     onExport = viewModel::showExportPlaceholder,
-                    onDeleteAll = viewModel::showDeleteAllPlaceholder,
-                    onSelectiveDelete = viewModel::showSelectiveDeletePlaceholder,
+                    selectiveDeleteMode = state.selectiveDeleteMode,
+                    selectedCount = state.selectedBulkRecordIds.size + state.selectedBulkTransferIds.size,
+                    onDeleteAll = { confirmDeleteAll = true },
+                    onSelectiveDelete = viewModel::startSelectiveDelete,
+                    onDeleteSelected = { confirmSelectiveDelete = true },
+                    onCancelSelectiveDelete = viewModel::cancelSelectiveDelete,
                 )
             }
 
@@ -115,7 +122,12 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
                 } else if (state.records.isEmpty()) {
                     Text("No operations for the selected filter.")
                 } else {
-                    val journalItems = operationJournalItems(state.records, state.selectedRecordId)
+                    val journalItems = operationJournalItems(
+                        records = state.records,
+                        selectedRecordId = state.selectedRecordId,
+                        selectedBulkRecordIds = state.selectedBulkRecordIds,
+                        selectedBulkTransferIds = state.selectedBulkTransferIds,
+                    )
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -123,8 +135,15 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
                         items(journalItems, key = { it.key }) { item ->
                             OperationRow(
                                 item = item,
+                                selectiveDeleteMode = state.selectiveDeleteMode,
                                 onClick = {
-                                    if (item.transferId != null) {
+                                    if (state.selectiveDeleteMode) {
+                                        if (item.transferId != null) {
+                                            viewModel.toggleBulkTransfer(item.transferId)
+                                        } else {
+                                            item.selectableRecordId?.let(viewModel::toggleBulkRecord)
+                                        }
+                                    } else if (item.transferId != null) {
                                         viewModel.selectTransfer(item.transferId)
                                     } else {
                                         item.selectableRecordId?.let(viewModel::select)
@@ -208,6 +227,25 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
             onCancel = { confirmDelete = false },
         )
     }
+    if (confirmDeleteAll) {
+        DeleteAllConfirmDialog(
+            onConfirm = {
+                confirmDeleteAll = false
+                viewModel.deleteAllOperations()
+            },
+            onCancel = { confirmDeleteAll = false },
+        )
+    }
+    if (confirmSelectiveDelete) {
+        DeleteSelectedOperationsConfirmDialog(
+            selectedCount = state.selectedBulkRecordIds.size + state.selectedBulkTransferIds.size,
+            onConfirm = {
+                confirmSelectiveDelete = false
+                viewModel.deleteSelectedOperations()
+            },
+            onCancel = { confirmSelectiveDelete = false },
+        )
+    }
 }
 
 @Composable
@@ -217,8 +255,12 @@ private fun AddOperationLauncher(
     onAddTransfer: () -> Unit,
     onImport: () -> Unit,
     onExport: () -> Unit,
+    selectiveDeleteMode: Boolean,
+    selectedCount: Int,
     onDeleteAll: () -> Unit,
     onSelectiveDelete: () -> Unit,
+    onDeleteSelected: () -> Unit,
+    onCancelSelectiveDelete: () -> Unit,
 ) {
     val walletCount = wallets.size
     Card(Modifier.fillMaxWidth().fillMaxHeight()) {
@@ -257,20 +299,36 @@ private fun AddOperationLauncher(
             }
             Spacer(Modifier.height(2.dp))
             Text("Journal actions", style = MaterialTheme.typography.titleSmall)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onImport, modifier = Modifier.weight(1f)) {
-                    Text("Import")
+            if (selectiveDeleteMode) {
+                Text("$selectedCount selected")
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = onDeleteSelected,
+                        enabled = selectedCount > 0,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Delete selected")
+                    }
+                    TextButton(onClick = onCancelSelectiveDelete, modifier = Modifier.weight(1f)) {
+                        Text("Cancel")
+                    }
                 }
-                TextButton(onClick = onExport, modifier = Modifier.weight(1f)) {
-                    Text("Export")
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = onImport, modifier = Modifier.weight(1f)) {
+                        Text("Import")
+                    }
+                    TextButton(onClick = onExport, modifier = Modifier.weight(1f)) {
+                        Text("Export")
+                    }
                 }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onDeleteAll, modifier = Modifier.weight(1f)) {
-                    Text("Delete all")
-                }
-                TextButton(onClick = onSelectiveDelete, modifier = Modifier.weight(1f)) {
-                    Text("Selective delete")
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = onDeleteAll, modifier = Modifier.weight(1f)) {
+                        Text("Delete all")
+                    }
+                    TextButton(onClick = onSelectiveDelete, modifier = Modifier.weight(1f)) {
+                        Text("Selective delete")
+                    }
                 }
             }
         }
@@ -962,30 +1020,88 @@ private fun DeleteTransferConfirmDialog(onConfirm: () -> Unit, onCancel: () -> U
 }
 
 @Composable
-private fun OperationRow(item: OperationJournalItem, onClick: () -> Unit) {
-    Card(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        Column(Modifier.padding(14.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(
-                    item.title,
-                    fontWeight = FontWeight.SemiBold,
+private fun DeleteAllConfirmDialog(onConfirm: () -> Unit, onCancel: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Delete all operations") },
+        text = { Text("Delete all standalone operations and transfers? Linked debt records will be kept.") },
+        confirmButton = {
+            Button(onClick = onConfirm) { Text("Delete all") }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun DeleteSelectedOperationsConfirmDialog(
+    selectedCount: Int,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Delete selected operations") },
+        text = { Text("Delete $selectedCount selected operations and transfers?") },
+        confirmButton = {
+            Button(onClick = onConfirm, enabled = selectedCount > 0) { Text("Delete selected") }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun OperationRow(
+    item: OperationJournalItem,
+    selectiveDeleteMode: Boolean,
+    onClick: () -> Unit,
+) {
+    Card(
+        Modifier
+            .fillMaxWidth()
+            .clickable(enabled = !selectiveDeleteMode || item.bulkSelectable, onClick = onClick)
+    ) {
+        Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (selectiveDeleteMode) {
+                Checkbox(
+                    checked = item.selected,
+                    onCheckedChange = { onClick() },
+                    enabled = item.bulkSelectable,
                 )
-                Text(item.amount)
             }
-            Spacer(Modifier.height(4.dp))
-            Text(item.meta)
-            if (item.transferId != null) {
-                Text(
-                    "Transfer-linked",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (item.description.isNotBlank()) {
-                Text(item.description)
-            }
-            if (item.tags.isNotEmpty()) {
-                Text(item.tags.joinToString(" ") { "#$it" }, color = MaterialTheme.colorScheme.secondary)
+            Column(Modifier.weight(1f)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(
+                        item.title,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(item.amount)
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(item.meta)
+                if (item.transferId != null) {
+                    Text(
+                        "Transfer-linked",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (selectiveDeleteMode && !item.bulkSelectable) {
+                    Text(
+                        "Linked record is kept",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (item.description.isNotBlank()) {
+                    Text(item.description)
+                }
+                if (item.tags.isNotEmpty()) {
+                    Text(item.tags.joinToString(" ") { "#$it" }, color = MaterialTheme.colorScheme.secondary)
+                }
             }
         }
     }

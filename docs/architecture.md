@@ -87,14 +87,16 @@ Current Kotlin/Rust contract:
   supports standalone `income` and `expense` record listing, creation, update,
   delete, tag replacement, basic wallet/date/type filters, and base-currency
   transfer creation/editing/deletion with optional base-currency commission
-  records
+  records plus safe delete-all and selective-delete flows for Operations-owned
+  records/transfers
 - Kotlin Settings supports wallet listing and active base-currency wallet
   creation through Rust/Kotlin UniFFI; wallet edit/delete, runtime currency,
   audit, sync, and updater controls remain separate beta.1 slices
 - Kotlin Operations rejects transfer-linked and debt-linked record edits at the
   Rust storage boundary; transfer-linked mirror rows are grouped into one
   transfer journal row with source/target wallet direction and transfer-level
-  editing/deletion through modal dialogs, while transfer list parity,
+  editing/deletion through modal dialogs; delete-all preserves unsupported
+  linked rows and reports skipped records, while transfer list parity,
   import/export, and full inline editor keyboard parity remain separate beta.1
   slices
 - transfer commissions are represented as standalone expense records adjacent

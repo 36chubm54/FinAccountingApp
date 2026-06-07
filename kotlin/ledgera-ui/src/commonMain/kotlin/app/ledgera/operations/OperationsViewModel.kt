@@ -4,6 +4,7 @@ import app.ledgera.bridge.OperationsEngine
 import app.ledgera.model.CreateOperationRequest
 import app.ledgera.model.CreateTransferRequest
 import app.ledgera.model.OperationDraft
+import app.ledgera.model.OperationDeleteResult
 import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationRecord
 import app.ledgera.model.TransferDraft
@@ -27,6 +28,9 @@ data class OperationsUiState(
     val categories: List<String> = emptyList(),
     val filter: OperationFilter = OperationFilter(),
     val selectedRecordId: Long? = null,
+    val selectiveDeleteMode: Boolean = false,
+    val selectedBulkRecordIds: Set<Long> = emptySet(),
+    val selectedBulkTransferIds: Set<Long> = emptySet(),
     val editDraft: OperationDraft? = null,
     val transferDraft: TransferDraft? = null,
     val error: String? = null,
@@ -64,6 +68,15 @@ class OperationsViewModel(
                     selectedRecordId = mutableState.value.selectedRecordId?.takeIf { selectedId ->
                         records.any { it.id == selectedId }
                     },
+                    selectiveDeleteMode = mutableState.value.selectiveDeleteMode,
+                    selectedBulkRecordIds = mutableState.value.selectedBulkRecordIds
+                        .filterTo(mutableSetOf()) { selectedId ->
+                            records.any { it.id == selectedId }
+                        },
+                    selectedBulkTransferIds = mutableState.value.selectedBulkTransferIds
+                        .filterTo(mutableSetOf()) { selectedId ->
+                            records.any { it.transferId == selectedId }
+                        },
                     editDraft = mutableState.value.editDraft?.takeIf { draft ->
                         draft.id != null && records.any { it.id == draft.id }
                     },
@@ -114,6 +127,9 @@ class OperationsViewModel(
     fun clearSelection() {
         mutableState.value = mutableState.value.copy(
             selectedRecordId = null,
+            selectiveDeleteMode = false,
+            selectedBulkRecordIds = emptySet(),
+            selectedBulkTransferIds = emptySet(),
             editDraft = null,
             transferDraft = null,
             error = null,
@@ -133,12 +149,74 @@ class OperationsViewModel(
         showPlaceholderNotice("Export")
     }
 
-    fun showDeleteAllPlaceholder() {
-        showPlaceholderNotice("Delete all")
+    fun startSelectiveDelete() {
+        mutableState.value = mutableState.value.copy(
+            selectiveDeleteMode = true,
+            selectedBulkRecordIds = emptySet(),
+            selectedBulkTransferIds = emptySet(),
+            selectedRecordId = null,
+            editDraft = null,
+            transferDraft = null,
+            error = null,
+            notice = null,
+        )
     }
 
-    fun showSelectiveDeletePlaceholder() {
-        showPlaceholderNotice("Selective delete")
+    fun cancelSelectiveDelete() {
+        mutableState.value = mutableState.value.copy(
+            selectiveDeleteMode = false,
+            selectedBulkRecordIds = emptySet(),
+            selectedBulkTransferIds = emptySet(),
+            error = null,
+            notice = null,
+        )
+    }
+
+    fun toggleBulkRecord(recordId: Long) {
+        if (recordId <= 0) {
+            mutableState.value = mutableState.value.copy(error = "Record is required", notice = null)
+            return
+        }
+        val record = mutableState.value.records.firstOrNull { it.id == recordId }
+        if (record == null) {
+            mutableState.value = mutableState.value.copy(error = "Record not found", notice = null)
+            return
+        }
+        if (
+            record.transferId != null ||
+            record.relatedDebtId != null ||
+            (record.type != "income" && record.type != "expense") ||
+            isTransferCommissionMarker(record.description)
+        ) {
+            mutableState.value = mutableState.value.copy(
+                error = "This linked record cannot be selected for bulk delete",
+                notice = null,
+            )
+            return
+        }
+        mutableState.value = mutableState.value.copy(
+            selectiveDeleteMode = true,
+            selectedBulkRecordIds = toggleId(mutableState.value.selectedBulkRecordIds, recordId),
+            error = null,
+            notice = null,
+        )
+    }
+
+    fun toggleBulkTransfer(transferId: Long) {
+        if (transferId <= 0) {
+            mutableState.value = mutableState.value.copy(error = "Transfer is required", notice = null)
+            return
+        }
+        if (mutableState.value.records.none { it.transferId == transferId }) {
+            mutableState.value = mutableState.value.copy(error = "Transfer not found", notice = null)
+            return
+        }
+        mutableState.value = mutableState.value.copy(
+            selectiveDeleteMode = true,
+            selectedBulkTransferIds = toggleId(mutableState.value.selectedBulkTransferIds, transferId),
+            error = null,
+            notice = null,
+        )
     }
 
     fun updateDraft(draft: OperationDraft) {
@@ -320,6 +398,60 @@ class OperationsViewModel(
         }
     }
 
+    fun deleteAllOperations() {
+        mutableState.value = mutableState.value.copy(loading = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                val result = engine.deleteAllOperations()
+                mutableState.value = mutableState.value.copy(
+                    selectedRecordId = null,
+                    editDraft = null,
+                    transferDraft = null,
+                    selectiveDeleteMode = false,
+                    selectedBulkRecordIds = emptySet(),
+                    selectedBulkTransferIds = emptySet(),
+                )
+                refresh(notice = deleteNotice(result))
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
+    fun deleteSelectedOperations() {
+        val recordIds = mutableState.value.selectedBulkRecordIds.toList().sorted()
+        val transferIds = mutableState.value.selectedBulkTransferIds.toList().sorted()
+        if (recordIds.isEmpty() && transferIds.isEmpty()) {
+            mutableState.value = mutableState.value.copy(error = "Select at least one operation or transfer", notice = null)
+            return
+        }
+        mutableState.value = mutableState.value.copy(loading = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                val result = engine.deleteOperationsSelection(recordIds, transferIds)
+                mutableState.value = mutableState.value.copy(
+                    selectedRecordId = null,
+                    editDraft = null,
+                    transferDraft = null,
+                    selectiveDeleteMode = false,
+                    selectedBulkRecordIds = emptySet(),
+                    selectedBulkTransferIds = emptySet(),
+                )
+                refresh(notice = deleteNotice(result))
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
     private fun validate(request: CreateOperationRequest): String? =
         OperationValidation.validateFields(
             type = request.type,
@@ -396,6 +528,21 @@ class OperationsViewModel(
             notice = "$action is not available in beta.1 yet",
         )
     }
+
+    private fun deleteNotice(result: OperationDeleteResult): String {
+        val base = "Deleted ${result.deletedRecords} records and ${result.deletedTransfers} transfers"
+        return if (result.skippedRecords > 0) {
+            "$base. Skipped ${result.skippedRecords} linked records"
+        } else {
+            base
+        }
+    }
+
+    private fun toggleId(ids: Set<Long>, id: Long): Set<Long> =
+        if (ids.contains(id)) ids - id else ids + id
+
+    private fun isTransferCommissionMarker(description: String): Boolean =
+        Regex("""^\[transfer:\d+]$""").matches(description.trim())
 
     private fun OperationRecord.toDraft(): OperationDraft =
         OperationDraft(

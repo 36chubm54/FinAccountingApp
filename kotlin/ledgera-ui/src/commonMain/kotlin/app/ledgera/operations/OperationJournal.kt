@@ -12,18 +12,21 @@ internal data class OperationJournalItem(
     val selectableRecordId: Long?,
     val transferId: Long?,
     val selected: Boolean,
+    val bulkSelectable: Boolean,
 )
 
 internal fun operationJournalItems(
     records: List<OperationRecord>,
     selectedRecordId: Long?,
+    selectedBulkRecordIds: Set<Long> = emptySet(),
+    selectedBulkTransferIds: Set<Long> = emptySet(),
 ): List<OperationJournalItem> {
     val consumedTransferIds = mutableSetOf<Long>()
     val result = mutableListOf<OperationJournalItem>()
     records.forEach { record ->
         val transferId = record.transferId
         if (transferId == null) {
-            result += standaloneJournalItem(record, selectedRecordId)
+            result += standaloneJournalItem(record, selectedRecordId, selectedBulkRecordIds)
             return@forEach
         }
         if (!consumedTransferIds.add(transferId)) {
@@ -32,6 +35,7 @@ internal fun operationJournalItems(
         result += transferJournalItem(
             records = records.filter { it.transferId == transferId },
             transferId = transferId,
+            selectedBulkTransferIds = selectedBulkTransferIds,
         )
     }
     return result
@@ -40,22 +44,35 @@ internal fun operationJournalItems(
 private fun standaloneJournalItem(
     record: OperationRecord,
     selectedRecordId: Long?,
-): OperationJournalItem =
-    OperationJournalItem(
+    selectedBulkRecordIds: Set<Long>,
+): OperationJournalItem {
+    val bulkSelectable =
+        record.relatedDebtId == null &&
+            (record.type == "income" || record.type == "expense") &&
+            !isTransferCommissionMarker(record.description)
+    val selected = selectedBulkRecordIds.contains(record.id)
+    return OperationJournalItem(
         key = "record:${record.id}",
-        title = if (selectedRecordId == record.id) "${record.category} · selected" else record.category,
+        title = if (selectedRecordId == record.id || selected) {
+            "${record.category} · selected"
+        } else {
+            record.category
+        },
         amount = "${record.amountOriginal} ${record.currency}",
         meta = "${record.date} · ${record.type} · wallet #${record.walletId}",
         description = record.description,
         tags = record.tags,
         selectableRecordId = record.id,
         transferId = null,
-        selected = selectedRecordId == record.id,
+        selected = selectedRecordId == record.id || selected,
+        bulkSelectable = bulkSelectable,
     )
+}
 
 private fun transferJournalItem(
     records: List<OperationRecord>,
     transferId: Long,
+    selectedBulkTransferIds: Set<Long>,
 ): OperationJournalItem {
     val expense = records.firstOrNull { it.type == "expense" }
     val income = records.firstOrNull { it.type == "income" }
@@ -67,13 +84,21 @@ private fun transferJournalItem(
     }
     return OperationJournalItem(
         key = "transfer:$transferId",
-        title = "Transfer · transfer #$transferId",
+        title = if (selectedBulkTransferIds.contains(transferId)) {
+            "Transfer · transfer #$transferId · selected"
+        } else {
+            "Transfer · transfer #$transferId"
+        },
         amount = "${primary.amountOriginal} ${primary.currency}",
         meta = "${primary.date} · transfer · $direction",
         description = primary.description,
         tags = emptyList(),
         selectableRecordId = null,
         transferId = transferId,
-        selected = false,
+        selected = selectedBulkTransferIds.contains(transferId),
+        bulkSelectable = true,
     )
 }
+
+private fun isTransferCommissionMarker(description: String): Boolean =
+    Regex("""^\[transfer:\d+]$""").matches(description.trim())

@@ -115,6 +115,12 @@ data class UpdateTransferResult(
     val transferId: Long,
 )
 
+data class OperationDeleteResult(
+    val deletedRecords: Long,
+    val deletedTransfers: Long,
+    val skippedRecords: Long,
+)
+
 data class WalletOption(
     val id: Long,
     val name: String,

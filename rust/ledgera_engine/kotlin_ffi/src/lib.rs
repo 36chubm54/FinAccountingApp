@@ -1,12 +1,12 @@
 use ledgera_engine_storage::{
-    base_currency_code, create_standalone_record, create_transfer, create_wallet,
-    current_local_date, delete_standalone_record, delete_transfer, delete_wallet,
+    OperationDeleteResult, RecordFilterPayload, RecordRow, StandaloneRecordCreatePayload,
+    StandaloneRecordUpdatePayload, TransferCreatePayload, TransferRow, TransferUpdatePayload,
+    WalletBalanceRow, WalletCreatePayload, WalletRow, base_currency_code, create_standalone_record,
+    create_transfer, create_wallet, current_local_date, delete_all_operations,
+    delete_operations_selection, delete_standalone_record, delete_transfer, delete_wallet,
     distinct_record_categories, filtered_record_list_rows, standalone_record_get_row, tag_names,
     transfer_get_row, update_standalone_record, update_transfer, wallet_balance_row,
     wallet_balance_rows, wallet_list_rows,
-    RecordFilterPayload, RecordRow, StandaloneRecordCreatePayload, StandaloneRecordUpdatePayload,
-    TransferCreatePayload, TransferRow, TransferUpdatePayload, WalletBalanceRow,
-    WalletCreatePayload, WalletRow,
 };
 use std::fmt;
 use std::path::Path;
@@ -93,6 +93,13 @@ pub struct CreateWalletRequest {
 pub struct WalletDeleteResultDto {
     pub wallet_id: i64,
     pub action: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OperationDeleteResultDto {
+    pub deleted_records: i64,
+    pub deleted_transfers: i64,
+    pub skipped_records: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -324,6 +331,22 @@ impl LedgeraEngine {
         delete_transfer(&self.db_path, transfer_id).map_err(storage_error)
     }
 
+    pub fn delete_all_operations(&self) -> Result<OperationDeleteResultDto, LedgeraEngineError> {
+        delete_all_operations(&self.db_path)
+            .map(operation_delete_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn delete_operations_selection(
+        &self,
+        record_ids: Vec<i64>,
+        transfer_ids: Vec<i64>,
+    ) -> Result<OperationDeleteResultDto, LedgeraEngineError> {
+        delete_operations_selection(&self.db_path, &record_ids, &transfer_ids)
+            .map(operation_delete_to_dto)
+            .map_err(storage_error)
+    }
+
     pub fn list_tags(&self) -> Result<Vec<String>, LedgeraEngineError> {
         tag_names(&self.db_path).map_err(storage_error)
     }
@@ -353,7 +376,10 @@ impl LedgeraEngine {
             .map_err(storage_error)
     }
 
-    pub fn delete_wallet(&self, wallet_id: i64) -> Result<WalletDeleteResultDto, LedgeraEngineError> {
+    pub fn delete_wallet(
+        &self,
+        wallet_id: i64,
+    ) -> Result<WalletDeleteResultDto, LedgeraEngineError> {
         delete_wallet(&self.db_path, wallet_id)
             .map(|result| WalletDeleteResultDto {
                 wallet_id: result.wallet_id,
@@ -527,6 +553,14 @@ fn wallet_balance_to_dto(row: WalletBalanceRow) -> WalletBalanceDto {
         name: row.1,
         currency: row.2,
         balance: format_money(row.3 + row.4),
+    }
+}
+
+fn operation_delete_to_dto(result: OperationDeleteResult) -> OperationDeleteResultDto {
+    OperationDeleteResultDto {
+        deleted_records: result.deleted_records,
+        deleted_transfers: result.deleted_transfers,
+        skipped_records: result.skipped_records,
     }
 }
 
@@ -1067,14 +1101,98 @@ mod tests {
 
         assert!(engine.delete_transfer(result.transfer_id).unwrap());
         assert!(engine.get_transfer(result.transfer_id).unwrap().is_none());
-        assert!(engine
-            .list_records(RecordFilterDto::default())
-            .unwrap()
-            .iter()
-            .all(|record| record.transfer_id != Some(result.transfer_id)));
+        assert!(
+            engine
+                .list_records(RecordFilterDto::default())
+                .unwrap()
+                .iter()
+                .all(|record| record.transfer_id != Some(result.transfer_id))
+        );
 
         let error = engine.delete_transfer(result.transfer_id).unwrap_err();
         assert!(error.to_string().contains("Transfer not found"));
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_bulk_deletes_operations() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+        let record = engine
+            .create_record(CreateRecordRequest {
+                record_type: "expense".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Food".to_owned(),
+                description: "Lunch".to_owned(),
+                tags: vec!["food".to_owned()],
+            })
+            .unwrap();
+        let transfer = engine
+            .create_transfer(CreateTransferRequest {
+                from_wallet_id: 1,
+                to_wallet_id: 2,
+                date: "2026-01-02".to_owned(),
+                amount: "20".to_owned(),
+                currency: "KZT".to_owned(),
+                description: "Move".to_owned(),
+                commission_amount: "0".to_owned(),
+                commission_currency: "KZT".to_owned(),
+            })
+            .unwrap();
+
+        let selected = engine
+            .delete_operations_selection(vec![record.id], vec![transfer.transfer_id])
+            .unwrap();
+
+        assert_eq!(
+            selected,
+            OperationDeleteResultDto {
+                deleted_records: 1,
+                deleted_transfers: 1,
+                skipped_records: 0,
+            }
+        );
+        assert!(
+            engine
+                .list_records(RecordFilterDto::default())
+                .unwrap()
+                .is_empty()
+        );
+
+        engine
+            .create_record(CreateRecordRequest {
+                record_type: "income".to_owned(),
+                date: "2026-01-03".to_owned(),
+                wallet_id: 1,
+                amount_original: "5".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "5".to_owned(),
+                category: "Bonus".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            })
+            .unwrap();
+        let all = engine.delete_all_operations().unwrap();
+        assert_eq!(
+            all,
+            OperationDeleteResultDto {
+                deleted_records: 1,
+                deleted_transfers: 0,
+                skipped_records: 0,
+            }
+        );
+        assert!(
+            engine
+                .list_records(RecordFilterDto::default())
+                .unwrap()
+                .is_empty()
+        );
         fs::remove_file(db_path).ok();
     }
 
@@ -1118,11 +1236,13 @@ mod tests {
         let result = engine.delete_wallet(empty_wallet.id).unwrap();
         assert_eq!(result.wallet_id, empty_wallet.id);
         assert_eq!(result.action, "hard_deleted");
-        assert!(engine
-            .list_wallets()
-            .unwrap()
-            .iter()
-            .all(|wallet| wallet.id != empty_wallet.id));
+        assert!(
+            engine
+                .list_wallets()
+                .unwrap()
+                .iter()
+                .all(|wallet| wallet.id != empty_wallet.id)
+        );
         let replacement = engine
             .create_wallet(CreateWalletRequest {
                 name: "Replacement".to_owned(),
@@ -1159,13 +1279,15 @@ mod tests {
 
         let result = engine.delete_wallet(archived_wallet.id).unwrap();
         assert_eq!(result.action, "soft_deleted");
-        assert!(!engine
-            .list_wallets()
-            .unwrap()
-            .into_iter()
-            .find(|wallet| wallet.id == archived_wallet.id)
-            .unwrap()
-            .is_active);
+        assert!(
+            !engine
+                .list_wallets()
+                .unwrap()
+                .into_iter()
+                .find(|wallet| wallet.id == archived_wallet.id)
+                .unwrap()
+                .is_active
+        );
         fs::remove_file(db_path).ok();
     }
 
@@ -1189,7 +1311,11 @@ mod tests {
             .unwrap();
         drop(conn);
         let error = engine.delete_wallet(1).unwrap_err();
-        assert!(error.to_string().contains("System wallet cannot be deleted"));
+        assert!(
+            error
+                .to_string()
+                .contains("System wallet cannot be deleted")
+        );
         fs::remove_file(db_path).ok();
     }
 

@@ -7,6 +7,7 @@ import app.ledgera.model.CreateTransferResult
 import app.ledgera.model.CreateWalletRequest
 import app.ledgera.model.EngineStatus
 import app.ledgera.model.OperationFilter
+import app.ledgera.model.OperationDeleteResult
 import app.ledgera.model.OperationRecord
 import app.ledgera.model.TransferDetails
 import app.ledgera.model.UpdateOperationRequest
@@ -260,7 +261,7 @@ class OperationsViewModelTest {
     }
 
     @Test
-    fun placeholderJournalActionsShowNoticeWithoutEngineCalls() {
+    fun importExportPlaceholdersShowNoticeWithoutEngineCalls() {
         val adapter = FakeEngineAdapter()
         val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
 
@@ -269,12 +270,6 @@ class OperationsViewModelTest {
 
         viewModel.showExportPlaceholder()
         assertEquals("Export is not available in beta.1 yet", viewModel.state.value.notice)
-
-        viewModel.showDeleteAllPlaceholder()
-        assertEquals("Delete all is not available in beta.1 yet", viewModel.state.value.notice)
-
-        viewModel.showSelectiveDeletePlaceholder()
-        assertEquals("Selective delete is not available in beta.1 yet", viewModel.state.value.notice)
 
         assertEquals(0, adapter.createCalls)
         assertEquals(0, adapter.createTransferCalls)
@@ -285,6 +280,66 @@ class OperationsViewModelTest {
         assertEquals(0, adapter.deleteTransferCalls)
         assertEquals(0, adapter.refreshCalls)
         assertEquals(null, viewModel.state.value.error)
+    }
+
+    @Test
+    fun deleteAllOperationsRefreshesStateAndShowsNotice() {
+        val adapter = FakeEngineAdapter(
+            records = mutableListOf(
+                operationRecord(id = 1),
+                operationRecord(id = 2, type = "expense", transferId = 42, category = "Transfer"),
+                operationRecord(id = 3, type = "income", transferId = 42, category = "Transfer"),
+                operationRecord(id = 4, type = "mandatory_expense", category = "Mandatory"),
+            )
+        )
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.deleteAllOperations()
+
+        assertEquals(1, adapter.deleteAllOperationsCalls)
+        assertEquals("Deleted 1 records and 1 transfers. Skipped 1 linked records", viewModel.state.value.notice)
+        assertEquals(listOf(4L), viewModel.state.value.records.map { it.id })
+        assertEquals(false, viewModel.state.value.selectiveDeleteMode)
+    }
+
+    @Test
+    fun selectiveDeleteTogglesRowsAndDeletesSelection() {
+        val adapter = FakeEngineAdapter(
+            records = mutableListOf(
+                operationRecord(id = 1),
+                operationRecord(id = 2, type = "expense", transferId = 42, category = "Transfer"),
+                operationRecord(id = 3, type = "income", transferId = 42, category = "Transfer"),
+            )
+        )
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.startSelectiveDelete()
+        viewModel.toggleBulkRecord(1)
+        viewModel.toggleBulkTransfer(42)
+        viewModel.deleteSelectedOperations()
+
+        assertEquals(1, adapter.deleteSelectionCalls)
+        assertEquals(listOf(1L), adapter.lastDeletedRecordIds)
+        assertEquals(listOf(42L), adapter.lastDeletedTransferIds)
+        assertEquals("Deleted 1 records and 1 transfers", viewModel.state.value.notice)
+        assertEquals(emptyList(), viewModel.state.value.records)
+        assertEquals(false, viewModel.state.value.selectiveDeleteMode)
+        assertEquals(emptySet(), viewModel.state.value.selectedBulkRecordIds)
+        assertEquals(emptySet(), viewModel.state.value.selectedBulkTransferIds)
+    }
+
+    @Test
+    fun selectiveDeleteRejectsEmptySelectionBeforeEngineCall() {
+        val adapter = FakeEngineAdapter()
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.startSelectiveDelete()
+        viewModel.deleteSelectedOperations()
+
+        assertEquals("Select at least one operation or transfer", viewModel.state.value.error)
+        assertEquals(0, adapter.deleteSelectionCalls)
     }
 
     @Test
@@ -713,6 +768,8 @@ private class FakeEngineAdapter(
     private val transferError: Throwable? = null,
     private val updateTransferError: Throwable? = null,
     private val deleteTransferError: Throwable? = null,
+    private val deleteAllOperationsError: Throwable? = null,
+    private val deleteSelectionError: Throwable? = null,
     private val wallets: MutableList<WalletOption> = mutableListOf(
         WalletOption(id = 1, name = "Cash", currency = "KZT", balance = "100.00"),
         WalletOption(id = 2, name = "Card", currency = "KZT", balance = "0.00"),
@@ -723,9 +780,13 @@ private class FakeEngineAdapter(
     var getTransferCalls = 0
     var updateTransferCalls = 0
     var deleteTransferCalls = 0
+    var deleteAllOperationsCalls = 0
+    var deleteSelectionCalls = 0
     var updateCalls = 0
     var deleteCalls = 0
     var refreshCalls = 0
+    var lastDeletedRecordIds: List<Long> = emptyList()
+    var lastDeletedTransferIds: List<Long> = emptyList()
 
     override suspend fun status() = EngineStatus(true, "test.db", "ready")
 
@@ -869,6 +930,54 @@ private class FakeEngineAdapter(
         deleteTransferCalls += 1
         records.removeIf { it.transferId == transferId || it.description == "[transfer:$transferId]" }
         return true
+    }
+
+    override suspend fun deleteAllOperations(): OperationDeleteResult {
+        deleteAllOperationsError?.let { throw it }
+        deleteAllOperationsCalls += 1
+        val transferIds = records.mapNotNull { it.transferId }.toSet()
+        val deletedRecords = records.count {
+            it.transferId == null &&
+                it.relatedDebtId == null &&
+                (it.type == "income" || it.type == "expense") &&
+                !it.description.matches(Regex("""^\[transfer:\d+]$"""))
+        }.toLong()
+        val skippedRecords = records.count {
+            it.relatedDebtId != null ||
+                (it.transferId == null && it.type != "income" && it.type != "expense")
+        }.toLong()
+        records.removeIf {
+            it.transferId in transferIds ||
+                (
+                    it.transferId == null &&
+                        it.relatedDebtId == null &&
+                        (it.type == "income" || it.type == "expense") &&
+                        !it.description.matches(Regex("""^\[transfer:\d+]$"""))
+                    )
+        }
+        return OperationDeleteResult(
+            deletedRecords = deletedRecords,
+            deletedTransfers = transferIds.size.toLong(),
+            skippedRecords = skippedRecords,
+        )
+    }
+
+    override suspend fun deleteOperationsSelection(
+        recordIds: List<Long>,
+        transferIds: List<Long>,
+    ): OperationDeleteResult {
+        deleteSelectionError?.let { throw it }
+        deleteSelectionCalls += 1
+        lastDeletedRecordIds = recordIds
+        lastDeletedTransferIds = transferIds
+        records.removeIf { record ->
+            record.id in recordIds || record.transferId in transferIds || transferIds.any { record.description == "[transfer:$it]" }
+        }
+        return OperationDeleteResult(
+            deletedRecords = recordIds.size.toLong(),
+            deletedTransfers = transferIds.size.toLong(),
+            skippedRecords = 0,
+        )
     }
 
     override suspend fun listTags(): List<String> = listOf("home")

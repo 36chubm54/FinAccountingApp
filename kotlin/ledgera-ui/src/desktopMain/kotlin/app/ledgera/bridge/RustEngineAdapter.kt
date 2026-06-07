@@ -13,6 +13,7 @@ import app.ledgera.model.CreateTransferResult
 import app.ledgera.model.CreateWalletRequest
 import app.ledgera.model.EngineStatus
 import app.ledgera.model.OperationFilter
+import app.ledgera.model.OperationDeleteResult
 import app.ledgera.model.OperationRecord
 import app.ledgera.model.TransferDetails
 import app.ledgera.model.UpdateOperationRequest
@@ -135,6 +136,29 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
 
     override suspend fun deleteTransfer(transferId: Long): Boolean = withContext(Dispatchers.IO) {
         engine.deleteTransfer(transferId)
+    }
+
+    override suspend fun deleteAllOperations(): OperationDeleteResult = withContext(Dispatchers.IO) {
+        engine.deleteAllOperations().let {
+            OperationDeleteResult(
+                deletedRecords = it.deletedRecords,
+                deletedTransfers = it.deletedTransfers,
+                skippedRecords = it.skippedRecords,
+            )
+        }
+    }
+
+    override suspend fun deleteOperationsSelection(
+        recordIds: List<Long>,
+        transferIds: List<Long>,
+    ): OperationDeleteResult = withContext(Dispatchers.IO) {
+        engine.deleteOperationsSelection(recordIds, transferIds).let {
+            OperationDeleteResult(
+                deletedRecords = it.deletedRecords,
+                deletedTransfers = it.deletedTransfers,
+                skippedRecords = it.skippedRecords,
+            )
+        }
     }
 
     override suspend fun listTags(): List<String> = withContext(Dispatchers.IO) {

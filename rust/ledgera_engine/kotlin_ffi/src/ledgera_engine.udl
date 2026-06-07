@@ -79,6 +79,12 @@ dictionary WalletDeleteResultDto {
     string action;
 };
 
+dictionary OperationDeleteResultDto {
+    i64 deleted_records;
+    i64 deleted_transfers;
+    i64 skipped_records;
+};
+
 dictionary RecordDto {
     i64 id;
     string record_type;
@@ -154,6 +160,10 @@ interface LedgeraEngine {
     UpdateTransferResult update_transfer(i64 transfer_id, UpdateTransferRequest request);
     [Throws=LedgeraEngineError]
     boolean delete_transfer(i64 transfer_id);
+    [Throws=LedgeraEngineError]
+    OperationDeleteResultDto delete_all_operations();
+    [Throws=LedgeraEngineError]
+    OperationDeleteResultDto delete_operations_selection(sequence<i64> record_ids, sequence<i64> transfer_ids);
     [Throws=LedgeraEngineError]
     sequence<string> list_tags();
     [Throws=LedgeraEngineError]
