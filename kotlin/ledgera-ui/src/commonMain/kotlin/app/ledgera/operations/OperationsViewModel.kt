@@ -6,7 +6,9 @@ import app.ledgera.model.CreateTransferRequest
 import app.ledgera.model.OperationDraft
 import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationRecord
+import app.ledgera.model.TransferDraft
 import app.ledgera.model.UpdateOperationRequest
+import app.ledgera.model.UpdateTransferRequest
 import app.ledgera.model.WalletOption
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +28,7 @@ data class OperationsUiState(
     val filter: OperationFilter = OperationFilter(),
     val selectedRecordId: Long? = null,
     val editDraft: OperationDraft? = null,
+    val transferDraft: TransferDraft? = null,
     val error: String? = null,
     val notice: String? = null,
 )
@@ -64,6 +67,7 @@ class OperationsViewModel(
                     editDraft = mutableState.value.editDraft?.takeIf { draft ->
                         draft.id != null && records.any { it.id == draft.id }
                     },
+                    transferDraft = mutableState.value.transferDraft,
                     notice = notice,
                 )
             }.onFailure { error ->
@@ -82,6 +86,7 @@ class OperationsViewModel(
             mutableState.value = mutableState.value.copy(
                 selectedRecordId = null,
                 editDraft = null,
+                transferDraft = null,
                 error = null,
                 notice = "Transfer-linked rows are read-only in this beta.1 slice",
             )
@@ -91,6 +96,7 @@ class OperationsViewModel(
             mutableState.value = mutableState.value.copy(
                 selectedRecordId = null,
                 editDraft = null,
+                transferDraft = null,
                 error = null,
                 notice = "Debt-linked rows are read-only in this beta.1 slice",
             )
@@ -99,13 +105,20 @@ class OperationsViewModel(
         mutableState.value = mutableState.value.copy(
             selectedRecordId = recordId,
             editDraft = record?.toDraft(),
+            transferDraft = null,
             error = if (record == null) "Record not found" else null,
             notice = null,
         )
     }
 
     fun clearSelection() {
-        mutableState.value = mutableState.value.copy(selectedRecordId = null, editDraft = null, error = null, notice = null)
+        mutableState.value = mutableState.value.copy(
+            selectedRecordId = null,
+            editDraft = null,
+            transferDraft = null,
+            error = null,
+            notice = null,
+        )
     }
 
     fun clearFeedback() {
@@ -114,6 +127,39 @@ class OperationsViewModel(
 
     fun updateDraft(draft: OperationDraft) {
         mutableState.value = mutableState.value.copy(editDraft = draft, error = null, notice = null)
+    }
+
+    fun selectTransfer(transferId: Long) {
+        mutableState.value = mutableState.value.copy(
+            loading = true,
+            selectedRecordId = null,
+            editDraft = null,
+            transferDraft = null,
+            error = null,
+            notice = null,
+        )
+        launchSafely {
+            runCatching {
+                val transfer = engine.getTransfer(transferId)
+                    ?: error("Transfer not found: $transferId")
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    transferDraft = transfer.toDraft(),
+                    error = null,
+                    notice = null,
+                )
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
+    fun updateTransferDraft(draft: TransferDraft) {
+        mutableState.value = mutableState.value.copy(transferDraft = draft, error = null, notice = null)
     }
 
     fun create(request: CreateOperationRequest) {
@@ -186,6 +232,34 @@ class OperationsViewModel(
         }
     }
 
+    fun updateSelectedTransfer() {
+        val draft = mutableState.value.transferDraft
+        if (draft == null) {
+            mutableState.value = mutableState.value.copy(error = "Select a transfer first", notice = null)
+            return
+        }
+        val validationError = validate(draft)
+        if (validationError != null) {
+            mutableState.value = mutableState.value.copy(error = validationError, notice = null)
+            return
+        }
+        val request = draft.toUpdateRequest()
+        mutableState.value = mutableState.value.copy(loading = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                val result = engine.updateTransfer(draft.id, request)
+                mutableState.value = mutableState.value.copy(transferDraft = null)
+                refresh(notice = "Transfer updated (id=${result.transferId})")
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
     fun deleteSelected() {
         val recordId = mutableState.value.selectedRecordId
         if (recordId == null) {
@@ -244,6 +318,18 @@ class OperationsViewModel(
             baseCurrency = mutableState.value.baseCurrency,
         )
 
+    private fun validate(draft: TransferDraft): String? =
+        OperationValidation.validateTransferFields(
+            fromWalletId = draft.fromWalletId,
+            toWalletId = draft.toWalletId,
+            date = draft.date,
+            amount = draft.amount,
+            currency = draft.currency,
+            commissionAmount = "0",
+            commissionCurrency = mutableState.value.baseCurrency,
+            baseCurrency = mutableState.value.baseCurrency,
+        )
+
     private fun validate(draft: OperationDraft): String? =
         OperationValidation.validateFields(
             type = draft.type,
@@ -281,6 +367,17 @@ class OperationsViewModel(
             tagsText = tags.joinToString(", "),
         )
 
+    private fun app.ledgera.model.TransferDetails.toDraft(): TransferDraft =
+        TransferDraft(
+            id = id,
+            fromWalletId = fromWalletId,
+            toWalletId = toWalletId,
+            date = date,
+            amount = amountOriginal,
+            currency = currency,
+            description = description,
+        )
+
     private fun OperationDraft.toUpdateRequest(): UpdateOperationRequest =
         UpdateOperationRequest(
             type = type,
@@ -293,6 +390,16 @@ class OperationsViewModel(
             category = category,
             description = description,
             tags = OperationValidation.parseTags(tagsText),
+        )
+
+    private fun TransferDraft.toUpdateRequest(): UpdateTransferRequest =
+        UpdateTransferRequest(
+            fromWalletId = fromWalletId,
+            toWalletId = toWalletId,
+            date = date,
+            amount = amount,
+            currency = currency,
+            description = description,
         )
 
     private fun launchSafely(block: suspend () -> Unit) {

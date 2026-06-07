@@ -54,6 +54,19 @@ dictionary CreateTransferResult {
     i64 transfer_id;
 };
 
+dictionary UpdateTransferRequest {
+    i64 from_wallet_id;
+    i64 to_wallet_id;
+    string date;
+    string amount;
+    string currency;
+    string description;
+};
+
+dictionary UpdateTransferResult {
+    i64 transfer_id;
+};
+
 dictionary CreateWalletRequest {
     string name;
     string currency;
@@ -87,6 +100,18 @@ dictionary WalletDto {
     boolean is_active;
 };
 
+dictionary TransferDto {
+    i64 id;
+    i64 from_wallet_id;
+    i64 to_wallet_id;
+    string date;
+    string amount_original;
+    string currency;
+    string rate_at_operation;
+    string amount_base;
+    string description;
+};
+
 dictionary WalletBalanceDto {
     i64 wallet_id;
     string name;
@@ -118,6 +143,10 @@ interface LedgeraEngine {
     boolean delete_record(i64 record_id);
     [Throws=LedgeraEngineError]
     CreateTransferResult create_transfer(CreateTransferRequest request);
+    [Throws=LedgeraEngineError]
+    TransferDto? get_transfer(i64 transfer_id);
+    [Throws=LedgeraEngineError]
+    UpdateTransferResult update_transfer(i64 transfer_id, UpdateTransferRequest request);
     [Throws=LedgeraEngineError]
     sequence<string> list_tags();
     [Throws=LedgeraEngineError]

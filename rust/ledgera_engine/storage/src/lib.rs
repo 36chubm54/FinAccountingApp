@@ -118,6 +118,16 @@ pub struct TransferCreatePayload {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct TransferUpdatePayload {
+    pub from_wallet_id: i64,
+    pub to_wallet_id: i64,
+    pub date: String,
+    pub amount: String,
+    pub currency: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct WalletCreatePayload {
     pub name: String,
     pub currency: String,
@@ -610,6 +620,15 @@ pub fn transfer_list_rows(db_path: &str) -> StorageResult<Vec<TransferRow>> {
     Ok(result)
 }
 
+pub fn transfer_get_row(db_path: &str, transfer_id: i64) -> StorageResult<Option<TransferRow>> {
+    if transfer_id <= 0 {
+        return Ok(None);
+    }
+    Ok(transfer_list_rows(db_path)?
+        .into_iter()
+        .find(|row| row.id == transfer_id))
+}
+
 pub fn transfer_id_by_record_index(db_path: &str, index: i64) -> StorageResult<Option<i64>> {
     if index < 0 {
         return Ok(None);
@@ -782,6 +801,203 @@ pub fn create_transfer(
     transfer_list_rows(db_path)?
         .into_iter()
         .find(|row| row.id == transfer_id)
+        .ok_or_else(|| format!("Transfer not found: {transfer_id}"))
+}
+
+pub fn update_transfer(
+    db_path: &str,
+    transfer_id: i64,
+    payload: &TransferUpdatePayload,
+) -> StorageResult<TransferRow> {
+    if transfer_id <= 0 {
+        return Err("Transfer id is required".to_owned());
+    }
+    let mut conn = open_sqlite_connection(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(sqlite_err)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+
+    if payload.from_wallet_id <= 0 || payload.to_wallet_id <= 0 {
+        return Err("Transfer wallets are required".to_owned());
+    }
+    if payload.from_wallet_id == payload.to_wallet_id {
+        return Err("Transfer wallets must be different".to_owned());
+    }
+    if payload.date.trim().is_empty() {
+        return Err("Transfer date is required".to_owned());
+    }
+    validate_ymd_date(payload.date.trim())?;
+
+    let from_wallet = active_wallet_in_tx(&tx, payload.from_wallet_id, "source")?;
+    active_wallet_in_tx(&tx, payload.to_wallet_id, "target")?;
+
+    let base_currency = base_currency_code_in_tx(&tx)?;
+    let currency = payload.currency.trim().to_uppercase();
+    validate_currency_code(&currency)?;
+    validate_transfer_base_currency_only(&currency, &base_currency)?;
+
+    let amount_minor = to_minor_units(&payload.amount)?;
+    if amount_minor <= 0 {
+        return Err("Transfer amount must be positive".to_owned());
+    }
+    let amount_text = quantize_money_text(&payload.amount)?;
+    let amount_value = amount_text
+        .parse::<f64>()
+        .map_err(|_| "invalid transfer amount".to_owned())?;
+    let rate_text = quantize_rate_text("1")?;
+    let rate_value = rate_text
+        .parse::<f64>()
+        .map_err(|_| "invalid transfer rate".to_owned())?;
+    let description = payload.description.trim();
+
+    let existing = tx
+        .query_row(
+            "SELECT id FROM transfers WHERE id = ?1",
+            [transfer_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(sqlite_err)?;
+    if existing.is_none() {
+        return Err(format!("Transfer not found: {transfer_id}"));
+    }
+
+    let linked = transfer_linked_record_ids_in_tx(&tx, transfer_id)?;
+    let commission_marker = format!("[transfer:{transfer_id}]");
+    let commission_minor = tx
+        .query_row(
+            "SELECT COALESCE(SUM(COALESCE(amount_base_minor, CAST(ROUND(amount_base * 100.0) AS INTEGER))), 0)
+             FROM records
+             WHERE transfer_id IS NULL
+               AND type = 'expense'
+               AND category = 'Commission'
+               AND description = ?1",
+            [commission_marker.as_str()],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(sqlite_err)?;
+
+    if !from_wallet.allow_negative {
+        let balance_minor = wallet_balance_minor_excluding_transfer_in_tx(
+            &tx,
+            payload.from_wallet_id,
+            transfer_id,
+        )?;
+        if balance_minor - amount_minor - commission_minor < 0 {
+            return Err("Insufficient funds in source wallet".to_owned());
+        }
+    }
+
+    tx.execute(
+        "UPDATE transfers
+         SET from_wallet_id = ?1,
+             to_wallet_id = ?2,
+             date = ?3,
+             amount_original = ?4,
+             amount_original_minor = ?5,
+             currency = ?6,
+             rate_at_operation = ?7,
+             rate_at_operation_text = ?8,
+             amount_base = ?9,
+             amount_base_minor = ?10,
+             description = ?11
+         WHERE id = ?12",
+        (
+            payload.from_wallet_id,
+            payload.to_wallet_id,
+            payload.date.trim(),
+            amount_value,
+            amount_minor,
+            currency.as_str(),
+            rate_value,
+            rate_text.as_str(),
+            amount_value,
+            amount_minor,
+            description,
+            transfer_id,
+        ),
+    )
+    .map_err(sqlite_err)?;
+
+    tx.execute(
+        "UPDATE records
+         SET date = ?1,
+             wallet_id = ?2,
+             amount_original = ?3,
+             amount_original_minor = ?4,
+             currency = ?5,
+             rate_at_operation = ?6,
+             rate_at_operation_text = ?7,
+             amount_base = ?8,
+             amount_base_minor = ?9,
+             category = 'Transfer',
+             description = ?10
+         WHERE id = ?11",
+        (
+            payload.date.trim(),
+            payload.from_wallet_id,
+            amount_value,
+            amount_minor,
+            currency.as_str(),
+            rate_value,
+            rate_text.as_str(),
+            amount_value,
+            amount_minor,
+            description,
+            linked.expense_record_id,
+        ),
+    )
+    .map_err(sqlite_err)?;
+
+    tx.execute(
+        "UPDATE records
+         SET date = ?1,
+             wallet_id = ?2,
+             amount_original = ?3,
+             amount_original_minor = ?4,
+             currency = ?5,
+             rate_at_operation = ?6,
+             rate_at_operation_text = ?7,
+             amount_base = ?8,
+             amount_base_minor = ?9,
+             category = 'Transfer',
+             description = ?10
+         WHERE id = ?11",
+        (
+            payload.date.trim(),
+            payload.to_wallet_id,
+            amount_value,
+            amount_minor,
+            currency.as_str(),
+            rate_value,
+            rate_text.as_str(),
+            amount_value,
+            amount_minor,
+            description,
+            linked.income_record_id,
+        ),
+    )
+    .map_err(sqlite_err)?;
+
+    tx.execute(
+        "UPDATE records
+         SET date = ?1,
+             wallet_id = ?2
+         WHERE transfer_id IS NULL
+           AND type = 'expense'
+           AND category = 'Commission'
+           AND description = ?3",
+        (
+            payload.date.trim(),
+            payload.from_wallet_id,
+            commission_marker.as_str(),
+        ),
+    )
+    .map_err(sqlite_err)?;
+
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    transfer_get_row(db_path, transfer_id)?
         .ok_or_else(|| format!("Transfer not found: {transfer_id}"))
 }
 
@@ -1355,6 +1571,52 @@ struct TransferWallet {
     allow_negative: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct TransferLinkedRecordIds {
+    expense_record_id: i64,
+    income_record_id: i64,
+}
+
+fn transfer_linked_record_ids_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    transfer_id: i64,
+) -> StorageResult<TransferLinkedRecordIds> {
+    let mut stmt = tx
+        .prepare("SELECT id, type FROM records WHERE transfer_id = ?1 ORDER BY id")
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([transfer_id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(sqlite_err)?;
+    let mut linked = Vec::new();
+    for row in rows {
+        linked.push(row.map_err(sqlite_err)?);
+    }
+    if linked.len() != 2 {
+        return Err(format!(
+            "Transfer integrity violated for #{transfer_id}: expected 2 linked records, got {}",
+            linked.len()
+        ));
+    }
+    let expense_record_id = linked
+        .iter()
+        .find_map(|(id, record_type)| (record_type == "expense").then_some(*id))
+        .ok_or_else(|| {
+            format!("Transfer integrity violated for #{transfer_id}: requires one expense and one income")
+        })?;
+    let income_record_id = linked
+        .iter()
+        .find_map(|(id, record_type)| (record_type == "income").then_some(*id))
+        .ok_or_else(|| {
+            format!("Transfer integrity violated for #{transfer_id}: requires one expense and one income")
+        })?;
+    Ok(TransferLinkedRecordIds {
+        expense_record_id,
+        income_record_id,
+    })
+}
+
 fn active_wallet_in_tx(
     tx: &rusqlite::Transaction<'_>,
     wallet_id: i64,
@@ -1400,6 +1662,42 @@ fn wallet_balance_minor_in_tx(
     let sql = format!("SELECT COALESCE(SUM({signed_expr}), 0) FROM records WHERE wallet_id = ?1");
     let delta_minor = tx
         .query_row(&sql, [wallet_id], |row| row.get::<_, i64>(0))
+        .map_err(sqlite_err)?;
+    Ok(initial_minor + delta_minor)
+}
+
+fn wallet_balance_minor_excluding_transfer_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    wallet_id: i64,
+    transfer_id: i64,
+) -> StorageResult<i64> {
+    let initial_minor = tx
+        .query_row(
+            "SELECT COALESCE(initial_balance_minor, CAST(ROUND(initial_balance * 100.0) AS INTEGER), 0)
+             FROM wallets
+             WHERE id = ?1 AND is_active = 1",
+            [wallet_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(sqlite_err)?;
+    let signed_expr = signed_minor_amount_expr("amount_base", "type");
+    let marker = format!("[transfer:{transfer_id}]");
+    let sql = format!(
+        "SELECT COALESCE(SUM({signed_expr}), 0)
+         FROM records
+         WHERE wallet_id = ?1
+           AND (transfer_id IS NULL OR transfer_id != ?2)
+           AND NOT (
+               transfer_id IS NULL
+               AND type = 'expense'
+               AND category = 'Commission'
+               AND description = ?3
+           )"
+    );
+    let delta_minor = tx
+        .query_row(&sql, (wallet_id, transfer_id, marker.as_str()), |row| {
+            row.get::<_, i64>(0)
+        })
         .map_err(sqlite_err)?;
     Ok(initial_minor + delta_minor)
 }
@@ -2513,6 +2811,99 @@ mod tests {
     }
 
     #[test]
+    fn update_transfer_updates_transfer_and_linked_records() {
+        let db_path = create_balance_test_db();
+        let updated = update_transfer(
+            &db_path,
+            1,
+            &TransferUpdatePayload {
+                from_wallet_id: 2,
+                to_wallet_id: 1,
+                date: "2026-02-10".to_owned(),
+                amount: "80.255".to_owned(),
+                currency: "kzt".to_owned(),
+                description: "Back to cash".to_owned(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(updated.from_wallet_id, 2);
+        assert_eq!(updated.to_wallet_id, 1);
+        assert_eq!(updated.date, "2026-02-10");
+        assert_eq!(updated.amount_original, 80.26);
+        assert_eq!(updated.currency, "KZT");
+        assert_eq!(updated.description, "Back to cash");
+
+        let linked: Vec<RecordRow> =
+            filtered_record_list_rows(&db_path, &RecordFilterPayload::default())
+                .unwrap()
+                .into_iter()
+                .filter(|record| record.transfer_id == Some(1))
+                .collect();
+        assert_eq!(linked.len(), 2);
+        let expense = linked
+            .iter()
+            .find(|record| record.record_type == "expense")
+            .unwrap();
+        let income = linked
+            .iter()
+            .find(|record| record.record_type == "income")
+            .unwrap();
+        assert_eq!(expense.wallet_id, 2);
+        assert_eq!(income.wallet_id, 1);
+        assert_eq!(expense.date, "2026-02-10");
+        assert_eq!(income.amount_base, 80.26);
+        assert_eq!(expense.description, "Back to cash");
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn update_transfer_moves_existing_commission_marker_without_changing_amount() {
+        let db_path = create_balance_test_db();
+        let created = create_transfer(
+            &db_path,
+            &TransferCreatePayload {
+                from_wallet_id: 1,
+                to_wallet_id: 2,
+                date: "2026-02-01".to_owned(),
+                amount: "100".to_owned(),
+                currency: "KZT".to_owned(),
+                description: "Move funds".to_owned(),
+                commission_amount: "3.5".to_owned(),
+                commission_currency: "KZT".to_owned(),
+            },
+        )
+        .unwrap();
+
+        update_transfer(
+            &db_path,
+            created.id,
+            &TransferUpdatePayload {
+                from_wallet_id: 2,
+                to_wallet_id: 1,
+                date: "2026-02-09".to_owned(),
+                amount: "50".to_owned(),
+                currency: "KZT".to_owned(),
+                description: "Return funds".to_owned(),
+            },
+        )
+        .unwrap();
+
+        let rows = filtered_record_list_rows(&db_path, &RecordFilterPayload::default()).unwrap();
+        let commission = rows
+            .iter()
+            .find(|record| {
+                record.transfer_id.is_none()
+                    && record.description == format!("[transfer:{}]", created.id)
+            })
+            .unwrap();
+        assert_eq!(commission.wallet_id, 2);
+        assert_eq!(commission.date, "2026-02-09");
+        assert_eq!(commission.amount_base, 3.5);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
     fn create_transfer_rejects_invalid_inputs() {
         let db_path = create_balance_test_db();
         let request = TransferCreatePayload {
@@ -2624,6 +3015,115 @@ mod tests {
             )
             .unwrap_err()
             .contains("Insufficient funds")
+        );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn update_transfer_rejects_invalid_inputs_and_corrupted_integrity() {
+        let db_path = create_balance_test_db();
+        let request = TransferUpdatePayload {
+            from_wallet_id: 1,
+            to_wallet_id: 2,
+            date: "2026-02-01".to_owned(),
+            amount: "100".to_owned(),
+            currency: "KZT".to_owned(),
+            description: "".to_owned(),
+        };
+
+        assert!(
+            update_transfer(
+                &db_path,
+                1,
+                &TransferUpdatePayload {
+                    to_wallet_id: 1,
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("must be different")
+        );
+        assert!(
+            update_transfer(
+                &db_path,
+                1,
+                &TransferUpdatePayload {
+                    to_wallet_id: 3,
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("target wallet is inactive")
+        );
+        assert!(
+            update_transfer(
+                &db_path,
+                1,
+                &TransferUpdatePayload {
+                    date: "2026-02-30".to_owned(),
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("Date day must be between")
+        );
+        assert!(
+            update_transfer(
+                &db_path,
+                1,
+                &TransferUpdatePayload {
+                    date: "2999-01-01".to_owned(),
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("Date cannot be in the future")
+        );
+        assert!(
+            update_transfer(
+                &db_path,
+                1,
+                &TransferUpdatePayload {
+                    amount: "0".to_owned(),
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("Transfer amount must be positive")
+        );
+        assert!(
+            update_transfer(
+                &db_path,
+                1,
+                &TransferUpdatePayload {
+                    currency: "USD".to_owned(),
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("base-currency transfers only (KZT)")
+        );
+        assert!(
+            update_transfer(
+                &db_path,
+                1,
+                &TransferUpdatePayload {
+                    amount: "2000".to_owned(),
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("Insufficient funds")
+        );
+
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute("DELETE FROM records WHERE id = 5", [])
+            .unwrap();
+        drop(conn);
+        assert!(
+            update_transfer(&db_path, 1, &request)
+                .unwrap_err()
+                .contains("expected 2 linked records")
         );
         remove_test_db(&db_path);
     }

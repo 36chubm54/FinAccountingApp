@@ -19,6 +19,7 @@ class OperationJournalTest {
         assertEquals("Transfer · transfer #7", items.single().title)
         assertEquals("2026-01-01 · transfer · wallet #1 -> wallet #2", items.single().meta)
         assertEquals(7, items.single().transferId)
+        assertEquals(null, items.single().selectableRecordId)
     }
 
     @Test

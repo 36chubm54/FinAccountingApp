@@ -72,7 +72,7 @@ private fun transferJournalItem(
         meta = "${primary.date} · transfer · $direction",
         description = primary.description,
         tags = emptyList(),
-        selectableRecordId = primary.id,
+        selectableRecordId = null,
         transferId = transferId,
         selected = false,
     )

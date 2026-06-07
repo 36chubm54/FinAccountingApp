@@ -80,6 +80,41 @@ data class CreateTransferResult(
     val transferId: Long,
 )
 
+data class TransferDetails(
+    val id: Long,
+    val fromWalletId: Long,
+    val toWalletId: Long,
+    val date: String,
+    val amountOriginal: String,
+    val currency: String,
+    val rateAtOperation: String,
+    val amountBase: String,
+    val description: String,
+)
+
+data class TransferDraft(
+    val id: Long,
+    val fromWalletId: Long = 0,
+    val toWalletId: Long = 0,
+    val date: String = "",
+    val amount: String = "",
+    val currency: String = "KZT",
+    val description: String = "",
+)
+
+data class UpdateTransferRequest(
+    val fromWalletId: Long,
+    val toWalletId: Long,
+    val date: String,
+    val amount: String,
+    val currency: String,
+    val description: String,
+)
+
+data class UpdateTransferResult(
+    val transferId: Long,
+)
+
 data class WalletOption(
     val id: Long,
     val name: String,

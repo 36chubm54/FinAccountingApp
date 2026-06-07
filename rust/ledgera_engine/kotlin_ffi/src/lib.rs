@@ -1,10 +1,11 @@
 use ledgera_engine_storage::{
+    base_currency_code, create_standalone_record, create_transfer, create_wallet,
+    current_local_date, delete_standalone_record, distinct_record_categories,
+    filtered_record_list_rows, standalone_record_get_row, tag_names, transfer_get_row,
+    update_standalone_record, update_transfer, wallet_balance_rows, wallet_list_rows,
     RecordFilterPayload, RecordRow, StandaloneRecordCreatePayload, StandaloneRecordUpdatePayload,
-    TransferCreatePayload, WalletBalanceRow, WalletCreatePayload, WalletRow, base_currency_code,
-    create_standalone_record, create_transfer, create_wallet, current_local_date,
-    delete_standalone_record, distinct_record_categories, filtered_record_list_rows,
-    standalone_record_get_row, tag_names, update_standalone_record, wallet_balance_rows,
-    wallet_list_rows,
+    TransferCreatePayload, TransferRow, TransferUpdatePayload, WalletBalanceRow,
+    WalletCreatePayload, WalletRow,
 };
 use std::fmt;
 use std::path::Path;
@@ -65,6 +66,21 @@ pub struct CreateTransferResult {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct UpdateTransferRequest {
+    pub from_wallet_id: i64,
+    pub to_wallet_id: i64,
+    pub date: String,
+    pub amount: String,
+    pub currency: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdateTransferResult {
+    pub transfer_id: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct CreateWalletRequest {
     pub name: String,
     pub currency: String,
@@ -106,6 +122,19 @@ pub struct WalletBalanceDto {
     pub name: String,
     pub currency: String,
     pub balance: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransferDto {
+    pub id: i64,
+    pub from_wallet_id: i64,
+    pub to_wallet_id: i64,
+    pub date: String,
+    pub amount_original: String,
+    pub currency: String,
+    pub rate_at_operation: String,
+    pub amount_base: String,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -250,6 +279,35 @@ impl LedgeraEngine {
         };
         create_transfer(&self.db_path, &payload)
             .map(|row| CreateTransferResult {
+                transfer_id: row.id,
+            })
+            .map_err(storage_error)
+    }
+
+    pub fn get_transfer(
+        &self,
+        transfer_id: i64,
+    ) -> Result<Option<TransferDto>, LedgeraEngineError> {
+        transfer_get_row(&self.db_path, transfer_id)
+            .map(|row| row.map(transfer_to_dto))
+            .map_err(storage_error)
+    }
+
+    pub fn update_transfer(
+        &self,
+        transfer_id: i64,
+        request: UpdateTransferRequest,
+    ) -> Result<UpdateTransferResult, LedgeraEngineError> {
+        let payload = TransferUpdatePayload {
+            from_wallet_id: request.from_wallet_id,
+            to_wallet_id: request.to_wallet_id,
+            date: request.date,
+            amount: request.amount,
+            currency: request.currency,
+            description: request.description,
+        };
+        update_transfer(&self.db_path, transfer_id, &payload)
+            .map(|row| UpdateTransferResult {
                 transfer_id: row.id,
             })
             .map_err(storage_error)
@@ -450,6 +508,20 @@ fn wallet_balance_to_dto(row: WalletBalanceRow) -> WalletBalanceDto {
         name: row.1,
         currency: row.2,
         balance: format_money(row.3 + row.4),
+    }
+}
+
+fn transfer_to_dto(row: TransferRow) -> TransferDto {
+    TransferDto {
+        id: row.id,
+        from_wallet_id: row.from_wallet_id,
+        to_wallet_id: row.to_wallet_id,
+        date: row.date,
+        amount_original: format_money(row.amount_original),
+        currency: row.currency,
+        rate_at_operation: format_rate(row.rate_at_operation),
+        amount_base: format_money(row.amount_base),
+        description: row.description,
     }
 }
 
@@ -865,6 +937,77 @@ mod tests {
         assert!(records.iter().any(|record| {
             record.record_type == "income" && record.transfer_id == Some(result.transfer_id)
         }));
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_gets_and_updates_transfer() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+        let result = engine
+            .create_transfer(CreateTransferRequest {
+                from_wallet_id: 1,
+                to_wallet_id: 2,
+                date: "2026-01-01".to_owned(),
+                amount: "20".to_owned(),
+                currency: "KZT".to_owned(),
+                description: "Move".to_owned(),
+                commission_amount: "0".to_owned(),
+                commission_currency: "KZT".to_owned(),
+            })
+            .unwrap();
+
+        let transfer = engine.get_transfer(result.transfer_id).unwrap().unwrap();
+        assert_eq!(transfer.from_wallet_id, 1);
+        assert_eq!(transfer.to_wallet_id, 2);
+        assert_eq!(transfer.amount_original, "20.00");
+
+        let updated = engine
+            .update_transfer(
+                result.transfer_id,
+                UpdateTransferRequest {
+                    from_wallet_id: 1,
+                    to_wallet_id: 2,
+                    date: "2026-01-02".to_owned(),
+                    amount: "5.25".to_owned(),
+                    currency: "KZT".to_owned(),
+                    description: "Return".to_owned(),
+                },
+            )
+            .unwrap();
+        assert_eq!(updated.transfer_id, result.transfer_id);
+
+        let transfer = engine.get_transfer(result.transfer_id).unwrap().unwrap();
+        assert_eq!(transfer.from_wallet_id, 1);
+        assert_eq!(transfer.to_wallet_id, 2);
+        assert_eq!(transfer.amount_original, "5.25");
+        assert_eq!(transfer.description, "Return");
+        let records = engine.list_records(RecordFilterDto::default()).unwrap();
+        assert!(records.iter().any(|record| {
+            record.record_type == "expense"
+                && record.transfer_id == Some(result.transfer_id)
+                && record.wallet_id == 1
+        }));
+        assert!(records.iter().any(|record| {
+            record.record_type == "income"
+                && record.transfer_id == Some(result.transfer_id)
+                && record.wallet_id == 2
+        }));
+
+        let error = engine
+            .update_transfer(
+                result.transfer_id,
+                UpdateTransferRequest {
+                    from_wallet_id: 1,
+                    to_wallet_id: 1,
+                    date: "2026-01-02".to_owned(),
+                    amount: "5.25".to_owned(),
+                    currency: "KZT".to_owned(),
+                    description: "Invalid".to_owned(),
+                },
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("must be different"));
         fs::remove_file(db_path).ok();
     }
 

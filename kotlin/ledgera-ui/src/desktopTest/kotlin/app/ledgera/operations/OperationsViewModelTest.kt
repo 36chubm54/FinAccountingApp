@@ -8,7 +8,10 @@ import app.ledgera.model.CreateWalletRequest
 import app.ledgera.model.EngineStatus
 import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationRecord
+import app.ledgera.model.TransferDetails
 import app.ledgera.model.UpdateOperationRequest
+import app.ledgera.model.UpdateTransferRequest
+import app.ledgera.model.UpdateTransferResult
 import app.ledgera.model.WalletOption
 import app.ledgera.model.WalletSettingsItem
 import java.util.Locale
@@ -362,6 +365,78 @@ class OperationsViewModelTest {
     }
 
     @Test
+    fun selectTransferLoadsTransferDraft() {
+        val adapter = FakeEngineAdapter()
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.selectTransfer(42)
+
+        assertEquals(1, adapter.getTransferCalls)
+        assertEquals(42, viewModel.state.value.transferDraft?.id)
+        assertEquals(1, viewModel.state.value.transferDraft?.fromWalletId)
+        assertEquals(2, viewModel.state.value.transferDraft?.toWalletId)
+        assertEquals("10.00", viewModel.state.value.transferDraft?.amount)
+        assertEquals(null, viewModel.state.value.editDraft)
+    }
+
+    @Test
+    fun updateTransferRejectsInvalidDraftBeforeEngineCall() {
+        val adapter = FakeEngineAdapter()
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.selectTransfer(42)
+        viewModel.updateTransferDraft(viewModel.state.value.transferDraft!!.copy(toWalletId = 1))
+        viewModel.updateSelectedTransfer()
+
+        assertEquals("Transfer wallets must be different", viewModel.state.value.error)
+        assertEquals(0, adapter.updateTransferCalls)
+    }
+
+    @Test
+    fun updateTransferSuccessRefreshesStateAndClosesDialog() {
+        val adapter = FakeEngineAdapter(
+            records = mutableListOf(
+                operationRecord(id = 1, type = "income", walletId = 2, transferId = 42),
+                operationRecord(id = 2, type = "expense", walletId = 1, transferId = 42),
+            )
+        )
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.selectTransfer(42)
+        viewModel.updateTransferDraft(
+            viewModel.state.value.transferDraft!!.copy(
+                fromWalletId = 2,
+                toWalletId = 1,
+                amount = "5.25",
+                description = "Return",
+            )
+        )
+        viewModel.updateSelectedTransfer()
+
+        assertEquals(1, adapter.updateTransferCalls)
+        assertEquals(null, viewModel.state.value.transferDraft)
+        assertEquals("Transfer updated (id=42)", viewModel.state.value.notice)
+        assertEquals(
+            listOf("income:42:1:5.25", "expense:42:2:5.25"),
+            viewModel.state.value.records.map { "${it.type}:${it.transferId}:${it.walletId}:${it.amountOriginal}" },
+        )
+        assertEquals(2, adapter.refreshCalls)
+    }
+
+    @Test
+    fun updateTransferEngineErrorStaysVisible() {
+        val adapter = FakeEngineAdapter(updateTransferError = IllegalStateException("insufficient funds"))
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.selectTransfer(42)
+        viewModel.updateSelectedTransfer()
+
+        assertEquals("insufficient funds", viewModel.state.value.error)
+        assertEquals(42, viewModel.state.value.transferDraft?.id)
+    }
+
+    @Test
     fun createTransferEngineErrorSurfacesInState() {
         val adapter = FakeEngineAdapter(transferError = IllegalStateException("insufficient funds"))
         val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
@@ -561,6 +636,7 @@ private class FakeEngineAdapter(
     private val createError: Throwable? = null,
     private val updateError: Throwable? = null,
     private val transferError: Throwable? = null,
+    private val updateTransferError: Throwable? = null,
     private val wallets: MutableList<WalletOption> = mutableListOf(
         WalletOption(id = 1, name = "Cash", currency = "KZT", balance = "100.00"),
         WalletOption(id = 2, name = "Card", currency = "KZT", balance = "0.00"),
@@ -568,6 +644,8 @@ private class FakeEngineAdapter(
 ) : EngineAdapter {
     var createCalls = 0
     var createTransferCalls = 0
+    var getTransferCalls = 0
+    var updateTransferCalls = 0
     var updateCalls = 0
     var deleteCalls = 0
     var refreshCalls = 0
@@ -660,6 +738,53 @@ private class FakeEngineAdapter(
             transferId = transferId,
         )
         return CreateTransferResult(transferId = transferId)
+    }
+
+    override suspend fun getTransfer(transferId: Long): TransferDetails? {
+        getTransferCalls += 1
+        return TransferDetails(
+            id = transferId,
+            fromWalletId = 1,
+            toWalletId = 2,
+            date = "2026-01-01",
+            amountOriginal = "10.00",
+            currency = "KZT",
+            rateAtOperation = "1.000000",
+            amountBase = "10.00",
+            description = "Move",
+        )
+    }
+
+    override suspend fun updateTransfer(
+        transferId: Long,
+        request: UpdateTransferRequest,
+    ): UpdateTransferResult {
+        updateTransferError?.let { throw it }
+        updateTransferCalls += 1
+        records.replaceAll { record ->
+            if (record.transferId != transferId) {
+                record
+            } else if (record.type == "expense") {
+                record.copy(
+                    walletId = request.fromWalletId,
+                    date = request.date,
+                    amountOriginal = request.amount,
+                    amountBase = request.amount,
+                    currency = request.currency,
+                    description = request.description,
+                )
+            } else {
+                record.copy(
+                    walletId = request.toWalletId,
+                    date = request.date,
+                    amountOriginal = request.amount,
+                    amountBase = request.amount,
+                    currency = request.currency,
+                    description = request.description,
+                )
+            }
+        }
+        return UpdateTransferResult(transferId = transferId)
     }
 
     override suspend fun listTags(): List<String> = listOf("home")

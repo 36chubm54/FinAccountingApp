@@ -86,15 +86,16 @@ Current Kotlin/Rust contract:
 - the current Kotlin shell exposes all 9 roadmap sections, while Operations
   supports standalone `income` and `expense` record listing, creation, update,
   delete, tag replacement, basic wallet/date/type filters, and base-currency
-  transfer creation with optional base-currency commission records
+  transfer creation/editing with optional base-currency commission records
 - Kotlin Settings supports wallet listing and active base-currency wallet
   creation through Rust/Kotlin UniFFI; wallet edit/delete, runtime currency,
   audit, sync, and updater controls remain separate beta.1 slices
 - Kotlin Operations rejects transfer-linked and debt-linked record edits at the
   Rust storage boundary; transfer-linked mirror rows are grouped into one
-  read-only journal row with source/target wallet direction, while transfer
-  edit/delete/list parity, import/export, and full inline editor keyboard
-  parity remain separate beta.1 slices
+  transfer journal row with source/target wallet direction and transfer-level
+  editing through a modal dialog, while transfer delete/list parity, commission
+  editing, import/export, and full inline editor keyboard parity remain
+  separate beta.1 slices
 - wallet balances exposed to Kotlin include both wallet initial balance and
   record delta
 - Kotlin does not create production databases implicitly; manual smoke testing
@@ -107,7 +108,7 @@ Deferred Kotlin scope:
 - all 9-tab Desktop feature parity is the beta.1 target
 - reports, analytics, dashboard, budget, debts, distribution, mandatory,
   wallet edit/delete, runtime settings, audit, sync, updater, transfer
-  edit/delete/list parity, import/export, and broader operations workflows
+  delete/list parity, import/export, and broader operations workflows
   still need Rust UniFFI capability wiring before beta.1 parity can be claimed
 - Android, iOS, CRDT sync, and Tkinter deprecation remain later beta/RC
   milestones

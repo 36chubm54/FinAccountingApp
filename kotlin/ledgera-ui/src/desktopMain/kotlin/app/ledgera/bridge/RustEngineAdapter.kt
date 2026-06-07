@@ -6,6 +6,7 @@ import app.ledgera.engine.CreateWalletRequest as NativeCreateWalletRequest
 import app.ledgera.engine.LedgeraEngine
 import app.ledgera.engine.RecordFilterDto
 import app.ledgera.engine.UpdateRecordRequest as NativeUpdateRecordRequest
+import app.ledgera.engine.UpdateTransferRequest as NativeUpdateTransferRequest
 import app.ledgera.model.CreateOperationRequest
 import app.ledgera.model.CreateTransferRequest
 import app.ledgera.model.CreateTransferResult
@@ -13,7 +14,10 @@ import app.ledgera.model.CreateWalletRequest
 import app.ledgera.model.EngineStatus
 import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationRecord
+import app.ledgera.model.TransferDetails
 import app.ledgera.model.UpdateOperationRequest
+import app.ledgera.model.UpdateTransferRequest
+import app.ledgera.model.UpdateTransferResult
 import app.ledgera.model.WalletOption
 import app.ledgera.model.WalletSettingsItem
 import kotlinx.coroutines.Dispatchers
@@ -107,6 +111,27 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
             ).let { CreateTransferResult(transferId = it.transferId) }
         }
 
+    override suspend fun getTransfer(transferId: Long): TransferDetails? = withContext(Dispatchers.IO) {
+        engine.getTransfer(transferId)?.let(::toTransferDetails)
+    }
+
+    override suspend fun updateTransfer(
+        transferId: Long,
+        request: UpdateTransferRequest,
+    ): UpdateTransferResult = withContext(Dispatchers.IO) {
+        engine.updateTransfer(
+            transferId,
+            NativeUpdateTransferRequest(
+                fromWalletId = request.fromWalletId,
+                toWalletId = request.toWalletId,
+                date = request.date,
+                amount = request.amount,
+                currency = request.currency,
+                description = request.description,
+            )
+        ).let { UpdateTransferResult(transferId = it.transferId) }
+    }
+
     override suspend fun listTags(): List<String> = withContext(Dispatchers.IO) {
         engine.listTags()
     }
@@ -180,5 +205,18 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
             category = record.category,
             description = record.description,
             tags = record.tags,
+        )
+
+    private fun toTransferDetails(transfer: app.ledgera.engine.TransferDto): TransferDetails =
+        TransferDetails(
+            id = transfer.id,
+            fromWalletId = transfer.fromWalletId,
+            toWalletId = transfer.toWalletId,
+            date = transfer.date,
+            amountOriginal = transfer.amountOriginal,
+            currency = transfer.currency,
+            rateAtOperation = transfer.rateAtOperation,
+            amountBase = transfer.amountBase,
+            description = transfer.description,
         )
 }

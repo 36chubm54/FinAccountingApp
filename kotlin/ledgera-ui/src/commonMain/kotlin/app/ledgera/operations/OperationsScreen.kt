@@ -41,7 +41,7 @@ import app.ledgera.model.CreateOperationRequest
 import app.ledgera.model.CreateTransferRequest
 import app.ledgera.model.OperationDraft
 import app.ledgera.model.OperationFilter
-import app.ledgera.model.OperationRecord
+import app.ledgera.model.TransferDraft
 import app.ledgera.model.WalletOption
 
 @Composable
@@ -119,7 +119,13 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
                         items(journalItems, key = { it.key }) { item ->
                             OperationRow(
                                 item = item,
-                                onClick = { item.selectableRecordId?.let(viewModel::select) },
+                                onClick = {
+                                    if (item.transferId != null) {
+                                        viewModel.selectTransfer(item.transferId)
+                                    } else {
+                                        item.selectableRecordId?.let(viewModel::select)
+                                    }
+                                },
                             )
                         }
                     }
@@ -162,6 +168,18 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
                 viewModel.clearSelection()
             },
             onDelete = { confirmDelete = true },
+        )
+    }
+    state.transferDraft?.let { draft ->
+        EditTransferDialog(
+            draft = draft,
+            wallets = state.wallets,
+            baseCurrency = state.baseCurrency,
+            engineError = state.error,
+            submitting = state.loading,
+            onDraftChanged = viewModel::updateTransferDraft,
+            onSave = viewModel::updateSelectedTransfer,
+            onCancel = { viewModel.clearSelection() },
         )
     }
     if (confirmDelete && state.selectedRecordId != null) {
@@ -749,6 +767,95 @@ private fun EditOperationFields(
     }
 }
 
+@Composable
+private fun EditTransferDialog(
+    draft: TransferDraft,
+    wallets: List<WalletOption>,
+    baseCurrency: String,
+    engineError: String?,
+    submitting: Boolean,
+    onDraftChanged: (TransferDraft) -> Unit,
+    onSave: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val validationError = OperationValidation.validateTransferFields(
+        fromWalletId = draft.fromWalletId,
+        toWalletId = draft.toWalletId,
+        date = draft.date,
+        amount = draft.amount,
+        currency = draft.currency,
+        commissionAmount = "0",
+        commissionCurrency = baseCurrency,
+        baseCurrency = baseCurrency,
+    )
+
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Edit transfer #${draft.id}") },
+        text = {
+            Column(
+                modifier = dialogFormModifier(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("From wallet", style = MaterialTheme.typography.labelLarge)
+                WalletChips(wallets, draft.fromWalletId) { wallet ->
+                    val nextToWallet = if (draft.toWalletId == wallet.id) {
+                        wallets.firstOrNull { it.id != wallet.id }?.id ?: 0L
+                    } else {
+                        draft.toWalletId
+                    }
+                    onDraftChanged(draft.copy(fromWalletId = wallet.id, toWalletId = nextToWallet))
+                }
+                Text("To wallet", style = MaterialTheme.typography.labelLarge)
+                WalletChips(wallets, draft.toWalletId) { wallet ->
+                    onDraftChanged(draft.copy(toWalletId = wallet.id))
+                }
+                OutlinedTextField(
+                    modifier = dialogFieldModifier(),
+                    value = draft.date,
+                    onValueChange = { onDraftChanged(draft.copy(date = it)) },
+                    label = { Text("Date YYYY-MM-DD") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    modifier = dialogFieldModifier(),
+                    value = draft.amount,
+                    onValueChange = { onDraftChanged(draft.copy(amount = it)) },
+                    label = { Text("Amount") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    modifier = dialogFieldModifier(),
+                    value = draft.currency,
+                    onValueChange = {
+                        onDraftChanged(draft.copy(currency = OperationValidation.normalizeCurrency(it)))
+                    },
+                    label = { Text("Currency") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    modifier = dialogFieldModifier(),
+                    value = draft.description,
+                    onValueChange = { onDraftChanged(draft.copy(description = it)) },
+                    label = { Text("Description") },
+                    singleLine = true,
+                )
+                (validationError ?: engineError)?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onSave, enabled = validationError == null && !submitting) {
+                Text(if (submitting) "Saving..." else "Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Cancel") }
+        },
+    )
+}
+
 private val DialogContentWidth = 360.dp
 
 private fun dialogFieldModifier(): Modifier = Modifier.fillMaxWidth()
@@ -790,7 +897,7 @@ private fun OperationRow(item: OperationJournalItem, onClick: () -> Unit) {
             Text(item.meta)
             if (item.transferId != null) {
                 Text(
-                    "Transfer-linked · read-only",
+                    "Transfer-linked",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
