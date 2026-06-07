@@ -97,7 +97,7 @@ internal object OperationValidation {
         return if (normalizedCurrency == normalizedBase) {
             null
         } else {
-            "Transfer creator currently supports base-currency transfers only ($normalizedBase)"
+            "Transfer flow currently supports base-currency transfers only ($normalizedBase)"
         }
     }
 }

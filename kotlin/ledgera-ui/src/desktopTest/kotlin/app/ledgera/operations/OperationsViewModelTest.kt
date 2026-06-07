@@ -322,7 +322,7 @@ class OperationsViewModelTest {
         viewModel.createTransfer(validTransferRequest(currency = "USD"))
 
         assertEquals(
-            "Transfer creator currently supports base-currency transfers only (KZT)",
+            "Transfer flow currently supports base-currency transfers only (KZT)",
             viewModel.state.value.error,
         )
         assertEquals(0, adapter.createTransferCalls)

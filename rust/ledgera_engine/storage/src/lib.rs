@@ -452,6 +452,42 @@ pub fn wallet_balance_rows(
     Ok(rows)
 }
 
+pub fn wallet_balance_row(
+    db_path: &str,
+    wallet_id: i64,
+) -> StorageResult<Option<WalletBalanceRow>> {
+    if wallet_id <= 0 {
+        return Ok(None);
+    }
+    let conn = open_sqlite_connection(db_path)?;
+    let signed_expr = signed_minor_amount_expr("r.amount_base", "r.type");
+    let sql = format!(
+        "SELECT \
+            w.id, \
+            w.name, \
+            w.currency, \
+            COALESCE(w.initial_balance_minor, CAST(ROUND(w.initial_balance * 100.0) AS INTEGER), 0) AS initial_minor, \
+            COALESCE(SUM({signed_expr}), 0) AS delta_minor \
+         FROM wallets AS w \
+         LEFT JOIN records AS r ON r.wallet_id = w.id \
+         WHERE w.is_active = 1 AND w.id = ?1 \
+         GROUP BY w.id, w.name, w.currency, initial_minor"
+    );
+    conn.query_row(&sql, [wallet_id], |row| {
+        let initial_minor: i64 = row.get(3)?;
+        let delta_minor: i64 = row.get(4)?;
+        Ok((
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            minor_to_money_value(initial_minor),
+            minor_to_money_value(delta_minor),
+        ))
+    })
+    .optional()
+    .map_err(sqlite_err)
+}
+
 pub fn cashflow_sum(
     db_path: &str,
     record_type: &str,
@@ -869,8 +905,6 @@ pub fn update_transfer(
             "SELECT COALESCE(SUM(COALESCE(amount_base_minor, CAST(ROUND(amount_base * 100.0) AS INTEGER))), 0)
              FROM records
              WHERE transfer_id IS NULL
-               AND type = 'expense'
-               AND category = 'Commission'
                AND description = ?1",
             [commission_marker.as_str()],
             |row| row.get::<_, i64>(0),
@@ -984,8 +1018,6 @@ pub fn update_transfer(
          SET date = ?1,
              wallet_id = ?2
          WHERE transfer_id IS NULL
-           AND type = 'expense'
-           AND category = 'Commission'
            AND description = ?3",
         (
             payload.date.trim(),
@@ -1031,8 +1063,6 @@ pub fn delete_transfer(db_path: &str, transfer_id: i64) -> StorageResult<bool> {
     tx.execute(
         "DELETE FROM records
          WHERE transfer_id IS NULL
-           AND type = 'expense'
-           AND category = 'Commission'
            AND description = ?1",
         [commission_marker.as_str()],
     )
@@ -1427,6 +1457,9 @@ pub fn update_standalone_record(
         .map_err(sqlite_err)?;
     let tx = conn.transaction().map_err(sqlite_err)?;
     ensure_standalone_record_exists_in_tx(&tx, record_id)?;
+    if let Some(marker) = transfer_commission_marker_in_tx(&tx, record_id)? {
+        validate_transfer_commission_update(&marker, payload)?;
+    }
 
     let record_type = payload.record_type.trim().to_lowercase();
     if record_type != "income" && record_type != "expense" {
@@ -1529,6 +1562,9 @@ pub fn delete_standalone_record(db_path: &str, record_id: i64) -> StorageResult<
         .map_err(sqlite_err)?;
     let tx = conn.transaction().map_err(sqlite_err)?;
     ensure_standalone_record_exists_in_tx(&tx, record_id)?;
+    if transfer_commission_marker_in_tx(&tx, record_id)?.is_some() {
+        return Err("Transfer commission must be deleted with its transfer".to_owned());
+    }
     tx.execute("DELETE FROM record_tags WHERE record_id = ?1", [record_id])
         .map_err(sqlite_err)?;
     let deleted = tx
@@ -1659,6 +1695,68 @@ fn transfer_linked_record_ids_in_tx(
     })
 }
 
+struct TransferCommissionMarker {
+    record_type: String,
+    date: String,
+    wallet_id: i64,
+    category: String,
+    description: String,
+}
+
+fn transfer_commission_marker_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    record_id: i64,
+) -> StorageResult<Option<TransferCommissionMarker>> {
+    let row = tx
+        .query_row(
+            "SELECT type, date, wallet_id, category, description
+             FROM records
+             WHERE id = ?1
+               AND transfer_id IS NULL
+               AND related_debt_id IS NULL",
+            [record_id],
+            |row| {
+                Ok(TransferCommissionMarker {
+                    record_type: row.get(0)?,
+                    date: row.get(1)?,
+                    wallet_id: row.get(2)?,
+                    category: row.get(3)?,
+                    description: row.get(4)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(sqlite_err)?;
+    Ok(row.filter(|row| transfer_marker_id(&row.description).is_some()))
+}
+
+fn transfer_marker_id(description: &str) -> Option<i64> {
+    let marker = description.trim();
+    let id_text = marker
+        .strip_prefix("[transfer:")
+        .and_then(|value| value.strip_suffix(']'))?;
+    let id = id_text.parse::<i64>().ok()?;
+    (id > 0).then_some(id)
+}
+
+fn validate_transfer_commission_update(
+    marker: &TransferCommissionMarker,
+    payload: &StandaloneRecordUpdatePayload,
+) -> StorageResult<()> {
+    if payload.record_type.trim().to_lowercase() != marker.record_type
+        || payload.date.trim() != marker.date
+        || payload.wallet_id != marker.wallet_id
+        || payload.category.trim() != marker.category
+        || payload.description.trim() != marker.description
+    {
+        return Err(
+            "Transfer commission date, wallet, type, category, and marker description are controlled by the transfer"
+                .to_owned(),
+        );
+    }
+    Ok(())
+}
+
 fn active_wallet_in_tx(
     tx: &rusqlite::Transaction<'_>,
     wallet_id: i64,
@@ -1729,12 +1827,7 @@ fn wallet_balance_minor_excluding_transfer_in_tx(
          FROM records
          WHERE wallet_id = ?1
            AND (transfer_id IS NULL OR transfer_id != ?2)
-           AND NOT (
-               transfer_id IS NULL
-               AND type = 'expense'
-               AND category = 'Commission'
-               AND description = ?3
-           )"
+          AND NOT (transfer_id IS NULL AND description = ?3)"
     );
     let delta_minor = tx
         .query_row(&sql, (wallet_id, transfer_id, marker.as_str()), |row| {
@@ -1872,7 +1965,7 @@ fn validate_transfer_base_currency_only(currency: &str, base_currency: &str) -> 
         Ok(())
     } else {
         Err(format!(
-            "Transfer creator currently supports base-currency transfers only ({base_currency})"
+            "Transfer flow currently supports base-currency transfers only ({base_currency})"
         ))
     }
 }
@@ -2324,6 +2417,19 @@ mod tests {
     }
 
     #[test]
+    fn balance_row_returns_one_active_wallet() {
+        let db_path = create_balance_test_db();
+        assert_eq!(
+            wallet_balance_row(&db_path, 1).unwrap().unwrap(),
+            (1, "Cash".to_owned(), "KZT".to_owned(), 1000.0, -150.0)
+        );
+        assert!(wallet_balance_row(&db_path, 3).unwrap().is_none());
+        assert!(wallet_balance_row(&db_path, 99).unwrap().is_none());
+        assert!(wallet_balance_row(&db_path, 0).unwrap().is_none());
+        remove_test_db(&db_path);
+    }
+
+    #[test]
     fn create_wallet_creates_active_non_system_wallet_with_minor_balance() {
         let db_path = create_balance_test_db();
         let wallet = create_wallet(
@@ -2352,6 +2458,36 @@ mod tests {
                 .unwrap(),
             (4, "Savings".to_owned(), "KZT".to_owned(), 10.01, 0.0)
         );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn create_wallet_allows_duplicate_names_for_python_compatibility() {
+        let db_path = create_balance_test_db();
+
+        let first = create_wallet(
+            &db_path,
+            &WalletCreatePayload {
+                name: "Savings".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "0".to_owned(),
+                allow_negative: false,
+            },
+        )
+        .unwrap();
+        let second = create_wallet(
+            &db_path,
+            &WalletCreatePayload {
+                name: "Savings".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "5".to_owned(),
+                allow_negative: false,
+            },
+        )
+        .unwrap();
+
+        assert_ne!(first.id, second.id);
+        assert_eq!(first.name, second.name);
         remove_test_db(&db_path);
     }
 
@@ -2853,6 +2989,104 @@ mod tests {
     }
 
     #[test]
+    fn transfer_commission_marker_survives_standalone_amount_edit_and_transfer_delete() {
+        let db_path = create_balance_test_db();
+        let created = create_transfer(
+            &db_path,
+            &TransferCreatePayload {
+                from_wallet_id: 1,
+                to_wallet_id: 2,
+                date: "2026-02-01".to_owned(),
+                amount: "100".to_owned(),
+                currency: "KZT".to_owned(),
+                description: "Move funds".to_owned(),
+                commission_amount: "3.5".to_owned(),
+                commission_currency: "KZT".to_owned(),
+            },
+        )
+        .unwrap();
+        let marker = format!("[transfer:{}]", created.id);
+        let commission = filtered_record_list_rows(&db_path, &RecordFilterPayload::default())
+            .unwrap()
+            .into_iter()
+            .find(|record| record.transfer_id.is_none() && record.description == marker)
+            .unwrap();
+
+        let updated = update_standalone_record(
+            &db_path,
+            commission.id,
+            &StandaloneRecordUpdatePayload {
+                record_type: "expense".to_owned(),
+                date: commission.date,
+                wallet_id: commission.wallet_id,
+                amount_original: "7.25".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "7.25".to_owned(),
+                category: "Commission".to_owned(),
+                description: marker.clone(),
+                tags: vec![],
+            },
+        )
+        .unwrap();
+        assert_eq!(updated.amount_base, 7.25);
+        assert_eq!(updated.description, marker);
+
+        assert!(delete_transfer(&db_path, created.id).unwrap());
+        let rows = filtered_record_list_rows(&db_path, &RecordFilterPayload::default()).unwrap();
+        assert!(!rows.iter().any(|record| record.description == marker));
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn standalone_crud_rejects_transfer_commission_marker_detach() {
+        let db_path = create_balance_test_db();
+        let created = create_transfer(
+            &db_path,
+            &TransferCreatePayload {
+                from_wallet_id: 1,
+                to_wallet_id: 2,
+                date: "2026-02-01".to_owned(),
+                amount: "100".to_owned(),
+                currency: "KZT".to_owned(),
+                description: "Move funds".to_owned(),
+                commission_amount: "3.5".to_owned(),
+                commission_currency: "KZT".to_owned(),
+            },
+        )
+        .unwrap();
+        let marker = format!("[transfer:{}]", created.id);
+        let commission = filtered_record_list_rows(&db_path, &RecordFilterPayload::default())
+            .unwrap()
+            .into_iter()
+            .find(|record| record.transfer_id.is_none() && record.description == marker)
+            .unwrap();
+
+        let update_error = update_standalone_record(
+            &db_path,
+            commission.id,
+            &StandaloneRecordUpdatePayload {
+                record_type: "expense".to_owned(),
+                date: commission.date,
+                wallet_id: commission.wallet_id,
+                amount_original: "7.25".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "7.25".to_owned(),
+                category: "Fee".to_owned(),
+                description: "edited".to_owned(),
+                tags: vec![],
+            },
+        )
+        .unwrap_err();
+        assert!(update_error.contains("controlled by the transfer"));
+
+        let delete_error = delete_standalone_record(&db_path, commission.id).unwrap_err();
+        assert!(delete_error.contains("deleted with its transfer"));
+        remove_test_db(&db_path);
+    }
+
+    #[test]
     fn update_transfer_updates_transfer_and_linked_records() {
         let db_path = create_balance_test_db();
         let updated = update_transfer(
@@ -3192,9 +3426,11 @@ mod tests {
 
         assert!(transfer_get_row(&db_path, created.id).unwrap().is_none());
         let rows = filtered_record_list_rows(&db_path, &RecordFilterPayload::default()).unwrap();
-        assert!(!rows
-            .iter()
-            .any(|record| record.transfer_id == Some(created.id)));
+        assert!(
+            !rows
+                .iter()
+                .any(|record| record.transfer_id == Some(created.id))
+        );
         assert!(!rows.iter().any(|record| {
             record.transfer_id.is_none()
                 && record.description == format!("[transfer:{}]", created.id)
@@ -3214,18 +3450,22 @@ mod tests {
     fn delete_transfer_rejects_missing_and_corrupted_integrity() {
         let db_path = create_balance_test_db();
 
-        assert!(delete_transfer(&db_path, 99)
-            .unwrap_err()
-            .contains("Transfer not found: 99"));
+        assert!(
+            delete_transfer(&db_path, 99)
+                .unwrap_err()
+                .contains("Transfer not found: 99")
+        );
 
         let conn = Connection::open(&db_path).unwrap();
         conn.execute("DELETE FROM records WHERE id = 5", [])
             .unwrap();
         drop(conn);
 
-        assert!(delete_transfer(&db_path, 1)
-            .unwrap_err()
-            .contains("expected 2 linked records"));
+        assert!(
+            delete_transfer(&db_path, 1)
+                .unwrap_err()
+                .contains("expected 2 linked records")
+        );
         assert!(transfer_get_row(&db_path, 1).unwrap().is_some());
         remove_test_db(&db_path);
     }

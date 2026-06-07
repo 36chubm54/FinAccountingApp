@@ -2,7 +2,8 @@ use ledgera_engine_storage::{
     base_currency_code, create_standalone_record, create_transfer, create_wallet,
     current_local_date, delete_standalone_record, delete_transfer, distinct_record_categories,
     filtered_record_list_rows, standalone_record_get_row, tag_names, transfer_get_row,
-    update_standalone_record, update_transfer, wallet_balance_rows, wallet_list_rows,
+    update_standalone_record, update_transfer, wallet_balance_row, wallet_balance_rows,
+    wallet_list_rows,
     RecordFilterPayload, RecordRow, StandaloneRecordCreatePayload, StandaloneRecordUpdatePayload,
     TransferCreatePayload, TransferRow, TransferUpdatePayload, WalletBalanceRow,
     WalletCreatePayload, WalletRow,
@@ -356,10 +357,9 @@ impl LedgeraEngine {
         &self,
         wallet_id: i64,
     ) -> Result<Option<WalletBalanceDto>, LedgeraEngineError> {
-        Ok(self
-            .wallet_balances()?
-            .into_iter()
-            .find(|row| row.wallet_id == wallet_id))
+        wallet_balance_row(&self.db_path, wallet_id)
+            .map(|row| row.map(wallet_balance_to_dto))
+            .map_err(storage_error)
     }
 }
 
@@ -661,6 +661,8 @@ mod tests {
             .unwrap();
         assert_eq!(rows, vec![created]);
         assert_eq!(engine.wallet_balance(1).unwrap().unwrap().balance, "110.01");
+        assert!(engine.wallet_balance(3).unwrap().is_none());
+        assert!(engine.wallet_balance(99).unwrap().is_none());
         fs::remove_file(db_path).ok();
     }
 
