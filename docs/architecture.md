@@ -95,8 +95,12 @@ Current Kotlin/Rust contract:
   Rust storage boundary; transfer-linked mirror rows are grouped into one
   transfer journal row with source/target wallet direction and transfer-level
   editing/deletion through modal dialogs, while transfer list parity,
-  commission editing, import/export, and full inline editor keyboard parity
-  remain separate beta.1 slices
+  import/export, and full inline editor keyboard parity remain separate beta.1
+  slices
+- transfer commissions are represented as standalone expense records adjacent
+  to the transfer, so commission amount/category edits use standalone
+  operation editing rather than a separate transfer-level commission contract;
+  deleting the transfer also deletes its commission marker records
 - wallet balances exposed to Kotlin include both wallet initial balance and
   record delta
 - Kotlin does not create production databases implicitly; manual smoke testing

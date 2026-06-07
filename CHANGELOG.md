@@ -35,6 +35,7 @@ This project adheres to Semantic Versioning.
 - Made Kotlin Operations transfer creation visibly reflected in the UI by showing wallet balances, a detailed transfer success notice, and an aggregated transfer journal row with source/target wallet direction.
 - Added Kotlin Operations transfer edit UX through an `AlertDialog`, preserving commission marker amount while moving linked records and commission markers to the updated source wallet/date.
 - Added Kotlin Operations transfer delete UX through a transfer edit action and confirmation dialog, removing linked operation rows and commission markers through Rust storage integrity checks.
+- Clarified in the Kotlin transfer edit dialog that transfer commissions are edited as standalone operations and deleted together with the transfer.
 
 ### Docs
 

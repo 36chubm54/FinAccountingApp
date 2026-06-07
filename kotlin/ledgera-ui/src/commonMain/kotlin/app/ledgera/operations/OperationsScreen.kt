@@ -855,6 +855,11 @@ private fun EditTransferDialog(
                     label = { Text("Description") },
                     singleLine = true,
                 )
+                Text(
+                    "Transfer commission is edited as a standalone operation and deleted with the transfer.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 (validationError ?: engineError)?.let {
                     Text(it, color = MaterialTheme.colorScheme.error)
                 }
