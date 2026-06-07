@@ -1123,6 +1123,16 @@ mod tests {
             .unwrap()
             .iter()
             .all(|wallet| wallet.id != empty_wallet.id));
+        let replacement = engine
+            .create_wallet(CreateWalletRequest {
+                name: "Replacement".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "0".to_owned(),
+                allow_negative: false,
+            })
+            .unwrap();
+        assert_eq!(replacement.id, empty_wallet.id);
+        assert!(engine.delete_wallet(replacement.id).is_ok());
 
         let archived_wallet = engine
             .create_wallet(CreateWalletRequest {

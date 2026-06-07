@@ -654,6 +654,7 @@ pub fn delete_wallet(db_path: &str, wallet_id: i64) -> StorageResult<WalletDelet
     let action = if history_count == 0 {
         tx.execute("DELETE FROM wallets WHERE id = ?1", [wallet_id])
             .map_err(sqlite_err)?;
+        reset_sqlite_sequence_to_max_id_in_tx(&tx, "wallets")?;
         "hard_deleted"
     } else {
         tx.execute("UPDATE wallets SET is_active = 0 WHERE id = ?1", [wallet_id])
@@ -1891,6 +1892,38 @@ fn wallet_history_count_in_tx(
     Ok(records_count + transfer_count + mandatory_count)
 }
 
+fn reset_sqlite_sequence_to_max_id_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    table: &str,
+) -> StorageResult<()> {
+    let has_sequence = tx
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'",
+            [],
+            |_row| Ok(()),
+        )
+        .optional()
+        .map_err(sqlite_err)?
+        .is_some();
+    if !has_sequence {
+        return Ok(());
+    }
+    let max_id_sql = format!("SELECT COALESCE(MAX(id), 0) FROM {table}");
+    let max_id = tx
+        .query_row(&max_id_sql, [], |row| row.get::<_, i64>(0))
+        .map_err(sqlite_err)?;
+    tx.execute("DELETE FROM sqlite_sequence WHERE name = ?1", [table])
+        .map_err(sqlite_err)?;
+    if max_id > 0 {
+        tx.execute(
+            "INSERT INTO sqlite_sequence(name, seq) VALUES(?1, ?2)",
+            (table, max_id),
+        )
+        .map_err(sqlite_err)?;
+    }
+    Ok(())
+}
+
 fn wallet_balance_minor_excluding_transfer_in_tx(
     tx: &rusqlite::Transaction<'_>,
     wallet_id: i64,
@@ -2325,7 +2358,7 @@ mod tests {
         conn.execute_batch(
             "
             CREATE TABLE wallets (
-                id INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 currency TEXT NOT NULL,
                 initial_balance REAL NOT NULL DEFAULT 0,
@@ -2655,6 +2688,37 @@ mod tests {
             .unwrap()
             .iter()
             .any(|row| row.id == wallet.id));
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn delete_wallet_hard_delete_normalizes_wallet_autoincrement_sequence() {
+        let db_path = create_balance_test_db();
+        let mistaken = create_wallet(
+            &db_path,
+            &WalletCreatePayload {
+                name: "Mistake".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "0".to_owned(),
+                allow_negative: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(mistaken.id, 4);
+        assert_eq!(delete_wallet(&db_path, mistaken.id).unwrap().action, "hard_deleted");
+
+        let corrected = create_wallet(
+            &db_path,
+            &WalletCreatePayload {
+                name: "Corrected".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "0".to_owned(),
+                allow_negative: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(corrected.id, mistaken.id);
         remove_test_db(&db_path);
     }
 
