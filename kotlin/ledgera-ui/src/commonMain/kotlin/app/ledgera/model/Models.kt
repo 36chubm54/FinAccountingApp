@@ -151,6 +151,20 @@ data class WalletDeleteResult(
     val action: String,
 )
 
+data class AuditFinding(
+    val check: String,
+    val severity: String,
+    val message: String,
+    val entity: String,
+)
+
+data class AuditSummary(
+    val errors: Int,
+    val warnings: Int,
+    val ok: Int,
+    val total: Int,
+)
+
 data class EngineStatus(
     val ok: Boolean,
     val dbPath: String,

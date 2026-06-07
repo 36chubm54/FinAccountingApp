@@ -7,6 +7,7 @@ import app.ledgera.engine.LedgeraEngine
 import app.ledgera.engine.RecordFilterDto
 import app.ledgera.engine.UpdateRecordRequest as NativeUpdateRecordRequest
 import app.ledgera.engine.UpdateTransferRequest as NativeUpdateTransferRequest
+import app.ledgera.model.AuditFinding
 import app.ledgera.model.CreateOperationRequest
 import app.ledgera.model.CreateTransferRequest
 import app.ledgera.model.CreateTransferResult
@@ -225,6 +226,17 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
             walletId = result.walletId,
             action = result.action,
         )
+    }
+
+    override suspend fun runAudit(): List<AuditFinding> = withContext(Dispatchers.IO) {
+        engine.auditRun().map {
+            AuditFinding(
+                check = it.check,
+                severity = it.severity,
+                message = it.message,
+                entity = it.entity,
+            )
+        }
     }
 
     private fun toOperationRecord(record: app.ledgera.engine.RecordDto): OperationRecord =

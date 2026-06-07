@@ -1,6 +1,7 @@
 package app.ledgera.operations
 
 import app.ledgera.bridge.EngineAdapter
+import app.ledgera.model.AuditFinding
 import app.ledgera.model.CreateOperationRequest
 import app.ledgera.model.CreateTransferRequest
 import app.ledgera.model.CreateTransferResult
@@ -1027,6 +1028,8 @@ private class FakeEngineAdapter(
 
     override suspend fun deleteWallet(walletId: Long): WalletDeleteResult =
         WalletDeleteResult(walletId, "hard_deleted")
+
+    override suspend fun runAudit(): List<AuditFinding> = emptyList()
 
     private fun replaceWalletBalance(walletId: Long, update: (Double) -> Double) {
         val index = wallets.indexOfFirst { it.id == walletId }

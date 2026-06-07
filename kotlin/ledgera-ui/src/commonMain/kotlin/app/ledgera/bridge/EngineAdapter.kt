@@ -4,6 +4,7 @@ import app.ledgera.model.CreateOperationRequest
 import app.ledgera.model.CreateTransferRequest
 import app.ledgera.model.CreateTransferResult
 import app.ledgera.model.CreateWalletRequest
+import app.ledgera.model.AuditFinding
 import app.ledgera.model.EngineStatus
 import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationDeleteResult
@@ -44,6 +45,7 @@ interface SettingsEngine {
     suspend fun listWalletsForSettings(): List<WalletSettingsItem>
     suspend fun createWallet(request: CreateWalletRequest): WalletSettingsItem
     suspend fun deleteWallet(walletId: Long): WalletDeleteResult
+    suspend fun runAudit(): List<AuditFinding>
 }
 
 interface EngineAdapter : RuntimeEngine, OperationsEngine, SettingsEngine

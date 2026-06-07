@@ -18,6 +18,7 @@ This project adheres to Semantic Versioning.
 - Added beta.1 Kotlin Operations base-currency transfer create/edit/delete support through Rust/Kotlin UniFFI, including linked source/target record maintenance and preserved or removed commission marker records.
 - Added beta.1 Kotlin Operations safe bulk deletion through Rust/Kotlin UniFFI, including delete-all for Operations-owned standalone records/transfers and selective delete mode for chosen records/transfers.
 - Added a beta.1 Kotlin Settings wallet slice for listing wallets and creating active base-currency wallets through Rust/Kotlin UniFFI.
+- Added a beta.1 Kotlin Settings Audit card that runs the read-only Rust AuditEngine v2 report through Rust/Kotlin UniFFI and shows findings without repair actions.
 
 ### Changed
 
@@ -27,7 +28,7 @@ This project adheres to Semantic Versioning.
 - Renamed the Kotlin Desktop runtime framing from alpha.4 to beta.1 and split the Kotlin adapter contract into runtime and operations capability groups so ViewModels depend only on the surfaces they use.
 - Extended the Kotlin UniFFI Operations contract with standalone record get/update/delete methods plus tag and category lookup surfaces.
 - Extended the Kotlin UniFFI Operations contract with transfer create/get/update/delete and safe bulk delete support; transfer list parity, commission editing, and import/export remain pending beta.1 slices.
-- Extended the Kotlin adapter contract with a Settings capability group for wallet list/create flows; wallet edit/delete and broader Settings surfaces remain pending beta.1 slices.
+- Extended the Kotlin adapter contract with a Settings capability group for wallet list/create/delete and read-only audit flows; wallet edit and broader Settings surfaces remain pending beta.1 slices.
 
 ### Fixed
 

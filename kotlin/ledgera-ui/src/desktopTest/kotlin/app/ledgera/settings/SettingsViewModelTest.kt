@@ -1,6 +1,7 @@
 package app.ledgera.settings
 
 import app.ledgera.bridge.SettingsEngine
+import app.ledgera.model.AuditFinding
 import app.ledgera.model.CreateWalletRequest
 import app.ledgera.model.WalletDeleteResult
 import app.ledgera.model.WalletSettingsItem
@@ -20,6 +21,7 @@ class SettingsViewModelTest {
         assertEquals(1, viewModel.state.value.wallets.size)
         assertEquals("Cash", viewModel.state.value.wallets.single().name)
         assertEquals("KZT", viewModel.state.value.baseCurrency)
+        assertEquals(0, engine.auditCalls)
     }
 
     @Test
@@ -133,6 +135,56 @@ class SettingsViewModelTest {
         assertEquals(listOf("Cash"), viewModel.state.value.wallets.map { it.name })
         assertEquals(null, viewModel.state.value.notice)
     }
+
+    @Test
+    fun runAuditSuccessStoresFindingsSummaryAndShowsNotice() {
+        val engine = FakeSettingsEngine(
+            auditFindings = listOf(
+                auditFinding("amount_consistency", "error"),
+                auditFinding("date_validity", "warning"),
+                auditFinding("tag_integrity", "ok"),
+            )
+        )
+        val viewModel = SettingsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.runAudit()
+
+        assertEquals(1, engine.auditCalls)
+        assertEquals(3, viewModel.state.value.auditFindings.size)
+        assertEquals(1, viewModel.state.value.auditSummary?.errors)
+        assertEquals(1, viewModel.state.value.auditSummary?.warnings)
+        assertEquals(1, viewModel.state.value.auditSummary?.ok)
+        assertEquals(3, viewModel.state.value.auditSummary?.total)
+        assertEquals("Audit completed: 1 errors, 1 warnings", viewModel.state.value.notice)
+    }
+
+    @Test
+    fun runAuditEngineErrorSurfacesAndKeepsWalletList() {
+        val engine = FakeSettingsEngine(auditError = IllegalStateException("audit failed"))
+        val viewModel = SettingsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.runAudit()
+
+        assertEquals("audit failed", viewModel.state.value.error)
+        assertEquals(false, viewModel.state.value.auditRunning)
+        assertEquals(listOf("Cash"), viewModel.state.value.wallets.map { it.name })
+        assertEquals(null, viewModel.state.value.notice)
+    }
+
+    @Test
+    fun refreshDoesNotAutoRunAudit() {
+        val engine = FakeSettingsEngine(auditFindings = listOf(auditFinding("tag_integrity", "ok")))
+        val viewModel = SettingsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.refresh()
+
+        assertEquals(0, engine.auditCalls)
+        assertEquals(emptyList(), viewModel.state.value.auditFindings)
+        assertEquals(null, viewModel.state.value.auditSummary)
+    }
 }
 
 private class FakeSettingsEngine(
@@ -140,9 +192,12 @@ private class FakeSettingsEngine(
     private val createError: Throwable? = null,
     private val deleteError: Throwable? = null,
     private val deleteAction: String = "hard_deleted",
+    private val auditFindings: List<AuditFinding> = emptyList(),
+    private val auditError: Throwable? = null,
 ) : SettingsEngine {
     var createCalls = 0
     var deleteCalls = 0
+    var auditCalls = 0
 
     override suspend fun baseCurrency(): String = "KZT"
 
@@ -174,7 +229,20 @@ private class FakeSettingsEngine(
         }
         return WalletDeleteResult(walletId, deleteAction)
     }
+
+    override suspend fun runAudit(): List<AuditFinding> {
+        auditError?.let { throw it }
+        auditCalls += 1
+        return auditFindings
+    }
 }
+
+private fun auditFinding(check: String, severity: String) = AuditFinding(
+    check = check,
+    severity = severity,
+    message = "$check message",
+    entity = "id=1",
+)
 
 private fun validWalletRequest(
     name: String = "Savings",

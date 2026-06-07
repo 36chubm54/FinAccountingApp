@@ -1,8 +1,9 @@
 use ledgera_engine_storage::{
-    OperationDeleteResult, RecordFilterPayload, RecordRow, StandaloneRecordCreatePayload,
-    StandaloneRecordUpdatePayload, TransferCreatePayload, TransferRow, TransferUpdatePayload,
-    WalletBalanceRow, WalletCreatePayload, WalletRow, base_currency_code, create_standalone_record,
-    create_transfer, create_wallet, current_local_date, delete_all_operations,
+    AuditFindingRow, OperationDeleteResult, RecordFilterPayload, RecordRow,
+    StandaloneRecordCreatePayload, StandaloneRecordUpdatePayload, TransferCreatePayload,
+    TransferRow, TransferUpdatePayload, WalletBalanceRow, WalletCreatePayload, WalletRow,
+    audit_run_for_date, base_currency_code, create_standalone_record, create_transfer,
+    create_wallet, current_local_date, delete_all_operations,
     delete_operations_selection, delete_standalone_record, delete_transfer, delete_wallet,
     distinct_record_categories, filtered_record_list_rows, standalone_record_get_row, tag_names,
     transfer_get_row, update_standalone_record, update_transfer, wallet_balance_row,
@@ -100,6 +101,14 @@ pub struct OperationDeleteResultDto {
     pub deleted_records: i64,
     pub deleted_transfers: i64,
     pub skipped_records: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AuditFindingDto {
+    pub check: String,
+    pub severity: String,
+    pub message: String,
+    pub entity: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -388,6 +397,12 @@ impl LedgeraEngine {
             .map_err(storage_error)
     }
 
+    pub fn audit_run(&self) -> Result<Vec<AuditFindingDto>, LedgeraEngineError> {
+        audit_run_for_date(&self.db_path, &current_local_date_text())
+            .map(|findings| findings.into_iter().map(audit_finding_to_dto).collect())
+            .map_err(storage_error)
+    }
+
     pub fn wallet_balances(&self) -> Result<Vec<WalletBalanceDto>, LedgeraEngineError> {
         wallet_balance_rows(&self.db_path, None)
             .map(|rows| rows.into_iter().map(wallet_balance_to_dto).collect())
@@ -564,6 +579,15 @@ fn operation_delete_to_dto(result: OperationDeleteResult) -> OperationDeleteResu
     }
 }
 
+fn audit_finding_to_dto(row: AuditFindingRow) -> AuditFindingDto {
+    AuditFindingDto {
+        check: row.check,
+        severity: row.severity,
+        message: row.message,
+        entity: row.detail,
+    }
+}
+
 fn transfer_to_dto(row: TransferRow) -> TransferDto {
     TransferDto {
         id: row.id,
@@ -584,6 +608,11 @@ fn format_money(value: f64) -> String {
 
 fn format_rate(value: f64) -> String {
     format!("{value:.6}")
+}
+
+fn current_local_date_text() -> String {
+    let (year, month, day) = current_local_date();
+    format!("{year:04}-{month:02}-{day:02}")
 }
 
 fn storage_error(message: String) -> LedgeraEngineError {
@@ -691,6 +720,112 @@ mod tests {
         )
         .unwrap();
         path.to_string_lossy().to_string()
+    }
+
+    fn audit_fixture_db() -> String {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("ledgera_kotlin_ffi_audit_{unique}.db"));
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE wallets (id INTEGER PRIMARY KEY, system INTEGER NOT NULL, is_active INTEGER NOT NULL DEFAULT 1);
+            CREATE TABLE transfers (
+                id INTEGER PRIMARY KEY, from_wallet_id INTEGER, to_wallet_id INTEGER, date TEXT,
+                amount_original REAL, currency TEXT, rate_at_operation REAL, amount_base REAL
+            );
+            CREATE TABLE records (
+                id INTEGER PRIMARY KEY, type TEXT, date TEXT, wallet_id INTEGER, transfer_id INTEGER,
+                related_debt_id INTEGER, amount_original REAL, currency TEXT,
+                rate_at_operation REAL, amount_base REAL, category TEXT
+            );
+            CREATE TABLE mandatory_expenses (
+                id INTEGER PRIMARY KEY, amount_original REAL, amount_base REAL, date TEXT, auto_pay INTEGER
+            );
+            CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT, usage_count INTEGER);
+            CREATE TABLE record_tags (record_id INTEGER, tag_id INTEGER);
+            CREATE TABLE debts (
+                id INTEGER PRIMARY KEY, total_amount_minor INTEGER, remaining_amount_minor INTEGER, status TEXT
+            );
+            CREATE TABLE debt_payments (
+                id INTEGER PRIMARY KEY, debt_id INTEGER, record_id INTEGER, operation_type TEXT,
+                principal_paid_minor INTEGER, is_write_off INTEGER
+            );
+            CREATE TABLE assets (
+                id INTEGER PRIMARY KEY, name TEXT, category TEXT, currency TEXT, is_active INTEGER, created_at TEXT
+            );
+            CREATE TABLE asset_snapshots (
+                id INTEGER PRIMARY KEY, asset_id INTEGER, snapshot_date TEXT, value_minor INTEGER, currency TEXT
+            );
+            CREATE TABLE goals (
+                id INTEGER PRIMARY KEY, title TEXT, target_amount_minor INTEGER, currency TEXT,
+                target_date TEXT, is_completed INTEGER, created_at TEXT
+            );
+            INSERT INTO wallets (id, system) VALUES (1, 1), (2, 0);
+            INSERT INTO transfers VALUES (1, 1, 2, '2026-03-04', 100.0, 'KZT', 1.0, 100.0);
+            INSERT INTO records VALUES
+                (1, 'income', '2026-03-02', 1, NULL, NULL, 200.0, 'KZT', 1.0, 200.0, 'Salary'),
+                (2, 'expense', '2026-03-03', 1, NULL, NULL, 50.0, 'KZT', 1.0, 50.0, 'Food'),
+                (3, 'expense', '2026-03-04', 1, 1, NULL, 100.0, 'KZT', 1.0, 100.0, 'Transfer'),
+                (4, 'income', '2026-03-04', 2, 1, NULL, 100.0, 'KZT', 1.0, 100.0, 'Transfer');
+            INSERT INTO mandatory_expenses VALUES (1, 75.0, 75.0, NULL, 0);
+            INSERT INTO assets VALUES (1, 'Broker', 'bank', 'KZT', 1, '2026-03-01');
+            INSERT INTO asset_snapshots VALUES (1, 1, '2026-03-05', 150000, 'KZT');
+            INSERT INTO goals VALUES (1, 'Emergency Fund', 500000, 'KZT', '2026-12-31', 0, '2026-03-02');
+            ",
+        )
+        .unwrap();
+        path.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn engine_audit_run_returns_ok_findings_for_clean_fixture() {
+        let db_path = audit_fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+
+        let findings = engine.audit_run().unwrap();
+
+        assert_eq!(findings.len(), 15);
+        assert!(findings.iter().all(|finding| finding.severity == "ok"));
+        assert!(findings.iter().any(|finding| {
+            finding.check == "transfer_pair_integrity"
+                && finding.message == "All transfer pairs valid."
+        }));
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_audit_run_maps_error_finding_fields() {
+        let db_path = audit_fixture_db();
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute(
+            "INSERT INTO records VALUES (5, 'income', '2999-01-01', 1, NULL, NULL, 1.0, 'KZT', 1.0, 1.0, 'Future')",
+            [],
+        )
+        .unwrap();
+        let engine = LedgeraEngine::new(db_path.clone());
+
+        let findings = engine.audit_run().unwrap();
+
+        assert!(findings.iter().any(|finding| {
+            finding.check == "date_validity"
+                && finding.severity == "error"
+                && finding.message == "Record id=5 has invalid date."
+                && finding.entity == "2999-01-01: Date cannot be in the future"
+        }));
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn current_local_date_text_uses_storage_local_date() {
+        let (year, month, day) = current_local_date();
+
+        assert_eq!(
+            current_local_date_text(),
+            format!("{year:04}-{month:02}-{day:02}")
+        );
     }
 
     #[test]

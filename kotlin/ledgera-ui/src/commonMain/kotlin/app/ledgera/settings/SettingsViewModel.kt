@@ -1,6 +1,8 @@
 package app.ledgera.settings
 
 import app.ledgera.bridge.SettingsEngine
+import app.ledgera.model.AuditFinding
+import app.ledgera.model.AuditSummary
 import app.ledgera.model.CreateWalletRequest
 import app.ledgera.model.WalletSettingsItem
 import kotlinx.coroutines.CoroutineScope
@@ -15,6 +17,9 @@ data class SettingsUiState(
     val loading: Boolean = false,
     val wallets: List<WalletSettingsItem> = emptyList(),
     val baseCurrency: String = "KZT",
+    val auditRunning: Boolean = false,
+    val auditFindings: List<AuditFinding> = emptyList(),
+    val auditSummary: AuditSummary? = null,
     val error: String? = null,
     val notice: String? = null,
 )
@@ -32,7 +37,7 @@ class SettingsViewModel(
             runCatching {
                 val baseCurrency = engine.baseCurrency()
                 val wallets = engine.listWalletsForSettings()
-                mutableState.value = SettingsUiState(
+                mutableState.value = mutableState.value.copy(
                     loading = false,
                     wallets = wallets,
                     baseCurrency = baseCurrency,
@@ -97,9 +102,27 @@ class SettingsViewModel(
         }
     }
 
+    fun runAudit() {
+        mutableState.value = mutableState.value.copy(auditRunning = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                val findings = engine.runAudit()
+                val summary = findings.toAuditSummary()
+                mutableState.value = mutableState.value.copy(
+                    auditRunning = false,
+                    auditFindings = findings,
+                    auditSummary = summary,
+                    error = null,
+                    notice = "Audit completed: ${summary.errors} errors, ${summary.warnings} warnings",
+                )
+            }.onFailure(::showError)
+        }
+    }
+
     private fun showError(error: Throwable) {
         mutableState.value = mutableState.value.copy(
             loading = false,
+            auditRunning = false,
             error = error.message ?: error::class.simpleName ?: "Unknown error",
             notice = null,
         )
@@ -119,4 +142,11 @@ class SettingsViewModel(
             "soft_deleted" -> "Wallet deactivated (id=$walletId)"
             else -> "Wallet updated (id=$walletId)"
         }
+}
+
+private fun List<AuditFinding>.toAuditSummary(): AuditSummary {
+    val errors = count { it.severity.equals("error", ignoreCase = true) }
+    val warnings = count { it.severity.equals("warning", ignoreCase = true) }
+    val ok = count { it.severity.equals("ok", ignoreCase = true) }
+    return AuditSummary(errors = errors, warnings = warnings, ok = ok, total = size)
 }

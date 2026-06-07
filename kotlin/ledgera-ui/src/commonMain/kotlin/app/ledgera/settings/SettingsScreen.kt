@@ -20,6 +20,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -35,6 +36,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.ledgera.model.AuditFinding
+import app.ledgera.model.AuditSummary
 import app.ledgera.model.CreateWalletRequest
 import app.ledgera.model.WalletSettingsItem
 import app.ledgera.ui.ToastHost
@@ -44,6 +47,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
     val state by viewModel.state.collectAsState()
     var showCreateWalletDialog by remember { mutableStateOf(false) }
     var walletPendingDelete by remember { mutableStateOf<WalletSettingsItem?>(null) }
+    var showAuditReport by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.refresh()
@@ -69,7 +73,8 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
         onDismiss = viewModel::clearNotice,
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(24.dp),
+            // modifier = Modifier.fillMaxSize().padding(24.dp),
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text("Settings", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
@@ -86,6 +91,16 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
                     viewModel.clearFeedback()
                     walletPendingDelete = wallet
                 },
+            )
+            AuditSection(
+                running = state.auditRunning,
+                summary = state.auditSummary,
+                hasFindings = state.auditFindings.isNotEmpty(),
+                onRunAudit = {
+                    viewModel.clearFeedback()
+                    viewModel.runAudit()
+                },
+                onViewReport = { showAuditReport = true },
             )
         }
     }
@@ -106,6 +121,12 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
             submitting = state.loading,
             onConfirm = { viewModel.deleteWallet(wallet.id) },
             onCancel = { walletPendingDelete = null },
+        )
+    }
+    if (showAuditReport) {
+        AuditReportDialog(
+            findings = state.auditFindings,
+            onClose = { showAuditReport = false },
         )
     }
 }
@@ -129,7 +150,7 @@ private fun WalletsSection(
                 Text("No wallets found in the selected database.")
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 450.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(wallets, key = { it.id }) { wallet ->
@@ -171,6 +192,109 @@ private fun WalletRow(wallet: WalletSettingsItem, onDeleteWallet: (WalletSetting
             }
         }
     }
+}
+
+@Composable
+private fun AuditSection(
+    running: Boolean,
+    summary: AuditSummary?,
+    hasFindings: Boolean,
+    onRunAudit: () -> Unit,
+    onViewReport: () -> Unit,
+) {
+    Card(Modifier.fillMaxWidth().heightIn(min = 144.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Audit", style = MaterialTheme.typography.titleMedium)
+                Button(onClick = onRunAudit, enabled = !running) {
+                    Text(if (running) "Running..." else "Run audit")
+                }
+            }
+            if (running) {
+                CircularProgressIndicator()
+            }
+            summary?.let {
+                Text(
+                    "Errors ${it.errors} · Warnings ${it.warnings} · Passed ${it.ok} · Total ${it.total}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } ?: Text(
+                "Run a read-only Rust AuditEngine v2 report for the selected database.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (hasFindings) {
+                TextButton(onClick = onViewReport) {
+                    Text("View report")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AuditReportDialog(findings: List<AuditFinding>, onClose: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Audit report") },
+        text = {
+            LazyColumn(
+                modifier = Modifier.width(DialogContentWidth).heightIn(max = 520.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                auditGroup("Errors", findings, "error")?.let { group ->
+                    item { AuditFindingGroup(group.title, group.findings) }
+                }
+                auditGroup("Warnings", findings, "warning")?.let { group ->
+                    item { AuditFindingGroup(group.title, group.findings) }
+                }
+                auditGroup("Passed", findings, "ok")?.let { group ->
+                    item { AuditFindingGroup(group.title, group.findings) }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onClose) { Text("Close") }
+        },
+    )
+}
+
+@Composable
+private fun AuditFindingGroup(title: String, findings: List<AuditFinding>) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        findings.forEach { finding ->
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(finding.check, fontWeight = FontWeight.Medium)
+                Text(finding.message)
+                if (finding.entity.isNotBlank()) {
+                    Text(
+                        finding.entity,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        HorizontalDivider()
+    }
+}
+
+private data class AuditFindingGroupData(
+    val title: String,
+    val findings: List<AuditFinding>,
+)
+
+private fun auditGroup(
+    title: String,
+    findings: List<AuditFinding>,
+    severity: String,
+): AuditFindingGroupData? {
+    val group = findings.filter { it.severity.equals(severity, ignoreCase = true) }
+    return if (group.isEmpty()) null else AuditFindingGroupData(title, group)
 }
 
 @Composable
