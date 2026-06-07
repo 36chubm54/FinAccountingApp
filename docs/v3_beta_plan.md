@@ -29,7 +29,7 @@ Current status:
   transfer/debt-linked rows.
 - Operations transfer creation is wired for base-currency source/target wallet
   transfers with optional base-currency commission marker records; transfer
-  editing is wired for base-currency transfers, while transfer delete/list
+  editing/deletion is wired for base-currency transfers, while transfer list
   parity and commission editing remain later Operations slices.
 - Settings wallet listing and active base-currency wallet creation are wired,
   which unlocks manual transfer-creator smoke testing on copied ledger DBs.

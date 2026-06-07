@@ -132,6 +132,10 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
         ).let { UpdateTransferResult(transferId = it.transferId) }
     }
 
+    override suspend fun deleteTransfer(transferId: Long): Boolean = withContext(Dispatchers.IO) {
+        engine.deleteTransfer(transferId)
+    }
+
     override suspend fun listTags(): List<String> = withContext(Dispatchers.IO) {
         engine.listTags()
     }

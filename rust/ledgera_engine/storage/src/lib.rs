@@ -1001,6 +1001,48 @@ pub fn update_transfer(
         .ok_or_else(|| format!("Transfer not found: {transfer_id}"))
 }
 
+pub fn delete_transfer(db_path: &str, transfer_id: i64) -> StorageResult<bool> {
+    if transfer_id <= 0 {
+        return Err("Transfer id is required".to_owned());
+    }
+    let mut conn = open_sqlite_connection(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(sqlite_err)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+
+    let existing = tx
+        .query_row(
+            "SELECT id FROM transfers WHERE id = ?1",
+            [transfer_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(sqlite_err)?;
+    if existing.is_none() {
+        return Err(format!("Transfer not found: {transfer_id}"));
+    }
+    transfer_linked_record_ids_in_tx(&tx, transfer_id)?;
+    let commission_marker = format!("[transfer:{transfer_id}]");
+
+    tx.execute("DELETE FROM transfers WHERE id = ?1", [transfer_id])
+        .map_err(sqlite_err)?;
+    tx.execute("DELETE FROM records WHERE transfer_id = ?1", [transfer_id])
+        .map_err(sqlite_err)?;
+    tx.execute(
+        "DELETE FROM records
+         WHERE transfer_id IS NULL
+           AND type = 'expense'
+           AND category = 'Commission'
+           AND description = ?1",
+        [commission_marker.as_str()],
+    )
+    .map_err(sqlite_err)?;
+
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    Ok(true)
+}
+
 fn mandatory_expense_select_sql(conn: &Connection, filter_by_id: bool) -> StorageResult<String> {
     let mut stmt = conn
         .prepare("PRAGMA table_info(mandatory_expenses)")
@@ -3125,6 +3167,66 @@ mod tests {
                 .unwrap_err()
                 .contains("expected 2 linked records")
         );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn delete_transfer_removes_transfer_linked_records_and_commission_marker() {
+        let db_path = create_balance_test_db();
+        let created = create_transfer(
+            &db_path,
+            &TransferCreatePayload {
+                from_wallet_id: 1,
+                to_wallet_id: 2,
+                date: "2026-02-01".to_owned(),
+                amount: "100".to_owned(),
+                currency: "KZT".to_owned(),
+                description: "Move funds".to_owned(),
+                commission_amount: "3.5".to_owned(),
+                commission_currency: "KZT".to_owned(),
+            },
+        )
+        .unwrap();
+
+        assert!(delete_transfer(&db_path, created.id).unwrap());
+
+        assert!(transfer_get_row(&db_path, created.id).unwrap().is_none());
+        let rows = filtered_record_list_rows(&db_path, &RecordFilterPayload::default()).unwrap();
+        assert!(!rows
+            .iter()
+            .any(|record| record.transfer_id == Some(created.id)));
+        assert!(!rows.iter().any(|record| {
+            record.transfer_id.is_none()
+                && record.description == format!("[transfer:{}]", created.id)
+        }));
+        assert_eq!(
+            wallet_balance_rows(&db_path, None)
+                .unwrap()
+                .into_iter()
+                .find(|row| row.0 == 1)
+                .unwrap(),
+            (1, "Cash".to_owned(), "KZT".to_owned(), 1000.0, -150.0)
+        );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn delete_transfer_rejects_missing_and_corrupted_integrity() {
+        let db_path = create_balance_test_db();
+
+        assert!(delete_transfer(&db_path, 99)
+            .unwrap_err()
+            .contains("Transfer not found: 99"));
+
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute("DELETE FROM records WHERE id = 5", [])
+            .unwrap();
+        drop(conn);
+
+        assert!(delete_transfer(&db_path, 1)
+            .unwrap_err()
+            .contains("expected 2 linked records"));
+        assert!(transfer_get_row(&db_path, 1).unwrap().is_some());
         remove_test_db(&db_path);
     }
 

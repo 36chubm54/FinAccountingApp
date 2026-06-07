@@ -1,6 +1,6 @@
 use ledgera_engine_storage::{
     base_currency_code, create_standalone_record, create_transfer, create_wallet,
-    current_local_date, delete_standalone_record, distinct_record_categories,
+    current_local_date, delete_standalone_record, delete_transfer, distinct_record_categories,
     filtered_record_list_rows, standalone_record_get_row, tag_names, transfer_get_row,
     update_standalone_record, update_transfer, wallet_balance_rows, wallet_list_rows,
     RecordFilterPayload, RecordRow, StandaloneRecordCreatePayload, StandaloneRecordUpdatePayload,
@@ -311,6 +311,10 @@ impl LedgeraEngine {
                 transfer_id: row.id,
             })
             .map_err(storage_error)
+    }
+
+    pub fn delete_transfer(&self, transfer_id: i64) -> Result<bool, LedgeraEngineError> {
+        delete_transfer(&self.db_path, transfer_id).map_err(storage_error)
     }
 
     pub fn list_tags(&self) -> Result<Vec<String>, LedgeraEngineError> {
@@ -1008,6 +1012,36 @@ mod tests {
             )
             .unwrap_err();
         assert!(error.to_string().contains("must be different"));
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_deletes_transfer() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+        let result = engine
+            .create_transfer(CreateTransferRequest {
+                from_wallet_id: 1,
+                to_wallet_id: 2,
+                date: "2026-01-01".to_owned(),
+                amount: "20".to_owned(),
+                currency: "KZT".to_owned(),
+                description: "Move".to_owned(),
+                commission_amount: "0".to_owned(),
+                commission_currency: "KZT".to_owned(),
+            })
+            .unwrap();
+
+        assert!(engine.delete_transfer(result.transfer_id).unwrap());
+        assert!(engine.get_transfer(result.transfer_id).unwrap().is_none());
+        assert!(engine
+            .list_records(RecordFilterDto::default())
+            .unwrap()
+            .iter()
+            .all(|record| record.transfer_id != Some(result.transfer_id)));
+
+        let error = engine.delete_transfer(result.transfer_id).unwrap_err();
+        assert!(error.to_string().contains("Transfer not found"));
         fs::remove_file(db_path).ok();
     }
 

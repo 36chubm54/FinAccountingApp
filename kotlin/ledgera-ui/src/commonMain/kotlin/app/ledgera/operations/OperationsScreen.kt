@@ -50,6 +50,7 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
     var showCreateDialog by remember { mutableStateOf(false) }
     var showTransferDialog by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var confirmTransferDelete by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         viewModel.refresh()
     }
@@ -179,7 +180,20 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
             submitting = state.loading,
             onDraftChanged = viewModel::updateTransferDraft,
             onSave = viewModel::updateSelectedTransfer,
-            onCancel = { viewModel.clearSelection() },
+            onCancel = {
+                confirmTransferDelete = false
+                viewModel.clearSelection()
+            },
+            onDelete = { confirmTransferDelete = true },
+        )
+    }
+    if (confirmTransferDelete && state.transferDraft != null) {
+        DeleteTransferConfirmDialog(
+            onConfirm = {
+                confirmTransferDelete = false
+                viewModel.deleteSelectedTransfer()
+            },
+            onCancel = { confirmTransferDelete = false },
         )
     }
     if (confirmDelete && state.selectedRecordId != null) {
@@ -777,6 +791,7 @@ private fun EditTransferDialog(
     onDraftChanged: (TransferDraft) -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val validationError = OperationValidation.validateTransferFields(
         fromWalletId = draft.fromWalletId,
@@ -846,8 +861,11 @@ private fun EditTransferDialog(
             }
         },
         confirmButton = {
-            Button(onClick = onSave, enabled = validationError == null && !submitting) {
-                Text(if (submitting) "Saving..." else "Save")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onDelete, enabled = !submitting) { Text("Delete") }
+                Button(onClick = onSave, enabled = validationError == null && !submitting) {
+                    Text(if (submitting) "Saving..." else "Save")
+                }
             }
         },
         dismissButton = {
@@ -873,6 +891,21 @@ private fun DeleteConfirmDialog(onConfirm: () -> Unit, onCancel: () -> Unit) {
         onDismissRequest = onCancel,
         title = { Text("Delete operation") },
         text = { Text("Delete selected standalone operation?") },
+        confirmButton = {
+            Button(onClick = onConfirm) { Text("Delete") }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun DeleteTransferConfirmDialog(onConfirm: () -> Unit, onCancel: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Delete transfer") },
+        text = { Text("Delete selected transfer and linked operation rows?") },
         confirmButton = {
             Button(onClick = onConfirm) { Text("Delete") }
         },

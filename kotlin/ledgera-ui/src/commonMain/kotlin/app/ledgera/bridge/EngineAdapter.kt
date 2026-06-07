@@ -28,6 +28,7 @@ interface OperationsEngine {
     suspend fun createTransfer(request: CreateTransferRequest): CreateTransferResult
     suspend fun getTransfer(transferId: Long): TransferDetails?
     suspend fun updateTransfer(transferId: Long, request: UpdateTransferRequest): UpdateTransferResult
+    suspend fun deleteTransfer(transferId: Long): Boolean
     suspend fun listTags(): List<String>
     suspend fun listCategories(recordType: String): List<String>
     suspend fun listWallets(): List<WalletOption>

@@ -282,6 +282,28 @@ class OperationsViewModel(
         }
     }
 
+    fun deleteSelectedTransfer() {
+        val draft = mutableState.value.transferDraft
+        if (draft == null) {
+            mutableState.value = mutableState.value.copy(error = "Select a transfer first", notice = null)
+            return
+        }
+        mutableState.value = mutableState.value.copy(loading = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                engine.deleteTransfer(draft.id)
+                mutableState.value = mutableState.value.copy(transferDraft = null)
+                refresh(notice = "Transfer deleted (id=${draft.id})")
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
     private fun validate(request: CreateOperationRequest): String? =
         OperationValidation.validateFields(
             type = request.type,

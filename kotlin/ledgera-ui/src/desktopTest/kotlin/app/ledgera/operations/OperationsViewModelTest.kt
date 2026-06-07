@@ -437,6 +437,52 @@ class OperationsViewModelTest {
     }
 
     @Test
+    fun deleteTransferWithoutDraftSurfacesErrorBeforeEngineCall() {
+        val adapter = FakeEngineAdapter()
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.deleteSelectedTransfer()
+
+        assertEquals("Select a transfer first", viewModel.state.value.error)
+        assertEquals(0, adapter.deleteTransferCalls)
+    }
+
+    @Test
+    fun deleteTransferSuccessRefreshesStateAndClosesDialog() {
+        val adapter = FakeEngineAdapter(
+            records = mutableListOf(
+                operationRecord(id = 1, type = "income", walletId = 2, transferId = 42),
+                operationRecord(id = 2, type = "expense", walletId = 1, transferId = 42),
+                operationRecord(id = 3, type = "expense", walletId = 1, category = "Commission", description = "[transfer:42]"),
+            )
+        )
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.selectTransfer(42)
+        viewModel.deleteSelectedTransfer()
+
+        assertEquals(1, adapter.deleteTransferCalls)
+        assertEquals(null, viewModel.state.value.transferDraft)
+        assertEquals("Transfer deleted (id=42)", viewModel.state.value.notice)
+        assertEquals(emptyList(), viewModel.state.value.records.mapNotNull { it.transferId })
+        assertEquals(emptyList(), viewModel.state.value.records.filter { it.description == "[transfer:42]" })
+        assertEquals(2, adapter.refreshCalls)
+    }
+
+    @Test
+    fun deleteTransferEngineErrorStaysVisibleAndKeepsDraft() {
+        val adapter = FakeEngineAdapter(deleteTransferError = IllegalStateException("integrity failed"))
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.selectTransfer(42)
+        viewModel.deleteSelectedTransfer()
+
+        assertEquals("integrity failed", viewModel.state.value.error)
+        assertEquals(42, viewModel.state.value.transferDraft?.id)
+    }
+
+    @Test
     fun createTransferEngineErrorSurfacesInState() {
         val adapter = FakeEngineAdapter(transferError = IllegalStateException("insufficient funds"))
         val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
@@ -637,6 +683,7 @@ private class FakeEngineAdapter(
     private val updateError: Throwable? = null,
     private val transferError: Throwable? = null,
     private val updateTransferError: Throwable? = null,
+    private val deleteTransferError: Throwable? = null,
     private val wallets: MutableList<WalletOption> = mutableListOf(
         WalletOption(id = 1, name = "Cash", currency = "KZT", balance = "100.00"),
         WalletOption(id = 2, name = "Card", currency = "KZT", balance = "0.00"),
@@ -646,6 +693,7 @@ private class FakeEngineAdapter(
     var createTransferCalls = 0
     var getTransferCalls = 0
     var updateTransferCalls = 0
+    var deleteTransferCalls = 0
     var updateCalls = 0
     var deleteCalls = 0
     var refreshCalls = 0
@@ -785,6 +833,13 @@ private class FakeEngineAdapter(
             }
         }
         return UpdateTransferResult(transferId = transferId)
+    }
+
+    override suspend fun deleteTransfer(transferId: Long): Boolean {
+        deleteTransferError?.let { throw it }
+        deleteTransferCalls += 1
+        records.removeIf { it.transferId == transferId || it.description == "[transfer:$transferId]" }
+        return true
     }
 
     override suspend fun listTags(): List<String> = listOf("home")
