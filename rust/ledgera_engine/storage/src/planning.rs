@@ -1671,9 +1671,15 @@ pub fn debt_delete_payment(
     let payment = debt_payment_from_conn(&conn, payment_id)?;
     let debt = debt_from_conn(&conn, payment.debt_id)?;
     let tx = conn.transaction().map_err(sqlite_err)?;
-    if delete_linked_record && let Some(record_id) = payment.record_id {
-        tx.execute("DELETE FROM records WHERE id = ?", [record_id])
-            .map_err(sqlite_err)?;
+    if delete_linked_record {
+        if let Some(record_id) = payment.record_id {
+            tx.execute("DELETE FROM record_tags WHERE record_id = ?", [record_id])
+                .map_err(sqlite_err)?;
+            tx.execute("DELETE FROM records WHERE id = ?", [record_id])
+                .map_err(sqlite_err)?;
+            refresh_tag_metrics_in_tx(&tx)?;
+            prune_orphan_tags_in_tx(&tx)?;
+        }
     }
     tx.execute("DELETE FROM debt_payments WHERE id = ?", [payment_id])
         .map_err(sqlite_err)?;
@@ -1703,6 +1709,33 @@ pub fn debt_delete_payment(
     storage_clear_read_connection_cache();
     let conn = open_write_connection(db_path)?;
     debt_from_conn(&conn, payment.debt_id)
+}
+
+fn refresh_tag_metrics_in_tx(tx: &rusqlite::Transaction<'_>) -> StorageResult<()> {
+    tx.execute(
+        "UPDATE tags
+         SET usage_count = (
+             SELECT COUNT(*) FROM record_tags WHERE record_tags.tag_id = tags.id
+         ),
+         last_used_at = COALESCE((
+             SELECT MAX(records.date)
+             FROM record_tags
+             JOIN records ON records.id = record_tags.record_id
+             WHERE record_tags.tag_id = tags.id
+         ), '')",
+        [],
+    )
+    .map_err(sqlite_err)?;
+    Ok(())
+}
+
+fn prune_orphan_tags_in_tx(tx: &rusqlite::Transaction<'_>) -> StorageResult<()> {
+    tx.execute(
+        "DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM record_tags)",
+        [],
+    )
+    .map_err(sqlite_err)?;
+    Ok(())
 }
 
 pub fn debt_replace_rows(
@@ -1880,6 +1913,17 @@ mod tests {
                 category TEXT NOT NULL,
                 description TEXT NOT NULL DEFAULT '',
                 period TEXT
+            );
+            CREATE TABLE tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                color TEXT NOT NULL DEFAULT '',
+                usage_count INTEGER NOT NULL DEFAULT 0,
+                last_used_at TEXT DEFAULT NULL
+            );
+            CREATE TABLE record_tags (
+                record_id INTEGER NOT NULL,
+                tag_id INTEGER NOT NULL
             );
             CREATE TABLE debts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2217,6 +2261,19 @@ mod tests {
                 .remaining_amount_minor,
             30_000
         );
+        let record_id = payment.record_id.expect("linked record");
+        conn.execute(
+            "INSERT INTO tags (id, name, color, usage_count, last_used_at)
+             VALUES (1, 'debt-payment', '#5B8DEF', 1, '2026-03-05')",
+            [],
+        )
+        .expect("tag");
+        conn.execute(
+            "INSERT INTO record_tags (record_id, tag_id) VALUES (?, 1)",
+            [record_id],
+        )
+        .expect("record tag");
+        drop(conn);
 
         let reopened = debt_delete_payment(&db_path, payment.id, true).expect("delete payment");
         assert_eq!(reopened.remaining_amount_minor, 50_000);
@@ -2225,6 +2282,19 @@ mod tests {
                 .expect("payments")
                 .is_empty()
         );
+        let conn = Connection::open(&db_path).expect("open");
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM record_tags", [], |row| row
+                .get::<_, i64>(0))
+                .expect("record_tags"),
+            0
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM tags", [], |row| row.get::<_, i64>(0))
+                .expect("tags"),
+            0
+        );
+        drop(conn);
 
         let write_off =
             debt_register_payment(&db_path, debt.id, &test_payment(debt.id, 50_000, true), None)

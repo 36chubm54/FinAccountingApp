@@ -298,9 +298,32 @@ class OperationsViewModelTest {
         viewModel.deleteAllOperations()
 
         assertEquals(1, adapter.deleteAllOperationsCalls)
-        assertEquals("Deleted 1 records and 1 transfers. Skipped 1 linked records", viewModel.state.value.notice)
+        assertEquals(
+            "Deleted 1 records and 1 transfers. Skipped 1 unsupported linked records",
+            viewModel.state.value.notice,
+        )
         assertEquals(listOf(4L), viewModel.state.value.records.map { it.id })
         assertEquals(false, viewModel.state.value.selectiveDeleteMode)
+    }
+
+    @Test
+    fun deleteAllOperationsWithoutCandidatesDoesNotCallEngine() {
+        val adapter = FakeEngineAdapter(
+            records = mutableListOf(
+                operationRecord(id = 4, type = "mandatory_expense", category = "Mandatory"),
+                operationRecord(id = 5, type = "expense", relatedDebtId = 1, category = "Debt"),
+            )
+        )
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        assertEquals(false, viewModel.state.value.hasBulkDeleteCandidates)
+
+        viewModel.deleteAllOperations()
+
+        assertEquals(0, adapter.deleteAllOperationsCalls)
+        assertEquals("No standalone operations or transfers to delete", viewModel.state.value.notice)
+        assertEquals(null, viewModel.state.value.error)
     }
 
     @Test

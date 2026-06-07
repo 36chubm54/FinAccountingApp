@@ -35,7 +35,18 @@ data class OperationsUiState(
     val transferDraft: TransferDraft? = null,
     val error: String? = null,
     val notice: String? = null,
-)
+) {
+    val hasBulkDeleteCandidates: Boolean
+        get() = records.any { record ->
+            if (record.transferId != null) {
+                true
+            } else {
+                record.relatedDebtId == null &&
+                    (record.type == "income" || record.type == "expense") &&
+                    !isTransferCommissionMarker(record.description)
+            }
+        }
+}
 
 class OperationsViewModel(
     private val engine: OperationsEngine,
@@ -399,6 +410,13 @@ class OperationsViewModel(
     }
 
     fun deleteAllOperations() {
+        if (!mutableState.value.hasBulkDeleteCandidates) {
+            mutableState.value = mutableState.value.copy(
+                error = null,
+                notice = "No standalone operations or transfers to delete",
+            )
+            return
+        }
         mutableState.value = mutableState.value.copy(loading = true, error = null, notice = null)
         launchSafely {
             runCatching {
@@ -532,7 +550,7 @@ class OperationsViewModel(
     private fun deleteNotice(result: OperationDeleteResult): String {
         val base = "Deleted ${result.deletedRecords} records and ${result.deletedTransfers} transfers"
         return if (result.skippedRecords > 0) {
-            "$base. Skipped ${result.skippedRecords} linked records"
+            "$base. Skipped ${result.skippedRecords} unsupported linked records"
         } else {
             base
         }
@@ -540,9 +558,6 @@ class OperationsViewModel(
 
     private fun toggleId(ids: Set<Long>, id: Long): Set<Long> =
         if (ids.contains(id)) ids - id else ids + id
-
-    private fun isTransferCommissionMarker(description: String): Boolean =
-        Regex("""^\[transfer:\d+]$""").matches(description.trim())
 
     private fun OperationRecord.toDraft(): OperationDraft =
         OperationDraft(
@@ -606,3 +621,6 @@ class OperationsViewModel(
         }
     }
 }
+
+private fun isTransferCommissionMarker(description: String): Boolean =
+    Regex("""^\[transfer:\d+]$""").matches(description.trim())

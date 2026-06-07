@@ -1121,20 +1121,7 @@ pub fn delete_transfer(db_path: &str, transfer_id: i64) -> StorageResult<bool> {
     if existing.is_none() {
         return Err(format!("Transfer not found: {transfer_id}"));
     }
-    transfer_linked_record_ids_in_tx(&tx, transfer_id)?;
-    let commission_marker = format!("[transfer:{transfer_id}]");
-
-    tx.execute("DELETE FROM transfers WHERE id = ?1", [transfer_id])
-        .map_err(sqlite_err)?;
-    tx.execute("DELETE FROM records WHERE transfer_id = ?1", [transfer_id])
-        .map_err(sqlite_err)?;
-    tx.execute(
-        "DELETE FROM records
-         WHERE transfer_id IS NULL
-           AND description = ?1",
-        [commission_marker.as_str()],
-    )
-    .map_err(sqlite_err)?;
+    delete_operations_in_tx(&tx, &[], &[transfer_id], 0)?;
 
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
@@ -2019,7 +2006,12 @@ fn delete_operations_in_tx(
              WHERE record_id IN (
                  SELECT id FROM records
                  WHERE transfer_id = ?1
-                    OR (transfer_id IS NULL AND description = ?2)
+                    OR (
+                        transfer_id IS NULL
+                        AND related_debt_id IS NULL
+                        AND category = 'Commission'
+                        AND description = ?2
+                    )
              )",
             (transfer_id, commission_marker.as_str()),
         )
@@ -2030,6 +2022,7 @@ fn delete_operations_in_tx(
             "DELETE FROM records
              WHERE transfer_id IS NULL
                AND related_debt_id IS NULL
+               AND category = 'Commission'
                AND description = ?1",
             [commission_marker.as_str()],
         )
@@ -4054,6 +4047,105 @@ mod tests {
                 .unwrap(),
             (1, "Cash".to_owned(), "KZT".to_owned(), 1000.0, -150.0)
         );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn delete_transfer_cleans_tags_without_deleting_unowned_marker_rows() {
+        let db_path = create_balance_test_db();
+        let created = create_transfer(
+            &db_path,
+            &TransferCreatePayload {
+                from_wallet_id: 1,
+                to_wallet_id: 2,
+                date: "2026-02-01".to_owned(),
+                amount: "100".to_owned(),
+                currency: "KZT".to_owned(),
+                description: "Move funds".to_owned(),
+                commission_amount: "3.5".to_owned(),
+                commission_currency: "KZT".to_owned(),
+            },
+        )
+        .unwrap();
+        let marker = format!("[transfer:{}]", created.id);
+        let conn = Connection::open(&db_path).unwrap();
+        let commission_id: i64 = conn
+            .query_row(
+                "SELECT id FROM records
+                 WHERE transfer_id IS NULL
+                   AND category = 'Commission'
+                   AND description = ?1",
+                [marker.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        conn.execute(
+            "INSERT INTO records (
+                id, type, date, wallet_id, transfer_id, related_debt_id,
+                amount_original, amount_original_minor, amount_base, amount_base_minor,
+                category, description
+             ) VALUES (
+                99, 'expense', '2026-02-01', 1, NULL, NULL,
+                1.0, 100, 1.0, 100, 'General', ?1
+             )",
+            [marker.as_str()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tags (id, name) VALUES (10, 'transfer-tag')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tags (id, name) VALUES (11, 'protected-tag')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO record_tags (record_id, tag_id) VALUES (?1, 10)",
+            [commission_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO record_tags (record_id, tag_id) VALUES (99, 11)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        assert!(delete_transfer(&db_path, created.id).unwrap());
+
+        let rows = filtered_record_list_rows(&db_path, &RecordFilterPayload::default()).unwrap();
+        assert!(
+            rows.iter()
+                .any(|record| record.id == 99 && record.description == marker)
+        );
+        let conn = Connection::open(&db_path).unwrap();
+        let record_tags: Vec<(i64, i64)> = {
+            let mut stmt = conn
+                .prepare("SELECT record_id, tag_id FROM record_tags ORDER BY record_id, tag_id")
+                .unwrap();
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(record_tags.contains(&(99, 11)));
+        assert!(
+            !record_tags
+                .iter()
+                .any(|(record_id, _tag_id)| *record_id == commission_id)
+        );
+        let tags: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT name FROM tags ORDER BY id").unwrap();
+            stmt.query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(tags.contains(&"food".to_owned()));
+        assert!(tags.contains(&"protected-tag".to_owned()));
+        assert!(!tags.contains(&"transfer-tag".to_owned()));
         remove_test_db(&db_path);
     }
 

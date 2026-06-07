@@ -187,6 +187,8 @@ class SQLiteRecordsWalletsMixin:
 
     def _reset_autoincrement_many(self, tables: tuple[str, ...]) -> None: ...
 
+    def _refresh_tag_metrics(self) -> None: ...
+
     def _prune_orphan_tags(self) -> None: ...
 
     @staticmethod
@@ -570,8 +572,11 @@ class SQLiteRecordsWalletsMixin:
 
     def delete_all(self) -> None:
         with self._conn:
+            self._conn.execute("DELETE FROM record_tags")
             self._conn.execute("DELETE FROM records")
-            self._reset_autoincrement("records")
+            self._conn.execute("DELETE FROM transfers")
+            self._reset_autoincrement_many(("records", "transfers"))
+            self._refresh_tag_metrics()
             self._prune_orphan_tags()
 
     def save_initial_balance(self, balance: float) -> None:

@@ -104,6 +104,7 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
                     onExport = viewModel::showExportPlaceholder,
                     selectiveDeleteMode = state.selectiveDeleteMode,
                     selectedCount = state.selectedBulkRecordIds.size + state.selectedBulkTransferIds.size,
+                    hasBulkDeleteCandidates = state.hasBulkDeleteCandidates,
                     onDeleteAll = { confirmDeleteAll = true },
                     onSelectiveDelete = viewModel::startSelectiveDelete,
                     onDeleteSelected = { confirmSelectiveDelete = true },
@@ -257,6 +258,7 @@ private fun AddOperationLauncher(
     onExport: () -> Unit,
     selectiveDeleteMode: Boolean,
     selectedCount: Int,
+    hasBulkDeleteCandidates: Boolean,
     onDeleteAll: () -> Unit,
     onSelectiveDelete: () -> Unit,
     onDeleteSelected: () -> Unit,
@@ -323,10 +325,18 @@ private fun AddOperationLauncher(
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = onDeleteAll, modifier = Modifier.weight(1f)) {
+                    TextButton(
+                        onClick = onDeleteAll,
+                        enabled = hasBulkDeleteCandidates,
+                        modifier = Modifier.weight(1f),
+                    ) {
                         Text("Delete all")
                     }
-                    TextButton(onClick = onSelectiveDelete, modifier = Modifier.weight(1f)) {
+                    TextButton(
+                        onClick = onSelectiveDelete,
+                        enabled = hasBulkDeleteCandidates,
+                        modifier = Modifier.weight(1f),
+                    ) {
                         Text("Selective delete")
                     }
                 }

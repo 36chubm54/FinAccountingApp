@@ -187,6 +187,26 @@ def _snapshot_months(controller: FinancialController) -> list[str]:
     return [row.month for row in controller.get_frozen_distribution_rows()]
 
 
+def test_sqlite_delete_all_removes_transfer_and_tag_sidecars(tmp_path: Path) -> None:
+    repo, _controller = _make_controller(tmp_path / "delete_all_sidecars.db")
+
+    try:
+        linked_records = [record for record in repo.load_all() if record.transfer_id is not None]
+        assert linked_records
+        repo.replace_record_tags(int(linked_records[0].id), ("transfer",))
+        repo.replace_record_tags(int(repo.load_all()[0].id), ("salary",))
+
+        repo.delete_all()
+
+        assert repo.query_one("SELECT COUNT(*) FROM records")[0] == 0
+        assert repo.query_one("SELECT COUNT(*) FROM transfers")[0] == 0
+        assert repo.query_one("SELECT COUNT(*) FROM record_tags")[0] == 0
+        assert repo.query_one("SELECT COUNT(*) FROM tags")[0] == 0
+        assert repo.load_all() == []
+    finally:
+        repo.close()
+
+
 def test_sqlite_storage_proxy_supports_backup_and_concurrent_selects(tmp_path: Path) -> None:
     source = SQLiteStorage(str(tmp_path / "source.db"))
     target = SQLiteStorage(str(tmp_path / "target.db"))
