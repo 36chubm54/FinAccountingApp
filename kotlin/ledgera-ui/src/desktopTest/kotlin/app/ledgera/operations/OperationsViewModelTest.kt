@@ -260,6 +260,34 @@ class OperationsViewModelTest {
     }
 
     @Test
+    fun placeholderJournalActionsShowNoticeWithoutEngineCalls() {
+        val adapter = FakeEngineAdapter()
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.showImportPlaceholder()
+        assertEquals("Import is not available in beta.1 yet", viewModel.state.value.notice)
+
+        viewModel.showExportPlaceholder()
+        assertEquals("Export is not available in beta.1 yet", viewModel.state.value.notice)
+
+        viewModel.showDeleteAllPlaceholder()
+        assertEquals("Delete all is not available in beta.1 yet", viewModel.state.value.notice)
+
+        viewModel.showSelectiveDeletePlaceholder()
+        assertEquals("Selective delete is not available in beta.1 yet", viewModel.state.value.notice)
+
+        assertEquals(0, adapter.createCalls)
+        assertEquals(0, adapter.createTransferCalls)
+        assertEquals(0, adapter.updateCalls)
+        assertEquals(0, adapter.deleteCalls)
+        assertEquals(0, adapter.getTransferCalls)
+        assertEquals(0, adapter.updateTransferCalls)
+        assertEquals(0, adapter.deleteTransferCalls)
+        assertEquals(0, adapter.refreshCalls)
+        assertEquals(null, viewModel.state.value.error)
+    }
+
+    @Test
     fun createRuntimeFailureSurfacesInState() {
         val adapter = FakeEngineAdapter(createError = NoClassDefFoundError("missing create lambda"))
         val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))

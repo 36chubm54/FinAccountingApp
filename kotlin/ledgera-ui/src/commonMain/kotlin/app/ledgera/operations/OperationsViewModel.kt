@@ -125,6 +125,22 @@ class OperationsViewModel(
         mutableState.value = mutableState.value.copy(error = null, notice = null)
     }
 
+    fun showImportPlaceholder() {
+        showPlaceholderNotice("Import")
+    }
+
+    fun showExportPlaceholder() {
+        showPlaceholderNotice("Export")
+    }
+
+    fun showDeleteAllPlaceholder() {
+        showPlaceholderNotice("Delete all")
+    }
+
+    fun showSelectiveDeletePlaceholder() {
+        showPlaceholderNotice("Selective delete")
+    }
+
     fun updateDraft(draft: OperationDraft) {
         mutableState.value = mutableState.value.copy(editDraft = draft, error = null, notice = null)
     }
@@ -372,6 +388,13 @@ class OperationsViewModel(
         val fromWallet = wallets.firstOrNull { it.id == request.fromWalletId }?.name ?: "wallet #${request.fromWalletId}"
         val toWallet = wallets.firstOrNull { it.id == request.toWalletId }?.name ?: "wallet #${request.toWalletId}"
         return "Transfer created (id=$transferId): $fromWallet -> $toWallet, ${request.amount} ${request.currency}"
+    }
+
+    private fun showPlaceholderNotice(action: String) {
+        mutableState.value = mutableState.value.copy(
+            error = null,
+            notice = "$action is not available in beta.1 yet",
+        )
     }
 
     private fun OperationRecord.toDraft(): OperationDraft =

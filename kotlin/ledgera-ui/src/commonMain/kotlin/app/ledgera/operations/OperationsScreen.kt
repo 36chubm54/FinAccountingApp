@@ -84,8 +84,7 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
             Column(
                 modifier = Modifier
                     .widthIn(min = 360.dp, max = 460.dp)
-                    .fillMaxHeight()
-                    .verticalScroll(rememberScrollState()),
+                    .fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 AddOperationLauncher(
@@ -98,6 +97,10 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
                         viewModel.clearFeedback()
                         showTransferDialog = true
                     },
+                    onImport = viewModel::showImportPlaceholder,
+                    onExport = viewModel::showExportPlaceholder,
+                    onDeleteAll = viewModel::showDeleteAllPlaceholder,
+                    onSelectiveDelete = viewModel::showSelectiveDeletePlaceholder,
                 )
             }
 
@@ -212,16 +215,36 @@ private fun AddOperationLauncher(
     wallets: List<WalletOption>,
     onAddOperation: () -> Unit,
     onAddTransfer: () -> Unit,
+    onImport: () -> Unit,
+    onExport: () -> Unit,
+    onDeleteAll: () -> Unit,
+    onSelectiveDelete: () -> Unit,
 ) {
     val walletCount = wallets.size
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Card(Modifier.fillMaxWidth().fillMaxHeight()) {
+        Column(
+            Modifier
+                .fillMaxHeight()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Text("Operations", style = MaterialTheme.typography.titleMedium)
             Text("$walletCount active wallet${if (walletCount == 1) "" else "s"} available.")
-            wallets.forEach { wallet ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(wallet.name)
-                    Text("${wallet.balance} ${wallet.currency}")
+            if (wallets.isNotEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 120.dp)
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    wallets.forEach { wallet ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(wallet.name)
+                            Text("${wallet.balance} ${wallet.currency}")
+                        }
+                    }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -230,6 +253,24 @@ private fun AddOperationLauncher(
                 }
                 Button(onClick = onAddTransfer, enabled = walletCount >= 2) {
                     Text("Add transfer")
+                }
+            }
+            Spacer(Modifier.height(2.dp))
+            Text("Journal actions", style = MaterialTheme.typography.titleSmall)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onImport, modifier = Modifier.weight(1f)) {
+                    Text("Import")
+                }
+                TextButton(onClick = onExport, modifier = Modifier.weight(1f)) {
+                    Text("Export")
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onDeleteAll, modifier = Modifier.weight(1f)) {
+                    Text("Delete all")
+                }
+                TextButton(onClick = onSelectiveDelete, modifier = Modifier.weight(1f)) {
+                    Text("Selective delete")
                 }
             }
         }
