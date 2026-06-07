@@ -63,7 +63,9 @@ fun AppShell(
         }
 
         Column(Modifier.fillMaxSize()) {
-            StatusBanner(state.engineMessage, state.error)
+            if (state.error != null || state.engineMessage.isMeaningfulStatus()) {
+                StatusBanner(state.engineMessage, state.error)
+            }
             Surface(Modifier.fillMaxSize()) {
                 when (state.selectedSection) {
                     DesktopSection.Operations -> OperationsScreen(operationsViewModel)
@@ -80,6 +82,9 @@ fun AppShell(
         }
     }
 }
+
+private fun String.isMeaningfulStatus(): Boolean =
+    trim().isNotEmpty() && !equals("ready", ignoreCase = true)
 
 @Composable
 private fun StatusBanner(message: String, error: String?) {

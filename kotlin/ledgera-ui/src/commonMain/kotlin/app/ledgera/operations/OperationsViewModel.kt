@@ -152,6 +152,10 @@ class OperationsViewModel(
         mutableState.value = mutableState.value.copy(error = null, notice = null)
     }
 
+    fun clearNotice() {
+        mutableState.value = mutableState.value.copy(notice = null)
+    }
+
     fun showImportPlaceholder() {
         showPlaceholderNotice("Import")
     }

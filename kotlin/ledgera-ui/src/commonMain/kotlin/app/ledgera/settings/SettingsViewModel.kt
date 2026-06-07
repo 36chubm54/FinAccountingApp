@@ -45,6 +45,10 @@ class SettingsViewModel(
         mutableState.value = mutableState.value.copy(error = null, notice = null)
     }
 
+    fun clearNotice() {
+        mutableState.value = mutableState.value.copy(notice = null)
+    }
+
     fun createWallet(request: CreateWalletRequest) {
         val validationError = SettingsValidation.validateWalletFields(
             name = request.name,

@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.ledgera.model.CreateWalletRequest
 import app.ledgera.model.WalletSettingsItem
+import app.ledgera.ui.ToastHost
 
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) {
@@ -62,26 +63,31 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
         }
     }
 
-    Column(
-        modifier = modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ToastHost(
+        message = state.notice,
+        modifier = modifier.fillMaxSize(),
+        onDismiss = viewModel::clearNotice,
     ) {
-        Text("Settings", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        state.notice?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+        Column(
+            modifier = Modifier.fillMaxSize().padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text("Settings", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
-        WalletsSection(
-            wallets = state.wallets,
-            loading = state.loading,
-            onAddWallet = {
-                viewModel.clearFeedback()
-                showCreateWalletDialog = true
-            },
-            onDeleteWallet = { wallet ->
-                viewModel.clearFeedback()
-                walletPendingDelete = wallet
-            },
-        )
+            WalletsSection(
+                wallets = state.wallets,
+                loading = state.loading,
+                onAddWallet = {
+                    viewModel.clearFeedback()
+                    showCreateWalletDialog = true
+                },
+                onDeleteWallet = { wallet ->
+                    viewModel.clearFeedback()
+                    walletPendingDelete = wallet
+                },
+            )
+        }
     }
 
     if (showCreateWalletDialog) {
