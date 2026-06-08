@@ -1,13 +1,15 @@
 use ledgera_engine_storage::{
-    AuditFindingRow, OperationDeleteResult, RecordFilterPayload, RecordRow,
+    AuditFindingRow, OperationDeleteResult, OperationExportResult, OperationImportResult,
+    RecordFilterPayload, RecordRow,
     StandaloneRecordCreatePayload, StandaloneRecordUpdatePayload, TransferCreatePayload,
     TransferRow, TransferUpdatePayload, WalletBalanceRow, WalletCreatePayload, WalletRow,
     audit_run_for_date, base_currency_code, create_standalone_record, create_transfer,
     create_wallet, current_local_date, delete_all_operations,
     delete_operations_selection, delete_standalone_record, delete_transfer, delete_wallet,
-    distinct_record_categories, filtered_record_list_rows, standalone_record_get_row, tag_names,
-    transfer_get_row, update_standalone_record, update_transfer, wallet_balance_row,
-    wallet_balance_rows, wallet_list_rows,
+    distinct_record_categories, export_records_csv, filtered_record_list_rows, import_records_csv,
+    preview_import_records_csv, standalone_record_get_row, tag_names, transfer_get_row,
+    update_standalone_record, update_transfer, wallet_balance_row, wallet_balance_rows,
+    wallet_list_rows,
 };
 use std::fmt;
 use std::path::Path;
@@ -101,6 +103,20 @@ pub struct OperationDeleteResultDto {
     pub deleted_records: i64,
     pub deleted_transfers: i64,
     pub skipped_records: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OperationImportResultDto {
+    pub imported: i64,
+    pub skipped: i64,
+    pub errors: Vec<String>,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OperationExportResultDto {
+    pub exported_rows: i64,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -356,6 +372,33 @@ impl LedgeraEngine {
             .map_err(storage_error)
     }
 
+    pub fn preview_import_records_csv(
+        &self,
+        path: String,
+    ) -> Result<OperationImportResultDto, LedgeraEngineError> {
+        preview_import_records_csv(&self.db_path, &path)
+            .map(operation_import_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn import_records_csv(
+        &self,
+        path: String,
+    ) -> Result<OperationImportResultDto, LedgeraEngineError> {
+        import_records_csv(&self.db_path, &path)
+            .map(operation_import_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn export_records_csv(
+        &self,
+        path: String,
+    ) -> Result<OperationExportResultDto, LedgeraEngineError> {
+        export_records_csv(&self.db_path, &path)
+            .map(operation_export_to_dto)
+            .map_err(storage_error)
+    }
+
     pub fn list_tags(&self) -> Result<Vec<String>, LedgeraEngineError> {
         tag_names(&self.db_path).map_err(storage_error)
     }
@@ -576,6 +619,22 @@ fn operation_delete_to_dto(result: OperationDeleteResult) -> OperationDeleteResu
         deleted_records: result.deleted_records,
         deleted_transfers: result.deleted_transfers,
         skipped_records: result.skipped_records,
+    }
+}
+
+fn operation_import_to_dto(result: OperationImportResult) -> OperationImportResultDto {
+    OperationImportResultDto {
+        imported: result.imported,
+        skipped: result.skipped,
+        errors: result.errors,
+        dry_run: result.dry_run,
+    }
+}
+
+fn operation_export_to_dto(result: OperationExportResult) -> OperationExportResultDto {
+    OperationExportResultDto {
+        exported_rows: result.exported_rows,
+        path: result.path,
     }
 }
 
@@ -1328,6 +1387,57 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_imports_and_exports_operations_csv() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+        let import_path = std::env::temp_dir().join(format!(
+            "ledgera_kotlin_ffi_import_{}.csv",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let export_path = std::env::temp_dir().join(format!(
+            "ledgera_kotlin_ffi_export_{}.csv",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::write(
+            &import_path,
+            "date,type,wallet_id,category,amount_original,currency,rate_at_operation,amount_base,description,tags,period,transfer_id,from_wallet_id,to_wallet_id\n\
+             2026-01-01,income,1,Salary,10.00,KZT,1,10.00,Pay,work,,,,,\n\
+             2026-01-02,transfer,,Transfer,5.00,KZT,1,5.00,Move,,,1,1,2\n",
+        )
+        .unwrap();
+
+        let preview = engine
+            .preview_import_records_csv(import_path.to_string_lossy().to_string())
+            .unwrap();
+        assert_eq!(preview.imported, 2);
+        assert!(preview.dry_run);
+
+        let imported = engine
+            .import_records_csv(import_path.to_string_lossy().to_string())
+            .unwrap();
+        assert_eq!(imported.imported, 2);
+        assert!(!imported.dry_run);
+
+        let exported = engine
+            .export_records_csv(export_path.to_string_lossy().to_string())
+            .unwrap();
+        assert_eq!(exported.exported_rows, 2);
+        let csv = fs::read_to_string(&export_path).unwrap();
+        assert!(csv.contains(",transfer,"));
+        assert!(csv.contains("Salary"));
+
+        fs::remove_file(import_path).ok();
+        fs::remove_file(export_path).ok();
         fs::remove_file(db_path).ok();
     }
 

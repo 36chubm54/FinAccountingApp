@@ -5,6 +5,7 @@ use ledgera_engine_core::{
 use rusqlite::{Connection, OptionalExtension};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(windows)]
 use windows_sys::Win32::{Foundation::SYSTEMTIME, System::SystemInformation::GetLocalTime};
@@ -34,6 +35,20 @@ pub struct OperationDeleteResult {
     pub deleted_records: i64,
     pub deleted_transfers: i64,
     pub skipped_records: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OperationImportResult {
+    pub imported: i64,
+    pub skipped: i64,
+    pub errors: Vec<String>,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OperationExportResult {
+    pub exported_rows: i64,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -906,13 +921,18 @@ pub fn create_transfer(
             &format!("[transfer:{transfer_id}]"),
         )?;
     }
+    let transfer_id_map = normalize_transfer_ids_in_tx(&tx)?;
+    let normalized_transfer_id = transfer_id_map
+        .get(&transfer_id)
+        .copied()
+        .unwrap_or(transfer_id);
 
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
     transfer_list_rows(db_path)?
         .into_iter()
-        .find(|row| row.id == transfer_id)
-        .ok_or_else(|| format!("Transfer not found: {transfer_id}"))
+        .find(|row| row.id == normalized_transfer_id)
+        .ok_or_else(|| format!("Transfer not found: {normalized_transfer_id}"))
 }
 
 pub fn update_transfer(
@@ -1177,6 +1197,671 @@ pub fn delete_operations_selection(
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
     Ok(result)
+}
+
+const OPERATION_CSV_HEADERS: [&str; 14] = [
+    "date",
+    "type",
+    "wallet_id",
+    "category",
+    "amount_original",
+    "currency",
+    "rate_at_operation",
+    "amount_base",
+    "description",
+    "tags",
+    "period",
+    "transfer_id",
+    "from_wallet_id",
+    "to_wallet_id",
+];
+const MAX_OPERATION_CSV_FILE_SIZE: u64 = 10 * 1024 * 1024;
+const MAX_OPERATION_CSV_ROWS: usize = 200_000;
+
+#[derive(Debug, Clone)]
+struct ParsedOperationCsvRecord {
+    record_type: String,
+    date: String,
+    wallet_id: i64,
+    amount_original: f64,
+    amount_original_minor: i64,
+    currency: String,
+    rate_text: String,
+    rate: f64,
+    amount_base: f64,
+    amount_base_minor: i64,
+    category: String,
+    description: String,
+    tags: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ParsedOperationCsvTransfer {
+    logical_id: i64,
+    from_wallet_id: i64,
+    to_wallet_id: i64,
+    date: String,
+    amount: f64,
+    amount_minor: i64,
+    currency: String,
+    rate_text: String,
+    rate: f64,
+    description: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct OperationCsvPlan {
+    rows: Vec<ParsedOperationCsvRow>,
+    imported: i64,
+    skipped: i64,
+    errors: Vec<String>,
+}
+
+pub fn preview_import_records_csv(db_path: &str, path: &str) -> StorageResult<OperationImportResult> {
+    let conn = open_sqlite_connection(db_path)?;
+    let plan = parse_operation_csv_import(&conn, path)?;
+    Ok(OperationImportResult {
+        imported: plan.imported,
+        skipped: plan.skipped,
+        errors: plan.errors,
+        dry_run: true,
+    })
+}
+
+pub fn import_records_csv(db_path: &str, path: &str) -> StorageResult<OperationImportResult> {
+    let mut conn = open_sqlite_connection(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(sqlite_err)?;
+    let plan = parse_operation_csv_import(&conn, path)?;
+    if plan.imported == 0 {
+        return Ok(OperationImportResult {
+            imported: 0,
+            skipped: plan.skipped,
+            errors: plan.errors,
+            dry_run: false,
+        });
+    }
+
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    let existing_transfer_ids = all_transfer_ids_in_tx(&tx)?;
+    let existing_record_ids = deletable_standalone_record_ids_in_tx(&tx, &existing_transfer_ids)?;
+    let skipped_existing = skipped_operation_record_count_in_tx(&tx, &existing_transfer_ids)?;
+    delete_operations_in_tx(&tx, &existing_record_ids, &existing_transfer_ids, skipped_existing)?;
+
+    let mut transfer_id_map: HashMap<i64, i64> = HashMap::new();
+    let mut imported_standalone_records: Vec<(i64, String)> = Vec::new();
+    for row in &plan.rows {
+        match row {
+            ParsedOperationCsvRow::Transfer(transfer) => {
+                tx.execute(
+                    "INSERT INTO transfers (
+                        from_wallet_id,
+                        to_wallet_id,
+                        date,
+                        amount_original,
+                        amount_original_minor,
+                        currency,
+                        rate_at_operation,
+                        rate_at_operation_text,
+                        amount_base,
+                        amount_base_minor,
+                        description
+                    )
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                    (
+                        transfer.from_wallet_id,
+                        transfer.to_wallet_id,
+                        transfer.date.as_str(),
+                        transfer.amount,
+                        transfer.amount_minor,
+                        transfer.currency.as_str(),
+                        transfer.rate,
+                        transfer.rate_text.as_str(),
+                        transfer.amount,
+                        transfer.amount_minor,
+                        transfer.description.as_str(),
+                    ),
+                )
+                .map_err(sqlite_err)?;
+                let new_transfer_id = tx.last_insert_rowid();
+                transfer_id_map.insert(transfer.logical_id, new_transfer_id);
+                insert_transfer_record_in_tx(
+                    &tx,
+                    "expense",
+                    &transfer.date,
+                    transfer.from_wallet_id,
+                    Some(new_transfer_id),
+                    transfer.amount,
+                    transfer.amount_minor,
+                    &transfer.currency,
+                    transfer.rate,
+                    &transfer.rate_text,
+                    "Transfer",
+                    &transfer.description,
+                )?;
+                insert_transfer_record_in_tx(
+                    &tx,
+                    "income",
+                    &transfer.date,
+                    transfer.to_wallet_id,
+                    Some(new_transfer_id),
+                    transfer.amount,
+                    transfer.amount_minor,
+                    &transfer.currency,
+                    transfer.rate,
+                    &transfer.rate_text,
+                    "Transfer",
+                    &transfer.description,
+                )?;
+            }
+            ParsedOperationCsvRow::Record(record) => {
+                let record_id = insert_import_record_in_tx(&tx, record, &record.description)?;
+                replace_record_tags_in_tx(&tx, record_id, &record.tags)?;
+                imported_standalone_records.push((record_id, record.description.clone()));
+            }
+        }
+    }
+
+    if !transfer_id_map.is_empty() {
+        let normalized_ids = normalize_transfer_ids_in_tx(&tx)?;
+        for mapped_transfer_id in transfer_id_map.values_mut() {
+            if let Some(normalized_transfer_id) = normalized_ids.get(mapped_transfer_id) {
+                *mapped_transfer_id = *normalized_transfer_id;
+            }
+        }
+        for (record_id, original_description) in &imported_standalone_records {
+            let description =
+                remap_transfer_marker_description(original_description, &transfer_id_map);
+            if description != *original_description {
+                tx.execute(
+                    "UPDATE records SET description = ?1 WHERE id = ?2",
+                    (description.as_str(), record_id),
+                )
+                .map_err(sqlite_err)?;
+            }
+        }
+    }
+    refresh_tag_metrics_in_tx(&tx)?;
+    prune_orphan_tags_in_tx(&tx)?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+
+    Ok(OperationImportResult {
+        imported: plan.imported,
+        skipped: plan.skipped,
+        errors: plan.errors,
+        dry_run: false,
+    })
+}
+
+pub fn export_records_csv(db_path: &str, path: &str) -> StorageResult<OperationExportResult> {
+    let conn = open_sqlite_connection(db_path)?;
+    let mut writer = csv::Writer::from_path(path).map_err(|error| error.to_string())?;
+    writer
+        .write_record(OPERATION_CSV_HEADERS)
+        .map_err(|error| error.to_string())?;
+
+    let records = record_row_dicts(&conn, &format!("{RECORD_SELECT} ORDER BY id"), &[])?;
+    let transfers = transfer_list_rows_from_conn(&conn)?;
+    let transfer_map: HashMap<i64, TransferRow> =
+        transfers.into_iter().map(|transfer| (transfer.id, transfer)).collect();
+    let mut exported_transfer_ids = HashSet::new();
+    let mut exported_rows = 0_i64;
+
+    for record in records {
+        if record.related_debt_id.is_some() || record.record_type == "mandatory_expense" {
+            continue;
+        }
+        if let Some(transfer_id) = record.transfer_id {
+            if exported_transfer_ids.insert(transfer_id) {
+                if let Some(transfer) = transfer_map.get(&transfer_id) {
+                    writer
+                        .write_record(operation_transfer_csv_row(transfer))
+                        .map_err(|error| error.to_string())?;
+                    exported_rows += 1;
+                }
+            }
+            continue;
+        }
+        if record.record_type != "income" && record.record_type != "expense" {
+            continue;
+        }
+        writer
+            .write_record(operation_record_csv_row(&record))
+            .map_err(|error| error.to_string())?;
+        exported_rows += 1;
+    }
+    writer.flush().map_err(|error| error.to_string())?;
+    Ok(OperationExportResult {
+        exported_rows,
+        path: path.to_owned(),
+    })
+}
+
+fn parse_operation_csv_import(conn: &Connection, path: &str) -> StorageResult<OperationCsvPlan> {
+    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
+    if metadata.len() > MAX_OPERATION_CSV_FILE_SIZE {
+        return Err(format!("CSV import file is too large: {} bytes", metadata.len()));
+    }
+    let base_currency = base_currency_code_in_conn(conn)?;
+    let wallet_ids = active_wallet_ids_in_conn(conn)?;
+    let mut reader = csv::ReaderBuilder::new()
+        .flexible(true)
+        .from_path(path)
+        .map_err(|error| error.to_string())?;
+    let headers = reader
+        .headers()
+        .map_err(|error| error.to_string())?
+        .iter()
+        .map(normalize_csv_key)
+        .collect::<Vec<_>>();
+
+    let mut plan = OperationCsvPlan::default();
+    let mut logical_transfer_ids = HashSet::new();
+    let mut next_implicit_transfer_id = -1_i64;
+    for (index, row) in reader.records().enumerate() {
+        if index >= MAX_OPERATION_CSV_ROWS {
+            return Err(format!(
+                "CSV import exceeded row limit ({MAX_OPERATION_CSV_ROWS})"
+            ));
+        }
+        let row_label = format!("row {}", index + 2);
+        let row = row.map_err(|error| error.to_string())?;
+        let values = csv_row_values(&headers, &row);
+        if values.values().all(|value| value.trim().is_empty()) {
+            continue;
+        }
+        let row = parse_operation_csv_row(
+            &values,
+            &row_label,
+            &base_currency,
+            &wallet_ids,
+            &mut logical_transfer_ids,
+            &mut next_implicit_transfer_id,
+        );
+        match row {
+            Ok(row) => {
+                plan.rows.push(row);
+                plan.imported += 1;
+            }
+            Err(error) => {
+                plan.skipped += 1;
+                plan.errors.push(error);
+            }
+        }
+    }
+    Ok(plan)
+}
+
+#[derive(Debug, Clone)]
+enum ParsedOperationCsvRow {
+    Record(ParsedOperationCsvRecord),
+    Transfer(ParsedOperationCsvTransfer),
+}
+
+fn parse_operation_csv_row(
+    values: &HashMap<String, String>,
+    row_label: &str,
+    base_currency: &str,
+    wallet_ids: &HashSet<i64>,
+    logical_transfer_ids: &mut HashSet<i64>,
+    next_implicit_transfer_id: &mut i64,
+) -> StorageResult<ParsedOperationCsvRow> {
+    let row_type = csv_value(values, "type").trim().to_lowercase();
+    if row_type == "transfer" {
+        return parse_operation_csv_transfer(
+            values,
+            row_label,
+            base_currency,
+            wallet_ids,
+            next_implicit_transfer_id,
+        )
+            .and_then(|transfer| {
+                if !logical_transfer_ids.insert(transfer.logical_id) {
+                    return Err(format!(
+                        "{row_label}: duplicate transfer_id {}",
+                        transfer.logical_id
+                    ));
+                }
+                Ok(ParsedOperationCsvRow::Transfer(transfer))
+            });
+    }
+    if row_type != "income" && row_type != "expense" {
+        return Err(format!("{row_label}: unsupported type '{row_type}'"));
+    }
+    let transfer_id = csv_value(values, "transfer_id");
+    if !transfer_id.trim().is_empty() {
+        return Err(format!(
+            "{row_label}: transfer-linked child rows are not supported; use aggregate transfer rows"
+        ));
+    }
+    if !csv_value(values, "period").trim().is_empty() {
+        return Err(format!("{row_label}: mandatory rows are not supported in Operations import"));
+    }
+    let date = required_csv_value(values, "date", row_label)?;
+    validate_ymd_date(&date)?;
+    let wallet_id = parse_required_positive_i64(values, "wallet_id", row_label)?;
+    if !wallet_ids.contains(&wallet_id) {
+        return Err(format!("{row_label}: wallet not found ({wallet_id})"));
+    }
+    let category = required_csv_value(values, "category", row_label)?;
+    let currency = required_csv_value(values, "currency", row_label)?.to_uppercase();
+    validate_currency_code(&currency)?;
+    validate_base_currency_only(&currency, base_currency)?;
+    let (_amount_original_text, amount_original, amount_original_minor) =
+        parse_positive_money(values, "amount_original", row_label)?;
+    let (_amount_base_text, amount_base, amount_base_minor) =
+        parse_positive_money(values, "amount_base", row_label)?;
+    let (rate_text, rate) = parse_positive_rate(values, "rate_at_operation", row_label)?;
+    Ok(ParsedOperationCsvRow::Record(ParsedOperationCsvRecord {
+        record_type: row_type,
+        date,
+        wallet_id,
+        amount_original,
+        amount_original_minor,
+        currency,
+        rate_text,
+        rate,
+        amount_base,
+        amount_base_minor,
+        category,
+        description: csv_value(values, "description"),
+        tags: parse_csv_tags(&csv_value(values, "tags")),
+    }))
+}
+
+fn parse_operation_csv_transfer(
+    values: &HashMap<String, String>,
+    row_label: &str,
+    base_currency: &str,
+    wallet_ids: &HashSet<i64>,
+    next_implicit_transfer_id: &mut i64,
+) -> StorageResult<ParsedOperationCsvTransfer> {
+    let date = required_csv_value(values, "date", row_label)?;
+    validate_ymd_date(&date)?;
+    let from_wallet_id = parse_required_positive_i64(values, "from_wallet_id", row_label)?;
+    let to_wallet_id = parse_required_positive_i64(values, "to_wallet_id", row_label)?;
+    if from_wallet_id == to_wallet_id {
+        return Err(format!("{row_label}: transfer wallets must be different"));
+    }
+    if !wallet_ids.contains(&from_wallet_id) {
+        return Err(format!("{row_label}: wallet not found ({from_wallet_id})"));
+    }
+    if !wallet_ids.contains(&to_wallet_id) {
+        return Err(format!("{row_label}: wallet not found ({to_wallet_id})"));
+    }
+    let logical_id = match parse_optional_positive_i64(values, "transfer_id", row_label)? {
+        Some(value) => value,
+        None => {
+            let value = *next_implicit_transfer_id;
+            *next_implicit_transfer_id -= 1;
+            value
+        }
+    };
+    let currency = required_csv_value(values, "currency", row_label)?.to_uppercase();
+    validate_currency_code(&currency)?;
+    validate_transfer_base_currency_only(&currency, base_currency)?;
+    let (_amount_text, amount, amount_minor) = parse_positive_money(values, "amount_original", row_label)?;
+    let (_amount_base_text, _amount_base, amount_base_minor) =
+        parse_positive_money(values, "amount_base", row_label)?;
+    if amount_minor != amount_base_minor {
+        return Err(format!(
+            "{row_label}: base-currency transfer amount_base must equal amount_original"
+        ));
+    }
+    let (rate_text, rate) = parse_positive_rate(values, "rate_at_operation", row_label)?;
+    if rate_text != "1.000000" && (rate - 1.0).abs() > f64::EPSILON {
+        return Err(format!("{row_label}: base-currency transfer rate must be 1"));
+    }
+    Ok(ParsedOperationCsvTransfer {
+        logical_id,
+        from_wallet_id,
+        to_wallet_id,
+        date,
+        amount,
+        amount_minor,
+        currency,
+        rate_text,
+        rate,
+        description: csv_value(values, "description"),
+    })
+}
+
+fn csv_row_values(headers: &[String], row: &csv::StringRecord) -> HashMap<String, String> {
+    let mut values = HashMap::new();
+    for (index, header) in headers.iter().enumerate() {
+        values.insert(header.clone(), row.get(index).unwrap_or("").trim().to_owned());
+    }
+    values
+}
+
+fn normalize_csv_key(value: &str) -> String {
+    value.trim().trim_start_matches('\u{feff}').to_lowercase().replace(' ', "_")
+}
+
+fn csv_value(values: &HashMap<String, String>, key: &str) -> String {
+    values.get(key).cloned().unwrap_or_default()
+}
+
+fn required_csv_value(
+    values: &HashMap<String, String>,
+    key: &str,
+    row_label: &str,
+) -> StorageResult<String> {
+    let value = csv_value(values, key);
+    if value.trim().is_empty() {
+        Err(format!("{row_label}: missing required field '{key}'"))
+    } else {
+        Ok(value.trim().to_owned())
+    }
+}
+
+fn parse_required_positive_i64(
+    values: &HashMap<String, String>,
+    key: &str,
+    row_label: &str,
+) -> StorageResult<i64> {
+    parse_optional_positive_i64(values, key, row_label)?
+        .ok_or_else(|| format!("{row_label}: missing required field '{key}'"))
+}
+
+fn parse_optional_positive_i64(
+    values: &HashMap<String, String>,
+    key: &str,
+    row_label: &str,
+) -> StorageResult<Option<i64>> {
+    let value = csv_value(values, key);
+    if value.trim().is_empty() {
+        return Ok(None);
+    }
+    let parsed = value
+        .trim()
+        .parse::<i64>()
+        .map_err(|_| format!("{row_label}: invalid {key} '{value}'"))?;
+    if parsed <= 0 {
+        return Err(format!("{row_label}: invalid {key} '{value}'"));
+    }
+    Ok(Some(parsed))
+}
+
+fn parse_positive_money(
+    values: &HashMap<String, String>,
+    key: &str,
+    row_label: &str,
+) -> StorageResult<(String, f64, i64)> {
+    let raw = required_csv_value(values, key, row_label)?;
+    let text = quantize_money_text(&raw).map_err(|error| format!("{row_label}: {key}: {error}"))?;
+    let minor = to_minor_units(&text).map_err(|error| format!("{row_label}: {key}: {error}"))?;
+    if minor <= 0 {
+        return Err(format!("{row_label}: {key} must be positive"));
+    }
+    let value = text
+        .parse::<f64>()
+        .map_err(|_| format!("{row_label}: invalid {key}"))?;
+    Ok((text, value, minor))
+}
+
+fn parse_positive_rate(
+    values: &HashMap<String, String>,
+    key: &str,
+    row_label: &str,
+) -> StorageResult<(String, f64)> {
+    let raw = required_csv_value(values, key, row_label)?;
+    let text = quantize_rate_text(&raw).map_err(|error| format!("{row_label}: {key}: {error}"))?;
+    let value = text
+        .parse::<f64>()
+        .map_err(|_| format!("{row_label}: invalid {key}"))?;
+    if value <= 0.0 {
+        return Err(format!("{row_label}: {key} must be positive"));
+    }
+    Ok((text, value))
+}
+
+fn parse_csv_tags(value: &str) -> Vec<String> {
+    value
+        .split([',', ';'])
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn active_wallet_ids_in_conn(conn: &Connection) -> StorageResult<HashSet<i64>> {
+    let mut stmt = conn
+        .prepare("SELECT id FROM wallets WHERE is_active = 1 ORDER BY id")
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, i64>(0))
+        .map_err(sqlite_err)?;
+    rows.collect::<Result<HashSet<_>, _>>().map_err(sqlite_err)
+}
+
+fn remap_transfer_marker_description(description: &str, transfer_id_map: &HashMap<i64, i64>) -> String {
+    let Some(old_transfer_id) = transfer_marker_id(description) else {
+        return description.to_owned();
+    };
+    match transfer_id_map.get(&old_transfer_id) {
+        Some(new_transfer_id) => format!("[transfer:{new_transfer_id}]"),
+        None => description.to_owned(),
+    }
+}
+
+fn insert_import_record_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    record: &ParsedOperationCsvRecord,
+    description: &str,
+) -> StorageResult<i64> {
+    tx.execute(
+        "INSERT INTO records (
+            type,
+            date,
+            wallet_id,
+            transfer_id,
+            related_debt_id,
+            amount_original,
+            amount_original_minor,
+            currency,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_base,
+            amount_base_minor,
+            category,
+            description,
+            period
+        )
+        VALUES (?1, ?2, ?3, NULL, NULL, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NULL)",
+        (
+            record.record_type.as_str(),
+            record.date.as_str(),
+            record.wallet_id,
+            record.amount_original,
+            record.amount_original_minor,
+            record.currency.as_str(),
+            record.rate,
+            record.rate_text.as_str(),
+            record.amount_base,
+            record.amount_base_minor,
+            record.category.as_str(),
+            description,
+        ),
+    )
+    .map_err(sqlite_err)?;
+    Ok(tx.last_insert_rowid())
+}
+
+fn transfer_list_rows_from_conn(conn: &Connection) -> StorageResult<Vec<TransferRow>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, from_wallet_id, to_wallet_id, date,
+                    amount_original, amount_original_minor, currency,
+                    rate_at_operation, rate_at_operation_text,
+                    amount_base, amount_base_minor, description
+             FROM transfers
+             ORDER BY id",
+        )
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(TransferRow {
+                id: row.get(0)?,
+                from_wallet_id: row.get(1)?,
+                to_wallet_id: row.get(2)?,
+                date: row.get(3)?,
+                amount_original: money_value_from_sql_row(row, 4, 5)?,
+                currency: row.get(6)?,
+                rate_at_operation: rate_value_from_sql_row(row, 7, 8)?,
+                amount_base: money_value_from_sql_row(row, 9, 10)?,
+                description: row.get(11)?,
+            })
+        })
+        .map_err(sqlite_err)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_err)
+}
+
+fn operation_record_csv_row(record: &RecordRow) -> Vec<String> {
+    vec![
+        record.date.clone(),
+        record.record_type.clone(),
+        record.wallet_id.to_string(),
+        record.category.clone(),
+        money_csv_text(record.amount_original),
+        record.currency.clone(),
+        rate_csv_text(record.rate_at_operation),
+        money_csv_text(record.amount_base),
+        record.description.clone(),
+        record.tags.join(", "),
+        String::new(),
+        String::new(),
+        String::new(),
+        String::new(),
+    ]
+}
+
+fn operation_transfer_csv_row(transfer: &TransferRow) -> Vec<String> {
+    vec![
+        transfer.date.clone(),
+        "transfer".to_owned(),
+        String::new(),
+        "Transfer".to_owned(),
+        money_csv_text(transfer.amount_original),
+        transfer.currency.clone(),
+        rate_csv_text(transfer.rate_at_operation),
+        money_csv_text(transfer.amount_base),
+        transfer.description.clone(),
+        String::new(),
+        String::new(),
+        transfer.id.to_string(),
+        transfer.from_wallet_id.to_string(),
+        transfer.to_wallet_id.to_string(),
+    ]
+}
+
+fn money_csv_text(value: f64) -> String {
+    quantize_money_text(&value.to_string()).unwrap_or_else(|_| format!("{value:.2}"))
+}
+
+fn rate_csv_text(value: f64) -> String {
+    quantize_rate_text(&value.to_string()).unwrap_or_else(|_| value.to_string())
 }
 
 fn mandatory_expense_select_sql(conn: &Connection, filter_by_id: bool) -> StorageResult<String> {
@@ -1843,6 +2528,94 @@ fn all_transfer_ids_in_tx(tx: &rusqlite::Transaction<'_>) -> StorageResult<Vec<i
         .query_map([], |row| row.get::<_, i64>(0))
         .map_err(sqlite_err)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_err)
+}
+
+fn normalize_transfer_ids_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+) -> StorageResult<HashMap<i64, i64>> {
+    let mut stmt = tx
+        .prepare("SELECT id FROM transfers ORDER BY date, id")
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, i64>(0))
+        .map_err(sqlite_err)?;
+    let ordered_ids = rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_err)?;
+    let transfer_id_map: HashMap<i64, i64> = ordered_ids
+        .iter()
+        .enumerate()
+        .map(|(index, old_id)| (*old_id, i64::try_from(index + 1).unwrap_or(i64::MAX)))
+        .collect();
+    if transfer_id_map
+        .iter()
+        .all(|(old_id, new_id)| old_id == new_id)
+    {
+        return Ok(transfer_id_map);
+    }
+
+    for (old_id, new_id) in &transfer_id_map {
+        let temp_id = -*new_id;
+        tx.execute("UPDATE transfers SET id = ?1 WHERE id = ?2", (temp_id, old_id))
+            .map_err(sqlite_err)?;
+        tx.execute(
+            "UPDATE records SET transfer_id = ?1 WHERE transfer_id = ?2",
+            (temp_id, old_id),
+        )
+        .map_err(sqlite_err)?;
+        tx.execute(
+            "UPDATE records
+             SET description = ?1
+             WHERE transfer_id IS NULL
+               AND related_debt_id IS NULL
+               AND description = ?2",
+            (
+                format!("[transfer:{temp_id}]"),
+                format!("[transfer:{old_id}]"),
+            ),
+        )
+        .map_err(sqlite_err)?;
+    }
+
+    for new_id in transfer_id_map.values() {
+        let temp_id = -*new_id;
+        tx.execute("UPDATE transfers SET id = ?1 WHERE id = ?2", (new_id, temp_id))
+            .map_err(sqlite_err)?;
+        tx.execute(
+            "UPDATE records SET transfer_id = ?1 WHERE transfer_id = ?2",
+            (new_id, temp_id),
+        )
+        .map_err(sqlite_err)?;
+        tx.execute(
+            "UPDATE records
+             SET description = ?1
+             WHERE transfer_id IS NULL
+               AND related_debt_id IS NULL
+               AND description = ?2",
+            (
+                format!("[transfer:{new_id}]"),
+                format!("[transfer:{temp_id}]"),
+            ),
+        )
+        .map_err(sqlite_err)?;
+    }
+
+    let max_id = i64::try_from(ordered_ids.len()).unwrap_or(0);
+    let has_sequence = tx
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'",
+            [],
+            |_row| Ok(()),
+        )
+        .optional()
+        .map_err(sqlite_err)?
+        .is_some();
+    if has_sequence {
+        tx.execute(
+            "UPDATE sqlite_sequence SET seq = ?1 WHERE name = 'transfers'",
+            [max_id],
+        )
+        .map_err(sqlite_err)?;
+    }
+    Ok(transfer_id_map)
 }
 
 fn deletable_standalone_record_ids_in_tx(
@@ -3641,6 +4414,52 @@ mod tests {
     }
 
     #[test]
+    fn create_transfer_normalizes_transfer_ids_after_gaps() {
+        let db_path = create_balance_test_db();
+        let second = create_transfer(
+            &db_path,
+            &TransferCreatePayload {
+                from_wallet_id: 1,
+                to_wallet_id: 2,
+                date: "2026-02-01".to_owned(),
+                amount: "100".to_owned(),
+                currency: "KZT".to_owned(),
+                description: "Second".to_owned(),
+                commission_amount: "0".to_owned(),
+                commission_currency: "KZT".to_owned(),
+            },
+        )
+        .unwrap();
+        assert_eq!(second.id, 2);
+        assert!(delete_transfer(&db_path, 1).unwrap());
+
+        let created = create_transfer(
+            &db_path,
+            &TransferCreatePayload {
+                from_wallet_id: 1,
+                to_wallet_id: 2,
+                date: "2026-02-02".to_owned(),
+                amount: "50".to_owned(),
+                currency: "KZT".to_owned(),
+                description: "Third".to_owned(),
+                commission_amount: "1".to_owned(),
+                commission_currency: "KZT".to_owned(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(created.id, 2);
+        let transfers = transfer_list_rows(&db_path).unwrap();
+        assert_eq!(transfers.iter().map(|transfer| transfer.id).collect::<Vec<_>>(), vec![1, 2]);
+        let rows = record_list_rows(&db_path).unwrap();
+        assert!(rows.iter().any(|record| record.transfer_id == Some(1)));
+        assert!(rows.iter().any(|record| record.transfer_id == Some(2)));
+        assert!(rows.iter().any(|record| record.description == "[transfer:2]"));
+        assert!(!rows.iter().any(|record| record.description == "[transfer:3]"));
+        remove_test_db(&db_path);
+    }
+
+    #[test]
     fn transfer_commission_marker_survives_standalone_amount_edit_and_transfer_delete() {
         let db_path = create_balance_test_db();
         let created = create_transfer(
@@ -4297,6 +5116,189 @@ mod tests {
             5
         );
         assert!(transfer_get_row(&db_path, 1).unwrap().is_some());
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn import_export_records_csv_writes_operations_owned_rows_and_aggregate_transfer() {
+        let db_path = create_balance_test_db();
+        let path = std::env::temp_dir().join(format!(
+            "ledgera_ops_export_{}.csv",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        let result = export_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+
+        assert_eq!(result.exported_rows, 3);
+        let contents = fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("date,type,wallet_id,category"));
+        assert_eq!(contents.matches(",transfer,").count(), 1);
+        assert!(contents.contains("Move to card"));
+        assert!(!contents.contains("mandatory_expense"));
+
+        let _ = fs::remove_file(path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn import_records_csv_preview_then_commit_replaces_operations_owned_rows() {
+        let db_path = create_balance_test_db();
+        let path = std::env::temp_dir().join(format!(
+            "ledgera_ops_import_{}.csv",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::write(
+            &path,
+            "date,type,wallet_id,category,amount_original,currency,rate_at_operation,amount_base,description,tags,period,transfer_id,from_wallet_id,to_wallet_id\n\
+             2026-02-01,income,1,Salary,100.00,KZT,1,100.00,Imported salary,\"work, main\",,,,,\n\
+             2026-02-02,transfer,,Transfer,25.00,KZT,1,25.00,Imported transfer,,,7,1,2\n",
+        )
+        .unwrap();
+
+        let preview = preview_import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+        assert_eq!(preview.imported, 2);
+        assert!(preview.dry_run);
+        assert_eq!(record_list_rows(&db_path).unwrap().len(), 5);
+
+        let result = import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+
+        assert_eq!(result.imported, 2);
+        assert!(!result.dry_run);
+        let records = record_list_rows(&db_path).unwrap();
+        assert!(records.iter().any(|record| record.record_type == "mandatory_expense"));
+        assert!(records.iter().any(|record| {
+            record.transfer_id.is_none()
+                && record.record_type == "income"
+                && record.category == "Salary"
+                && record.tags == vec!["main".to_owned(), "work".to_owned()]
+        }));
+        let transfer_rows: Vec<_> = records
+            .iter()
+            .filter(|record| record.transfer_id.is_some())
+            .collect();
+        assert_eq!(transfer_rows.len(), 2);
+        let transfers = transfer_list_rows(&db_path).unwrap();
+        assert_eq!(transfers.len(), 1);
+        assert_eq!(transfers[0].id, 1);
+        assert!(transfer_rows.iter().all(|record| record.transfer_id == Some(1)));
+
+        let _ = fs::remove_file(path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn import_records_csv_preserves_file_order_for_journal_sorting() {
+        let db_path = create_balance_test_db();
+        let path = std::env::temp_dir().join(format!(
+            "ledgera_ops_import_order_{}.csv",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::write(
+            &path,
+            "date,type,wallet_id,category,amount_original,currency,rate_at_operation,amount_base,description,tags,period,transfer_id,from_wallet_id,to_wallet_id\n\
+             2026-02-01,income,1,Salary,100.00,KZT,1,100.00,Oldest,,,,,\n\
+             2026-02-02,expense,1,Food,10.00,KZT,1,10.00,Same day first,,,,,\n\
+             2026-02-02,expense,1,Food,20.00,KZT,1,20.00,Same day second,,,,,\n\
+             2026-02-03,transfer,,Transfer,25.00,KZT,1,25.00,Newest transfer,,,9,1,2\n",
+        )
+        .unwrap();
+
+        import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+
+        let imported_rows: Vec<_> = record_list_rows(&db_path)
+            .unwrap()
+            .into_iter()
+            .filter(|record| {
+                record.description == "Oldest"
+                    || record.description == "Same day first"
+                    || record.description == "Same day second"
+                    || record.description == "Newest transfer"
+            })
+            .collect();
+        let oldest_id = imported_rows
+            .iter()
+            .find(|record| record.description == "Oldest")
+            .unwrap()
+            .id;
+        let same_day_first_id = imported_rows
+            .iter()
+            .find(|record| record.description == "Same day first")
+            .unwrap()
+            .id;
+        let same_day_second_id = imported_rows
+            .iter()
+            .find(|record| record.description == "Same day second")
+            .unwrap()
+            .id;
+        assert!(oldest_id < same_day_first_id);
+        assert!(same_day_first_id < same_day_second_id);
+
+        let journal_rows = filtered_record_list_rows(&db_path, &RecordFilterPayload::default())
+            .unwrap();
+        let descriptions: Vec<_> = journal_rows
+            .iter()
+            .map(|record| record.description.as_str())
+            .collect();
+        let newest_transfer_position = descriptions
+            .iter()
+            .position(|description| *description == "Newest transfer")
+            .unwrap();
+        let same_day_second_position = descriptions
+            .iter()
+            .position(|description| *description == "Same day second")
+            .unwrap();
+        let same_day_first_position = descriptions
+            .iter()
+            .position(|description| *description == "Same day first")
+            .unwrap();
+        let oldest_position = descriptions
+            .iter()
+            .position(|description| *description == "Oldest")
+            .unwrap();
+        assert!(newest_transfer_position < same_day_second_position);
+        assert!(same_day_second_position < same_day_first_position);
+        assert!(same_day_first_position < oldest_position);
+
+        let _ = fs::remove_file(path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn import_records_csv_skips_invalid_rows_without_mutating_on_preview() {
+        let db_path = create_balance_test_db();
+        let path = std::env::temp_dir().join(format!(
+            "ledgera_ops_import_invalid_{}.csv",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::write(
+            &path,
+            "date,type,wallet_id,category,amount_original,currency,rate_at_operation,amount_base,description,tags,period,transfer_id,from_wallet_id,to_wallet_id\n\
+             2999-01-01,income,1,Future,10.00,KZT,1,10.00,,,,,,\n\
+             2026-02-02,transfer,,Transfer,25.00,KZT,1,25.00,Bad transfer,,,1,1,1\n",
+        )
+        .unwrap();
+
+        let preview = preview_import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+
+        assert_eq!(preview.imported, 0);
+        assert_eq!(preview.skipped, 2);
+        assert!(preview.errors.iter().any(|error| error.contains("future")));
+        assert!(preview.errors.iter().any(|error| error.contains("different")));
+        assert_eq!(record_list_rows(&db_path).unwrap().len(), 5);
+
+        let _ = fs::remove_file(path);
         remove_test_db(&db_path);
     }
 

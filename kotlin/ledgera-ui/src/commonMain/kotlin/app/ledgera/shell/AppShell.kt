@@ -25,6 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.ledgera.operations.OperationsScreen
+import app.ledgera.operations.OperationsFileActions
+import app.ledgera.operations.NoOperationsFileActions
 import app.ledgera.operations.OperationsViewModel
 import app.ledgera.settings.SettingsScreen
 import app.ledgera.settings.SettingsViewModel
@@ -36,6 +38,7 @@ fun AppShell(
     operationsViewModel: OperationsViewModel,
     settingsViewModel: SettingsViewModel,
     modifier: Modifier = Modifier,
+    operationsFileActions: OperationsFileActions = NoOperationsFileActions,
 ) {
     val state by viewModel.state.collectAsState()
     val operationsState by operationsViewModel.state.collectAsState()
@@ -86,7 +89,10 @@ fun AppShell(
                 }
                 Surface(Modifier.fillMaxSize()) {
                     when (state.selectedSection) {
-                        DesktopSection.Operations -> OperationsScreen(operationsViewModel)
+                        DesktopSection.Operations -> OperationsScreen(
+                            operationsViewModel,
+                            fileActions = operationsFileActions,
+                        )
                         DesktopSection.Reports -> PendingSection(state.selectedSection)
                         DesktopSection.Analytics -> PendingSection(state.selectedSection)
                         DesktopSection.Dashboard -> PendingSection(state.selectedSection)

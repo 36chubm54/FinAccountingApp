@@ -15,6 +15,8 @@ import app.ledgera.model.CreateWalletRequest
 import app.ledgera.model.EngineStatus
 import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationDeleteResult
+import app.ledgera.model.OperationExportResult
+import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
 import app.ledgera.model.TransferDetails
 import app.ledgera.model.UpdateOperationRequest
@@ -161,6 +163,37 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
             )
         }
     }
+
+    override suspend fun previewImportRecordsCsv(path: String): OperationImportResult =
+        withContext(Dispatchers.IO) {
+            engine.previewImportRecordsCsv(path).let {
+                OperationImportResult(
+                    imported = it.imported,
+                    skipped = it.skipped,
+                    errors = it.errors,
+                    dryRun = it.dryRun,
+                )
+            }
+        }
+
+    override suspend fun importRecordsCsv(path: String): OperationImportResult =
+        withContext(Dispatchers.IO) {
+            engine.importRecordsCsv(path).let {
+                OperationImportResult(
+                    imported = it.imported,
+                    skipped = it.skipped,
+                    errors = it.errors,
+                    dryRun = it.dryRun,
+                )
+            }
+        }
+
+    override suspend fun exportRecordsCsv(path: String): OperationExportResult =
+        withContext(Dispatchers.IO) {
+            engine.exportRecordsCsv(path).let {
+                OperationExportResult(exportedRows = it.exportedRows, path = it.path)
+            }
+        }
 
     override suspend fun listTags(): List<String> = withContext(Dispatchers.IO) {
         engine.listTags()

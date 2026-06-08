@@ -121,6 +121,18 @@ data class OperationDeleteResult(
     val skippedRecords: Long,
 )
 
+data class OperationImportResult(
+    val imported: Long,
+    val skipped: Long,
+    val errors: List<String>,
+    val dryRun: Boolean,
+)
+
+data class OperationExportResult(
+    val exportedRows: Long,
+    val path: String,
+)
+
 data class WalletOption(
     val id: Long,
     val name: String,

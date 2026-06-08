@@ -85,6 +85,18 @@ dictionary OperationDeleteResultDto {
     i64 skipped_records;
 };
 
+dictionary OperationImportResultDto {
+    i64 imported;
+    i64 skipped;
+    sequence<string> errors;
+    boolean dry_run;
+};
+
+dictionary OperationExportResultDto {
+    i64 exported_rows;
+    string path;
+};
+
 dictionary AuditFindingDto {
     string check;
     string severity;
@@ -171,6 +183,12 @@ interface LedgeraEngine {
     OperationDeleteResultDto delete_all_operations();
     [Throws=LedgeraEngineError]
     OperationDeleteResultDto delete_operations_selection(sequence<i64> record_ids, sequence<i64> transfer_ids);
+    [Throws=LedgeraEngineError]
+    OperationImportResultDto preview_import_records_csv(string path);
+    [Throws=LedgeraEngineError]
+    OperationImportResultDto import_records_csv(string path);
+    [Throws=LedgeraEngineError]
+    OperationExportResultDto export_records_csv(string path);
     [Throws=LedgeraEngineError]
     sequence<string> list_tags();
     [Throws=LedgeraEngineError]

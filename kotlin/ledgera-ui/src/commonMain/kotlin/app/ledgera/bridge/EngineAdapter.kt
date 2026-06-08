@@ -8,6 +8,8 @@ import app.ledgera.model.AuditFinding
 import app.ledgera.model.EngineStatus
 import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationDeleteResult
+import app.ledgera.model.OperationExportResult
+import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
 import app.ledgera.model.TransferDetails
 import app.ledgera.model.UpdateOperationRequest
@@ -34,6 +36,9 @@ interface OperationsEngine {
     suspend fun deleteTransfer(transferId: Long): Boolean
     suspend fun deleteAllOperations(): OperationDeleteResult
     suspend fun deleteOperationsSelection(recordIds: List<Long>, transferIds: List<Long>): OperationDeleteResult
+    suspend fun previewImportRecordsCsv(path: String): OperationImportResult
+    suspend fun importRecordsCsv(path: String): OperationImportResult
+    suspend fun exportRecordsCsv(path: String): OperationExportResult
     suspend fun listTags(): List<String>
     suspend fun listCategories(recordType: String): List<String>
     suspend fun listWallets(): List<WalletOption>

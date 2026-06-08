@@ -6,6 +6,7 @@ import app.ledgera.model.CreateTransferRequest
 import app.ledgera.model.OperationDraft
 import app.ledgera.model.OperationDeleteResult
 import app.ledgera.model.OperationFilter
+import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
 import app.ledgera.model.TransferDraft
 import app.ledgera.model.UpdateOperationRequest
@@ -33,6 +34,8 @@ data class OperationsUiState(
     val selectedBulkTransferIds: Set<Long> = emptySet(),
     val editDraft: OperationDraft? = null,
     val transferDraft: TransferDraft? = null,
+    val importPreview: OperationImportResult? = null,
+    val importPath: String? = null,
     val error: String? = null,
     val notice: String? = null,
 ) {
@@ -92,6 +95,8 @@ class OperationsViewModel(
                         draft.id != null && records.any { it.id == draft.id }
                     },
                     transferDraft = mutableState.value.transferDraft,
+                    importPreview = mutableState.value.importPreview,
+                    importPath = mutableState.value.importPath,
                     notice = notice,
                 )
             }.onFailure { error ->
@@ -143,6 +148,8 @@ class OperationsViewModel(
             selectedBulkTransferIds = emptySet(),
             editDraft = null,
             transferDraft = null,
+            importPreview = null,
+            importPath = null,
             error = null,
             notice = null,
         )
@@ -156,12 +163,97 @@ class OperationsViewModel(
         mutableState.value = mutableState.value.copy(notice = null)
     }
 
-    fun showImportPlaceholder() {
-        showPlaceholderNotice("Import")
+    fun previewImportRecordsCsv(path: String?) {
+        val normalizedPath = path?.trim().orEmpty()
+        if (normalizedPath.isEmpty()) {
+            return
+        }
+        mutableState.value = mutableState.value.copy(
+            loading = true,
+            error = null,
+            notice = null,
+            importPreview = null,
+            importPath = normalizedPath,
+        )
+        launchSafely {
+            runCatching {
+                val result = engine.previewImportRecordsCsv(normalizedPath)
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    importPreview = result,
+                    importPath = normalizedPath,
+                    error = null,
+                    notice = null,
+                )
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    importPreview = null,
+                    importPath = null,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
     }
 
-    fun showExportPlaceholder() {
-        showPlaceholderNotice("Export")
+    fun cancelImportPreview() {
+        mutableState.value = mutableState.value.copy(importPreview = null, importPath = null, error = null)
+    }
+
+    fun confirmImportRecordsCsv() {
+        val path = mutableState.value.importPath
+        if (path.isNullOrBlank()) {
+            mutableState.value = mutableState.value.copy(error = "Import file is required", notice = null)
+            return
+        }
+        mutableState.value = mutableState.value.copy(loading = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                val result = engine.importRecordsCsv(path)
+                mutableState.value = mutableState.value.copy(
+                    selectedRecordId = null,
+                    editDraft = null,
+                    transferDraft = null,
+                    importPreview = null,
+                    importPath = null,
+                    selectiveDeleteMode = false,
+                    selectedBulkRecordIds = emptySet(),
+                    selectedBulkTransferIds = emptySet(),
+                )
+                refresh(notice = importNotice(result))
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
+    fun exportRecordsCsv(path: String?) {
+        val normalizedPath = path?.trim().orEmpty()
+        if (normalizedPath.isEmpty()) {
+            return
+        }
+        mutableState.value = mutableState.value.copy(loading = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                val result = engine.exportRecordsCsv(normalizedPath)
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    error = null,
+                    notice = "Exported ${result.exportedRows} rows to ${result.path}",
+                )
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
     }
 
     fun startSelectiveDelete() {
@@ -544,11 +636,13 @@ class OperationsViewModel(
         return "Transfer created (id=$transferId): $fromWallet -> $toWallet, ${request.amount} ${request.currency}"
     }
 
-    private fun showPlaceholderNotice(action: String) {
-        mutableState.value = mutableState.value.copy(
-            error = null,
-            notice = "$action is not available in beta.1 yet",
-        )
+    private fun importNotice(result: OperationImportResult): String {
+        val base = "Imported ${result.imported} CSV rows"
+        return if (result.skipped > 0 || result.errors.isNotEmpty()) {
+            "$base. Skipped ${result.skipped} rows"
+        } else {
+            base
+        }
     }
 
     private fun deleteNotice(result: OperationDeleteResult): String {

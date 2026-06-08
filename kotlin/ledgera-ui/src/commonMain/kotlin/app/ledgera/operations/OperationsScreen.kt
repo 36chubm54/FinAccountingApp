@@ -42,11 +42,26 @@ import app.ledgera.model.CreateOperationRequest
 import app.ledgera.model.CreateTransferRequest
 import app.ledgera.model.OperationDraft
 import app.ledgera.model.OperationFilter
+import app.ledgera.model.OperationImportResult
 import app.ledgera.model.TransferDraft
 import app.ledgera.model.WalletOption
 
+interface OperationsFileActions {
+    fun openImportCsvPath(): String?
+    fun saveExportCsvPath(): String?
+}
+
+object NoOperationsFileActions : OperationsFileActions {
+    override fun openImportCsvPath(): String? = null
+    override fun saveExportCsvPath(): String? = null
+}
+
 @Composable
-fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifier) {
+fun OperationsScreen(
+    viewModel: OperationsViewModel,
+    modifier: Modifier = Modifier,
+    fileActions: OperationsFileActions = NoOperationsFileActions,
+) {
     val state by viewModel.state.collectAsState()
     var showCreateDialog by remember { mutableStateOf(false) }
     var showTransferDialog by remember { mutableStateOf(false) }
@@ -54,6 +69,7 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
     var confirmTransferDelete by remember { mutableStateOf(false) }
     var confirmDeleteAll by remember { mutableStateOf(false) }
     var confirmSelectiveDelete by remember { mutableStateOf(false) }
+    var confirmExport by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         viewModel.refresh()
     }
@@ -100,8 +116,8 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
                         viewModel.clearFeedback()
                         showTransferDialog = true
                     },
-                    onImport = viewModel::showImportPlaceholder,
-                    onExport = viewModel::showExportPlaceholder,
+                    onImport = { viewModel.previewImportRecordsCsv(fileActions.openImportCsvPath()) },
+                    onExport = { confirmExport = true },
                     selectiveDeleteMode = state.selectiveDeleteMode,
                     selectedCount = state.selectedBulkRecordIds.size + state.selectedBulkTransferIds.size,
                     hasBulkDeleteCandidates = state.hasBulkDeleteCandidates,
@@ -244,6 +260,25 @@ fun OperationsScreen(viewModel: OperationsViewModel, modifier: Modifier = Modifi
                 viewModel.deleteSelectedOperations()
             },
             onCancel = { confirmSelectiveDelete = false },
+        )
+    }
+    if (confirmExport) {
+        ExportOperationsConfirmDialog(
+            onConfirm = {
+                confirmExport = false
+                viewModel.exportRecordsCsv(fileActions.saveExportCsvPath())
+            },
+            onCancel = { confirmExport = false },
+        )
+    }
+    state.importPreview?.let { preview ->
+        ImportPreviewDialog(
+            preview = preview,
+            path = state.importPath.orEmpty(),
+            submitting = state.loading,
+            engineError = state.error,
+            onConfirm = viewModel::confirmImportRecordsCsv,
+            onCancel = viewModel::cancelImportPreview,
         )
     }
 }
@@ -1058,6 +1093,70 @@ private fun DeleteSelectedOperationsConfirmDialog(
         },
         dismissButton = {
             TextButton(onClick = onCancel) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun ExportOperationsConfirmDialog(onConfirm: () -> Unit, onCancel: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Export operations") },
+        text = {
+            Text(
+                "Export creates a readable CSV file with financial data. Save it only to a trusted location."
+            )
+        },
+        confirmButton = {
+            Button(onClick = onConfirm) { Text("Export") }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun ImportPreviewDialog(
+    preview: OperationImportResult,
+    path: String,
+    submitting: Boolean,
+    engineError: String?,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Import CSV preview") },
+        text = {
+            Column(
+                Modifier.width(DialogContentWidth).heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(path, style = MaterialTheme.typography.bodySmall)
+                Text("Rows to import: ${preview.imported}")
+                Text("Rows skipped: ${preview.skipped}")
+                if (preview.errors.isNotEmpty()) {
+                    Text("First errors", fontWeight = FontWeight.SemiBold)
+                    preview.errors.take(5).forEach { error ->
+                        Text("- $error", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                engineError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                Text(
+                    "Current standalone operations and transfers will be replaced. Debt-linked and unsupported rows are kept.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm, enabled = !submitting && preview.imported > 0) {
+                Text("Import")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel, enabled = !submitting) { Text("Cancel") }
         },
     )
 }

@@ -9,6 +9,8 @@ import app.ledgera.model.CreateWalletRequest
 import app.ledgera.model.EngineStatus
 import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationDeleteResult
+import app.ledgera.model.OperationExportResult
+import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
 import app.ledgera.model.TransferDetails
 import app.ledgera.model.UpdateOperationRequest
@@ -262,24 +264,46 @@ class OperationsViewModelTest {
     }
 
     @Test
-    fun importExportPlaceholdersShowNoticeWithoutEngineCalls() {
+    fun importExportNullPathsDoNotCallEngine() {
         val adapter = FakeEngineAdapter()
         val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
 
-        viewModel.showImportPlaceholder()
-        assertEquals("Import is not available in beta.1 yet", viewModel.state.value.notice)
+        viewModel.previewImportRecordsCsv(null)
+        viewModel.exportRecordsCsv(null)
 
-        viewModel.showExportPlaceholder()
-        assertEquals("Export is not available in beta.1 yet", viewModel.state.value.notice)
+        assertEquals(0, adapter.previewImportCalls)
+        assertEquals(0, adapter.importCalls)
+        assertEquals(0, adapter.exportCalls)
+        assertEquals(null, viewModel.state.value.notice)
+        assertEquals(null, viewModel.state.value.error)
+    }
 
-        assertEquals(0, adapter.createCalls)
-        assertEquals(0, adapter.createTransferCalls)
-        assertEquals(0, adapter.updateCalls)
-        assertEquals(0, adapter.deleteCalls)
-        assertEquals(0, adapter.getTransferCalls)
-        assertEquals(0, adapter.updateTransferCalls)
-        assertEquals(0, adapter.deleteTransferCalls)
-        assertEquals(0, adapter.refreshCalls)
+    @Test
+    fun importPreviewThenCommitRefreshesAndShowsNotice() {
+        val adapter = FakeEngineAdapter(records = mutableListOf(operationRecord(id = 1)))
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.previewImportRecordsCsv("C:\\Temp\\ops.csv")
+        assertEquals(1, adapter.previewImportCalls)
+        assertEquals(2L, viewModel.state.value.importPreview?.imported)
+
+        viewModel.confirmImportRecordsCsv()
+
+        assertEquals(1, adapter.importCalls)
+        assertEquals("Imported 2 CSV rows", viewModel.state.value.notice)
+        assertEquals(listOf(10L, 11L), viewModel.state.value.records.map { it.id })
+        assertEquals(null, viewModel.state.value.importPreview)
+    }
+
+    @Test
+    fun exportSuccessShowsToastNotice() {
+        val adapter = FakeEngineAdapter()
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.exportRecordsCsv("C:\\Temp\\ops.csv")
+
+        assertEquals(1, adapter.exportCalls)
+        assertEquals("Exported 3 rows to C:\\Temp\\ops.csv", viewModel.state.value.notice)
         assertEquals(null, viewModel.state.value.error)
     }
 
@@ -808,6 +832,9 @@ private class FakeEngineAdapter(
     var deleteSelectionCalls = 0
     var updateCalls = 0
     var deleteCalls = 0
+    var previewImportCalls = 0
+    var importCalls = 0
+    var exportCalls = 0
     var refreshCalls = 0
     var lastDeletedRecordIds: List<Long> = emptyList()
     var lastDeletedTransferIds: List<Long> = emptyList()
@@ -1002,6 +1029,24 @@ private class FakeEngineAdapter(
             deletedTransfers = transferIds.size.toLong(),
             skippedRecords = 0,
         )
+    }
+
+    override suspend fun previewImportRecordsCsv(path: String): OperationImportResult {
+        previewImportCalls += 1
+        return OperationImportResult(imported = 2, skipped = 0, errors = emptyList(), dryRun = true)
+    }
+
+    override suspend fun importRecordsCsv(path: String): OperationImportResult {
+        importCalls += 1
+        records.clear()
+        records += operationRecord(id = 10, type = "income", category = "Imported")
+        records += operationRecord(id = 11, type = "expense", category = "Imported")
+        return OperationImportResult(imported = 2, skipped = 0, errors = emptyList(), dryRun = false)
+    }
+
+    override suspend fun exportRecordsCsv(path: String): OperationExportResult {
+        exportCalls += 1
+        return OperationExportResult(exportedRows = 3, path = path)
     }
 
     override suspend fun listTags(): List<String> = listOf("home")
