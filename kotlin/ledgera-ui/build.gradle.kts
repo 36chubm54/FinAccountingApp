@@ -46,11 +46,39 @@ kotlin {
 
 val rustManifest = rootProject.layout.projectDirectory.file("rust/ledgera_engine/Cargo.toml")
 val rustLibraryDir = rootProject.layout.projectDirectory.dir("rust/ledgera_engine/target/release")
+val rustWorkspaceDir = rootProject.layout.projectDirectory.dir("rust/ledgera_engine")
+val rustInputs = rootProject.fileTree(rustWorkspaceDir) {
+    include("Cargo.lock")
+    include("Cargo.toml")
+    include("**/Cargo.toml")
+    include("**/build.rs")
+    include("**/src/**")
+    include("**/uniffi.toml")
+    exclude("target/**")
+}
+val hostOs = System.getProperty("os.name").lowercase()
+val nativeLibraryName = when {
+    hostOs.contains("win") -> "ledgera_engine.dll"
+    hostOs.contains("mac") -> "libledgera_engine.dylib"
+    else -> "libledgera_engine.so"
+}
+val uniffiBindgenName = if (hostOs.contains("win")) {
+    "uniffi-bindgen.exe"
+} else {
+    "uniffi-bindgen"
+}
 val uniffiOutDir = layout.buildDirectory.dir("generated/uniffi/kotlin")
+val uniffiDefinition = rootProject.layout.projectDirectory.file("rust/ledgera_engine/kotlin_ffi/src/ledgera_engine.udl")
+val uniffiConfig = rootProject.layout.projectDirectory.file("rust/ledgera_engine/kotlin_ffi/uniffi.toml")
 val skikoDataDir = rootProject.layout.projectDirectory.dir(".gradle/skiko")
 
 val buildRustKotlinFfi by tasks.registering(Exec::class) {
     workingDir = rootProject.layout.projectDirectory.asFile
+    inputs.files(rustInputs)
+    outputs.files(
+        rustLibraryDir.file(nativeLibraryName),
+        rustLibraryDir.file(uniffiBindgenName),
+    )
     commandLine(
         "cargo",
         "build",
@@ -65,6 +93,7 @@ val buildRustKotlinFfi by tasks.registering(Exec::class) {
 val generateUniffiKotlin by tasks.registering(Exec::class) {
     dependsOn(buildRustKotlinFfi)
     workingDir = rootProject.layout.projectDirectory.asFile
+    inputs.files(uniffiDefinition, uniffiConfig, rustLibraryDir.file(uniffiBindgenName))
     outputs.dir(uniffiOutDir)
     commandLine(
         "cargo",
@@ -78,13 +107,13 @@ val generateUniffiKotlin by tasks.registering(Exec::class) {
         "uniffi-bindgen",
         "--",
         "generate",
-        "rust/ledgera_engine/kotlin_ffi/src/ledgera_engine.udl",
+        uniffiDefinition.asFile.absolutePath,
         "--language",
         "kotlin",
         "--out-dir",
         uniffiOutDir.get().asFile.absolutePath,
         "--config",
-        "rust/ledgera_engine/kotlin_ffi/uniffi.toml",
+        uniffiConfig.asFile.absolutePath,
     )
 }
 
