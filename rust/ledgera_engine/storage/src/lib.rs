@@ -1,6 +1,8 @@
+mod csv;
 mod excel;
 
 use calamine::{open_workbook_auto, Data, Reader};
+use csv::{normalize_tabular_key, read_csv_rows, write_csv_rows};
 use excel::StyledWorksheet;
 use ledgera_engine_core::{
     minor_to_money_value, quantize_money_text, quantize_rate_text, rate_float_from_text,
@@ -1203,7 +1205,7 @@ pub fn delete_operations_selection(
     Ok(result)
 }
 
-const OPERATION_CSV_HEADERS: [&str; 14] = [
+const OPERATION_TABULAR_HEADERS: [&str; 14] = [
     "date",
     "type",
     "wallet_id",
@@ -1426,18 +1428,10 @@ fn import_operation_plan(
 
 pub fn export_records_csv(db_path: &str, path: &str) -> StorageResult<OperationExportResult> {
     let conn = open_sqlite_connection(db_path)?;
-    let mut writer = csv::Writer::from_path(path).map_err(|error| error.to_string())?;
-    writer
-        .write_record(OPERATION_CSV_HEADERS)
-        .map_err(|error| error.to_string())?;
-
     let rows = operation_export_rows(&conn)?;
-    for row in &rows {
-        writer.write_record(row).map_err(|error| error.to_string())?;
-    }
-    writer.flush().map_err(|error| error.to_string())?;
+    let exported_rows = write_csv_rows(path, &OPERATION_TABULAR_HEADERS, &rows)?;
     Ok(OperationExportResult {
-        exported_rows: i64::try_from(rows.len()).unwrap_or(i64::MAX),
+        exported_rows,
         path: path.to_owned(),
     })
 }
@@ -1475,7 +1469,7 @@ pub fn export_records_xlsx(db_path: &str, path: &str) -> StorageResult<Operation
     let rows = operation_export_rows(&conn)?;
     let mut worksheet = StyledWorksheet::new_records_sheet(
         "Data",
-        &OPERATION_CSV_HEADERS,
+        &OPERATION_TABULAR_HEADERS,
         &[4, 6, 7],
     )
     .map_err(|error| error.to_string())?;
@@ -1490,31 +1484,12 @@ pub fn export_records_xlsx(db_path: &str, path: &str) -> StorageResult<Operation
 }
 
 fn parse_operation_csv_import(conn: &Connection, path: &str) -> StorageResult<OperationCsvPlan> {
-    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
-    if metadata.len() > MAX_OPERATION_CSV_FILE_SIZE {
-        return Err(format!("CSV import file is too large: {} bytes", metadata.len()));
-    }
-    let mut reader = csv::ReaderBuilder::new()
-        .flexible(true)
-        .from_path(path)
-        .map_err(|error| error.to_string())?;
-    let headers = reader
-        .headers()
-        .map_err(|error| error.to_string())?
-        .iter()
-        .map(normalize_csv_key)
-        .collect::<Vec<_>>();
-
-    let mut rows = Vec::new();
-    for (index, row) in reader.records().enumerate() {
-        if index >= MAX_OPERATION_CSV_ROWS {
-            return Err(format!(
-                "CSV import exceeded row limit ({MAX_OPERATION_CSV_ROWS})"
-            ));
-        }
-        let row = row.map_err(|error| error.to_string())?;
-        rows.push((index + 2, csv_row_values(&headers, &row)));
-    }
+    let rows = read_csv_rows(
+        path,
+        MAX_OPERATION_CSV_FILE_SIZE,
+        MAX_OPERATION_CSV_ROWS,
+        "CSV import",
+    )?;
     parse_operation_tabular_import(conn, rows)
 }
 
@@ -1537,7 +1512,7 @@ fn parse_operation_xlsx_import(conn: &Connection, path: &str) -> StorageResult<O
     let headers = header_row
         .iter()
         .map(xlsx_cell_to_string)
-        .map(|value| normalize_csv_key(&value))
+        .map(|value| normalize_tabular_key(&value))
         .collect::<Vec<_>>();
     let mut rows = Vec::new();
     for (index, row) in rows_iter.enumerate() {
@@ -1721,14 +1696,6 @@ fn parse_operation_csv_transfer(
     })
 }
 
-fn csv_row_values(headers: &[String], row: &csv::StringRecord) -> HashMap<String, String> {
-    let mut values = HashMap::new();
-    for (index, header) in headers.iter().enumerate() {
-        values.insert(header.clone(), row.get(index).unwrap_or("").trim().to_owned());
-    }
-    values
-}
-
 fn xlsx_row_values(headers: &[String], row: &[Data]) -> HashMap<String, String> {
     let mut values = HashMap::new();
     for (index, header) in headers.iter().enumerate() {
@@ -1769,10 +1736,6 @@ fn excel_serial_to_date_text(serial: f64) -> String {
     let days = serial.floor() as i64;
     let (year, month, day) = civil_from_days(days - 25_569);
     format!("{year:04}-{month:02}-{day:02}")
-}
-
-fn normalize_csv_key(value: &str) -> String {
-    value.trim().trim_start_matches('\u{feff}').to_lowercase().replace(' ', "_")
 }
 
 fn csv_value(values: &HashMap<String, String>, key: &str) -> String {
@@ -3724,7 +3687,7 @@ mod tests {
 
     fn write_operation_xlsx_fixture(path: &std::path::Path, rows: &[Vec<&str>]) {
         let mut worksheet =
-            StyledWorksheet::new_records_sheet("Data", &OPERATION_CSV_HEADERS, &[4, 6, 7])
+            StyledWorksheet::new_records_sheet("Data", &OPERATION_TABULAR_HEADERS, &[4, 6, 7])
                 .unwrap();
         for row in rows {
             worksheet
@@ -5314,7 +5277,7 @@ mod tests {
             .collect();
         assert_eq!(
             rows[0],
-            OPERATION_CSV_HEADERS
+            OPERATION_TABULAR_HEADERS
                 .iter()
                 .map(|value| value.to_string())
                 .collect::<Vec<_>>()

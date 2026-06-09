@@ -100,8 +100,8 @@ Current Kotlin/Rust contract:
   linked rows and reports skipped records; CSV/XLSX import uses a previewed
   replace flow over Operations-owned standalone records/transfers and exports
   transfers as aggregate `type=transfer` rows; XLSX export mirrors the
-  Python/Tkinter records `Data` sheet contract and shares reusable Rust Excel
-  styling utilities for later tabs; transfer list parity, `.xls`/JSON
+  Python/Tkinter records `Data` sheet contract and shares reusable Rust CSV
+  and Excel tabular utilities for later tabs; transfer list parity, `.xls`/JSON
   import/export, current-rate import, and full inline editor keyboard parity
   remain separate beta.1 slices
 - transfer commissions are represented as standalone expense records adjacent

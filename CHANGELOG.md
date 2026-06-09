@@ -30,6 +30,7 @@ This project adheres to Semantic Versioning.
 - Extended the Kotlin UniFFI Operations contract with standalone record get/update/delete methods plus tag and category lookup surfaces.
 - Extended the Kotlin UniFFI Operations contract with transfer create/get/update/delete, safe bulk delete, and CSV/XLSX records migration support; transfer list parity, `.xls`/JSON import/export, current-rate import, and commission editing remain pending beta.1 slices.
 - Extended the Kotlin adapter contract with a Settings capability group for wallet list/create/delete and read-only audit flows; wallet edit and broader Settings surfaces remain pending beta.1 slices.
+- Extracted reusable Rust storage CSV helpers alongside the Excel utility so later tabs can share bounded tabular import/export infrastructure instead of duplicating Operations-specific CSV I/O.
 
 ### Fixed
 
