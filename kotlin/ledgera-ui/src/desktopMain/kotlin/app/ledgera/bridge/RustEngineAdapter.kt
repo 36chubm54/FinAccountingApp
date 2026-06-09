@@ -4,6 +4,8 @@ import app.ledgera.engine.CreateRecordRequest as NativeCreateRecordRequest
 import app.ledgera.engine.CreateTransferRequest as NativeCreateTransferRequest
 import app.ledgera.engine.CreateWalletRequest as NativeCreateWalletRequest
 import app.ledgera.engine.LedgeraEngine
+import app.ledgera.engine.OperationExportResultDto
+import app.ledgera.engine.OperationImportResultDto
 import app.ledgera.engine.RecordFilterDto
 import app.ledgera.engine.UpdateRecordRequest as NativeUpdateRecordRequest
 import app.ledgera.engine.UpdateTransferRequest as NativeUpdateTransferRequest
@@ -166,33 +168,32 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
 
     override suspend fun previewImportRecordsCsv(path: String): OperationImportResult =
         withContext(Dispatchers.IO) {
-            engine.previewImportRecordsCsv(path).let {
-                OperationImportResult(
-                    imported = it.imported,
-                    skipped = it.skipped,
-                    errors = it.errors,
-                    dryRun = it.dryRun,
-                )
-            }
+            engine.previewImportRecordsCsv(path).toModel()
         }
 
     override suspend fun importRecordsCsv(path: String): OperationImportResult =
         withContext(Dispatchers.IO) {
-            engine.importRecordsCsv(path).let {
-                OperationImportResult(
-                    imported = it.imported,
-                    skipped = it.skipped,
-                    errors = it.errors,
-                    dryRun = it.dryRun,
-                )
-            }
+            engine.importRecordsCsv(path).toModel()
         }
 
     override suspend fun exportRecordsCsv(path: String): OperationExportResult =
         withContext(Dispatchers.IO) {
-            engine.exportRecordsCsv(path).let {
-                OperationExportResult(exportedRows = it.exportedRows, path = it.path)
-            }
+            engine.exportRecordsCsv(path).toModel()
+        }
+
+    override suspend fun previewImportRecordsXlsx(path: String): OperationImportResult =
+        withContext(Dispatchers.IO) {
+            engine.previewImportRecordsXlsx(path).toModel()
+        }
+
+    override suspend fun importRecordsXlsx(path: String): OperationImportResult =
+        withContext(Dispatchers.IO) {
+            engine.importRecordsXlsx(path).toModel()
+        }
+
+    override suspend fun exportRecordsXlsx(path: String): OperationExportResult =
+        withContext(Dispatchers.IO) {
+            engine.exportRecordsXlsx(path).toModel()
         }
 
     override suspend fun listTags(): List<String> = withContext(Dispatchers.IO) {
@@ -301,4 +302,15 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
             amountBase = transfer.amountBase,
             description = transfer.description,
         )
+
+    private fun OperationImportResultDto.toModel(): OperationImportResult =
+        OperationImportResult(
+            imported = imported,
+            skipped = skipped,
+            errors = errors,
+            dryRun = dryRun,
+        )
+
+    private fun OperationExportResultDto.toModel(): OperationExportResult =
+        OperationExportResult(exportedRows = exportedRows, path = path)
 }

@@ -1,3 +1,7 @@
+mod excel;
+
+use calamine::{open_workbook_auto, Data, Reader};
+use excel::StyledWorksheet;
 use ledgera_engine_core::{
     minor_to_money_value, quantize_money_text, quantize_rate_text, rate_float_from_text,
     to_minor_units,
@@ -1268,11 +1272,37 @@ pub fn preview_import_records_csv(db_path: &str, path: &str) -> StorageResult<Op
     })
 }
 
+pub fn preview_import_records_xlsx(db_path: &str, path: &str) -> StorageResult<OperationImportResult> {
+    let conn = open_sqlite_connection(db_path)?;
+    let plan = parse_operation_xlsx_import(&conn, path)?;
+    Ok(OperationImportResult {
+        imported: plan.imported,
+        skipped: plan.skipped,
+        errors: plan.errors,
+        dry_run: true,
+    })
+}
+
 pub fn import_records_csv(db_path: &str, path: &str) -> StorageResult<OperationImportResult> {
     let mut conn = open_sqlite_connection(db_path)?;
     conn.pragma_update(None, "foreign_keys", "ON")
         .map_err(sqlite_err)?;
     let plan = parse_operation_csv_import(&conn, path)?;
+    import_operation_plan(&mut conn, plan)
+}
+
+pub fn import_records_xlsx(db_path: &str, path: &str) -> StorageResult<OperationImportResult> {
+    let mut conn = open_sqlite_connection(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(sqlite_err)?;
+    let plan = parse_operation_xlsx_import(&conn, path)?;
+    import_operation_plan(&mut conn, plan)
+}
+
+fn import_operation_plan(
+    conn: &mut Connection,
+    plan: OperationCsvPlan,
+) -> StorageResult<OperationImportResult> {
     if plan.imported == 0 {
         return Ok(OperationImportResult {
             imported: 0,
@@ -1401,39 +1431,60 @@ pub fn export_records_csv(db_path: &str, path: &str) -> StorageResult<OperationE
         .write_record(OPERATION_CSV_HEADERS)
         .map_err(|error| error.to_string())?;
 
+    let rows = operation_export_rows(&conn)?;
+    for row in &rows {
+        writer.write_record(row).map_err(|error| error.to_string())?;
+    }
+    writer.flush().map_err(|error| error.to_string())?;
+    Ok(OperationExportResult {
+        exported_rows: i64::try_from(rows.len()).unwrap_or(i64::MAX),
+        path: path.to_owned(),
+    })
+}
+
+fn operation_export_rows(conn: &Connection) -> StorageResult<Vec<Vec<String>>> {
     let records = record_row_dicts(&conn, &format!("{RECORD_SELECT} ORDER BY id"), &[])?;
     let transfers = transfer_list_rows_from_conn(&conn)?;
     let transfer_map: HashMap<i64, TransferRow> =
         transfers.into_iter().map(|transfer| (transfer.id, transfer)).collect();
     let mut exported_transfer_ids = HashSet::new();
-    let mut exported_rows = 0_i64;
+    let mut rows = Vec::new();
 
     for record in records {
         if record.related_debt_id.is_some() || record.record_type == "mandatory_expense" {
             continue;
         }
         if let Some(transfer_id) = record.transfer_id {
-            if exported_transfer_ids.insert(transfer_id) {
-                if let Some(transfer) = transfer_map.get(&transfer_id) {
-                    writer
-                        .write_record(operation_transfer_csv_row(transfer))
-                        .map_err(|error| error.to_string())?;
-                    exported_rows += 1;
-                }
+            if exported_transfer_ids.insert(transfer_id)
+                && let Some(transfer) = transfer_map.get(&transfer_id)
+            {
+                rows.push(operation_transfer_csv_row(transfer));
             }
             continue;
         }
         if record.record_type != "income" && record.record_type != "expense" {
             continue;
         }
-        writer
-            .write_record(operation_record_csv_row(&record))
-            .map_err(|error| error.to_string())?;
-        exported_rows += 1;
+        rows.push(operation_record_csv_row(&record));
     }
-    writer.flush().map_err(|error| error.to_string())?;
+    Ok(rows)
+}
+
+pub fn export_records_xlsx(db_path: &str, path: &str) -> StorageResult<OperationExportResult> {
+    let conn = open_sqlite_connection(db_path)?;
+    let rows = operation_export_rows(&conn)?;
+    let mut worksheet = StyledWorksheet::new_records_sheet(
+        "Data",
+        &OPERATION_CSV_HEADERS,
+        &[4, 6, 7],
+    )
+    .map_err(|error| error.to_string())?;
+    for row in &rows {
+        worksheet.append_row(row).map_err(|error| error.to_string())?;
+    }
+    worksheet.save(path).map_err(|error| error.to_string())?;
     Ok(OperationExportResult {
-        exported_rows,
+        exported_rows: i64::try_from(rows.len()).unwrap_or(i64::MAX),
         path: path.to_owned(),
     })
 }
@@ -1443,8 +1494,6 @@ fn parse_operation_csv_import(conn: &Connection, path: &str) -> StorageResult<Op
     if metadata.len() > MAX_OPERATION_CSV_FILE_SIZE {
         return Err(format!("CSV import file is too large: {} bytes", metadata.len()));
     }
-    let base_currency = base_currency_code_in_conn(conn)?;
-    let wallet_ids = active_wallet_ids_in_conn(conn)?;
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
         .from_path(path)
@@ -1456,18 +1505,63 @@ fn parse_operation_csv_import(conn: &Connection, path: &str) -> StorageResult<Op
         .map(normalize_csv_key)
         .collect::<Vec<_>>();
 
-    let mut plan = OperationCsvPlan::default();
-    let mut logical_transfer_ids = HashSet::new();
-    let mut next_implicit_transfer_id = -1_i64;
+    let mut rows = Vec::new();
     for (index, row) in reader.records().enumerate() {
         if index >= MAX_OPERATION_CSV_ROWS {
             return Err(format!(
                 "CSV import exceeded row limit ({MAX_OPERATION_CSV_ROWS})"
             ));
         }
-        let row_label = format!("row {}", index + 2);
         let row = row.map_err(|error| error.to_string())?;
-        let values = csv_row_values(&headers, &row);
+        rows.push((index + 2, csv_row_values(&headers, &row)));
+    }
+    parse_operation_tabular_import(conn, rows)
+}
+
+fn parse_operation_xlsx_import(conn: &Connection, path: &str) -> StorageResult<OperationCsvPlan> {
+    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
+    if metadata.len() > MAX_OPERATION_CSV_FILE_SIZE {
+        return Err(format!("XLSX import file is too large: {} bytes", metadata.len()));
+    }
+    let mut workbook = open_workbook_auto(path).map_err(|error| error.to_string())?;
+    let Some(sheet_name) = workbook.sheet_names().first().cloned() else {
+        return Ok(OperationCsvPlan::default());
+    };
+    let range = workbook
+        .worksheet_range(&sheet_name)
+        .map_err(|error| error.to_string())?;
+    let mut rows_iter = range.rows();
+    let Some(header_row) = rows_iter.next() else {
+        return Ok(OperationCsvPlan::default());
+    };
+    let headers = header_row
+        .iter()
+        .map(xlsx_cell_to_string)
+        .map(|value| normalize_csv_key(&value))
+        .collect::<Vec<_>>();
+    let mut rows = Vec::new();
+    for (index, row) in rows_iter.enumerate() {
+        if index >= MAX_OPERATION_CSV_ROWS {
+            return Err(format!(
+                "XLSX import exceeded row limit ({MAX_OPERATION_CSV_ROWS})"
+            ));
+        }
+        rows.push((index + 2, xlsx_row_values(&headers, row)));
+    }
+    parse_operation_tabular_import(conn, rows)
+}
+
+fn parse_operation_tabular_import(
+    conn: &Connection,
+    rows: Vec<(usize, HashMap<String, String>)>,
+) -> StorageResult<OperationCsvPlan> {
+    let base_currency = base_currency_code_in_conn(conn)?;
+    let wallet_ids = active_wallet_ids_in_conn(conn)?;
+    let mut plan = OperationCsvPlan::default();
+    let mut logical_transfer_ids = HashSet::new();
+    let mut next_implicit_transfer_id = -1_i64;
+    for (row_number, values) in rows {
+        let row_label = format!("row {row_number}");
         if values.values().all(|value| value.trim().is_empty()) {
             continue;
         }
@@ -1633,6 +1727,48 @@ fn csv_row_values(headers: &[String], row: &csv::StringRecord) -> HashMap<String
         values.insert(header.clone(), row.get(index).unwrap_or("").trim().to_owned());
     }
     values
+}
+
+fn xlsx_row_values(headers: &[String], row: &[Data]) -> HashMap<String, String> {
+    let mut values = HashMap::new();
+    for (index, header) in headers.iter().enumerate() {
+        let value = row.get(index).map(xlsx_cell_to_string).unwrap_or_default();
+        values.insert(header.clone(), value.trim().to_owned());
+    }
+    values
+}
+
+fn xlsx_cell_to_string(cell: &Data) -> String {
+    match cell {
+        Data::Empty => String::new(),
+        Data::String(value) => value.trim().to_owned(),
+        Data::Float(value) => decimal_text(*value),
+        Data::Int(value) => value.to_string(),
+        Data::Bool(value) => value.to_string(),
+        Data::DateTime(value) => excel_serial_to_date_text(value.as_f64()),
+        Data::DateTimeIso(value) => value
+            .split(['T', ' '])
+            .next()
+            .unwrap_or(value)
+            .trim()
+            .to_owned(),
+        Data::DurationIso(value) => value.trim().to_owned(),
+        Data::Error(error) => format!("ERROR:{error:?}"),
+    }
+}
+
+fn decimal_text(value: f64) -> String {
+    if value.fract().abs() < f64::EPSILON {
+        return format!("{value:.0}");
+    }
+    let text = format!("{value:.15}");
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+fn excel_serial_to_date_text(serial: f64) -> String {
+    let days = serial.floor() as i64;
+    let (year, month, day) = civil_from_days(days - 25_569);
+    format!("{year:04}-{month:02}-{day:02}")
 }
 
 fn normalize_csv_key(value: &str) -> String {
@@ -3586,6 +3722,18 @@ mod tests {
         let _ = fs::remove_file(PathBuf::from(path));
     }
 
+    fn write_operation_xlsx_fixture(path: &std::path::Path, rows: &[Vec<&str>]) {
+        let mut worksheet =
+            StyledWorksheet::new_records_sheet("Data", &OPERATION_CSV_HEADERS, &[4, 6, 7])
+                .unwrap();
+        for row in rows {
+            worksheet
+                .append_row(&row.iter().map(|value| value.to_string()).collect::<Vec<_>>())
+                .unwrap();
+        }
+        worksheet.save(path.to_str().unwrap()).unwrap();
+    }
+
     #[test]
     fn balance_rows_return_active_wallets_only() {
         let db_path = create_balance_test_db();
@@ -5144,6 +5292,42 @@ mod tests {
     }
 
     #[test]
+    fn export_records_xlsx_writes_python_style_data_sheet() {
+        let db_path = create_balance_test_db();
+        let path = std::env::temp_dir().join(format!(
+            "ledgera_ops_export_{}.xlsx",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        let result = export_records_xlsx(&db_path, path.to_str().unwrap()).unwrap();
+
+        assert_eq!(result.exported_rows, 3);
+        let mut workbook = open_workbook_auto(&path).unwrap();
+        assert_eq!(workbook.sheet_names()[0], "Data");
+        let range = workbook.worksheet_range("Data").unwrap();
+        let rows: Vec<Vec<String>> = range
+            .rows()
+            .map(|row| row.iter().map(xlsx_cell_to_string).collect())
+            .collect();
+        assert_eq!(
+            rows[0],
+            OPERATION_CSV_HEADERS
+                .iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+        );
+        assert!(rows.iter().any(|row| row.get(1).map(String::as_str) == Some("transfer")));
+        assert!(rows.iter().any(|row| row.iter().any(|cell| cell == "Move to card")));
+        assert!(!rows.iter().any(|row| row.iter().any(|cell| cell == "mandatory_expense")));
+
+        let _ = fs::remove_file(path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
     fn import_records_csv_preview_then_commit_replaces_operations_owned_rows() {
         let db_path = create_balance_test_db();
         let path = std::env::temp_dir().join(format!(
@@ -5186,6 +5370,82 @@ mod tests {
         let transfers = transfer_list_rows(&db_path).unwrap();
         assert_eq!(transfers.len(), 1);
         assert_eq!(transfers[0].id, 1);
+        assert!(transfer_rows.iter().all(|record| record.transfer_id == Some(1)));
+
+        let _ = fs::remove_file(path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn import_records_xlsx_preview_then_commit_replaces_operations_owned_rows() {
+        let db_path = create_balance_test_db();
+        let path = std::env::temp_dir().join(format!(
+            "ledgera_ops_import_{}.xlsx",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        write_operation_xlsx_fixture(
+            &path,
+            &[
+                vec![
+                    "2026-02-01",
+                    "income",
+                    "1",
+                    "Salary",
+                    "100.00",
+                    "KZT",
+                    "1",
+                    "100.00",
+                    "Imported salary",
+                    "work, main",
+                    "",
+                    "",
+                    "",
+                    "",
+                ],
+                vec![
+                    "2026-02-02",
+                    "transfer",
+                    "",
+                    "Transfer",
+                    "25.00",
+                    "KZT",
+                    "1",
+                    "25.00",
+                    "Imported transfer",
+                    "",
+                    "",
+                    "7",
+                    "1",
+                    "2",
+                ],
+            ],
+        );
+
+        let preview = preview_import_records_xlsx(&db_path, path.to_str().unwrap()).unwrap();
+        assert_eq!(preview.imported, 2);
+        assert!(preview.dry_run);
+        assert_eq!(record_list_rows(&db_path).unwrap().len(), 5);
+
+        let result = import_records_xlsx(&db_path, path.to_str().unwrap()).unwrap();
+
+        assert_eq!(result.imported, 2);
+        assert!(!result.dry_run);
+        let records = record_list_rows(&db_path).unwrap();
+        assert!(records.iter().any(|record| record.record_type == "mandatory_expense"));
+        assert!(records.iter().any(|record| {
+            record.transfer_id.is_none()
+                && record.record_type == "income"
+                && record.category == "Salary"
+                && record.tags == vec!["main".to_owned(), "work".to_owned()]
+        }));
+        let transfer_rows: Vec<_> = records
+            .iter()
+            .filter(|record| record.transfer_id.is_some())
+            .collect();
+        assert_eq!(transfer_rows.len(), 2);
         assert!(transfer_rows.iter().all(|record| record.transfer_id == Some(1)));
 
         let _ = fs::remove_file(path);
@@ -5241,6 +5501,58 @@ mod tests {
             .id;
         assert!(oldest_id < same_day_first_id);
         assert!(same_day_first_id < same_day_second_id);
+
+        let journal_rows = filtered_record_list_rows(&db_path, &RecordFilterPayload::default())
+            .unwrap();
+        let descriptions: Vec<_> = journal_rows
+            .iter()
+            .map(|record| record.description.as_str())
+            .collect();
+        let newest_transfer_position = descriptions
+            .iter()
+            .position(|description| *description == "Newest transfer")
+            .unwrap();
+        let same_day_second_position = descriptions
+            .iter()
+            .position(|description| *description == "Same day second")
+            .unwrap();
+        let same_day_first_position = descriptions
+            .iter()
+            .position(|description| *description == "Same day first")
+            .unwrap();
+        let oldest_position = descriptions
+            .iter()
+            .position(|description| *description == "Oldest")
+            .unwrap();
+        assert!(newest_transfer_position < same_day_second_position);
+        assert!(same_day_second_position < same_day_first_position);
+        assert!(same_day_first_position < oldest_position);
+
+        let _ = fs::remove_file(path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn import_records_xlsx_preserves_file_order_for_journal_sorting() {
+        let db_path = create_balance_test_db();
+        let path = std::env::temp_dir().join(format!(
+            "ledgera_ops_import_order_{}.xlsx",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        write_operation_xlsx_fixture(
+            &path,
+            &[
+                vec!["2026-02-01", "income", "1", "Salary", "100.00", "KZT", "1", "100.00", "Oldest", "", "", "", "", ""],
+                vec!["2026-02-02", "expense", "1", "Food", "10.00", "KZT", "1", "10.00", "Same day first", "", "", "", "", ""],
+                vec!["2026-02-02", "expense", "1", "Food", "20.00", "KZT", "1", "20.00", "Same day second", "", "", "", "", ""],
+                vec!["2026-02-03", "transfer", "", "Transfer", "25.00", "KZT", "1", "25.00", "Newest transfer", "", "", "9", "1", "2"],
+            ],
+        );
+
+        import_records_xlsx(&db_path, path.to_str().unwrap()).unwrap();
 
         let journal_rows = filtered_record_list_rows(&db_path, &RecordFilterPayload::default())
             .unwrap();

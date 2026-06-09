@@ -190,6 +190,12 @@ interface LedgeraEngine {
     [Throws=LedgeraEngineError]
     OperationExportResultDto export_records_csv(string path);
     [Throws=LedgeraEngineError]
+    OperationImportResultDto preview_import_records_xlsx(string path);
+    [Throws=LedgeraEngineError]
+    OperationImportResultDto import_records_xlsx(string path);
+    [Throws=LedgeraEngineError]
+    OperationExportResultDto export_records_xlsx(string path);
+    [Throws=LedgeraEngineError]
     sequence<string> list_tags();
     [Throws=LedgeraEngineError]
     sequence<string> list_categories(string record_type);

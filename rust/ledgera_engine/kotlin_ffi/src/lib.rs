@@ -6,8 +6,9 @@ use ledgera_engine_storage::{
     audit_run_for_date, base_currency_code, create_standalone_record, create_transfer,
     create_wallet, current_local_date, delete_all_operations,
     delete_operations_selection, delete_standalone_record, delete_transfer, delete_wallet,
-    distinct_record_categories, export_records_csv, filtered_record_list_rows, import_records_csv,
-    preview_import_records_csv, standalone_record_get_row, tag_names, transfer_get_row,
+    distinct_record_categories, export_records_csv, export_records_xlsx, filtered_record_list_rows,
+    import_records_csv, import_records_xlsx, preview_import_records_csv,
+    preview_import_records_xlsx, standalone_record_get_row, tag_names, transfer_get_row,
     update_standalone_record, update_transfer, wallet_balance_row, wallet_balance_rows,
     wallet_list_rows,
 };
@@ -395,6 +396,33 @@ impl LedgeraEngine {
         path: String,
     ) -> Result<OperationExportResultDto, LedgeraEngineError> {
         export_records_csv(&self.db_path, &path)
+            .map(operation_export_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn preview_import_records_xlsx(
+        &self,
+        path: String,
+    ) -> Result<OperationImportResultDto, LedgeraEngineError> {
+        preview_import_records_xlsx(&self.db_path, &path)
+            .map(operation_import_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn import_records_xlsx(
+        &self,
+        path: String,
+    ) -> Result<OperationImportResultDto, LedgeraEngineError> {
+        import_records_xlsx(&self.db_path, &path)
+            .map(operation_import_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn export_records_xlsx(
+        &self,
+        path: String,
+    ) -> Result<OperationExportResultDto, LedgeraEngineError> {
+        export_records_xlsx(&self.db_path, &path)
             .map(operation_export_to_dto)
             .map_err(storage_error)
     }
@@ -1435,6 +1463,75 @@ mod tests {
         let csv = fs::read_to_string(&export_path).unwrap();
         assert!(csv.contains(",transfer,"));
         assert!(csv.contains("Salary"));
+
+        fs::remove_file(import_path).ok();
+        fs::remove_file(export_path).ok();
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_imports_and_exports_operations_xlsx() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+        let import_path = std::env::temp_dir().join(format!(
+            "ledgera_kotlin_ffi_import_{}.xlsx",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let export_path = std::env::temp_dir().join(format!(
+            "ledgera_kotlin_ffi_export_{}.xlsx",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        engine
+            .create_record(CreateRecordRequest {
+                record_type: "income".to_owned(),
+                date: "2026-01-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10.00".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10.00".to_owned(),
+                category: "Salary".to_owned(),
+                description: "Pay".to_owned(),
+                tags: vec!["work".to_owned()],
+            })
+            .unwrap();
+        engine
+            .create_transfer(CreateTransferRequest {
+                from_wallet_id: 1,
+                to_wallet_id: 2,
+                date: "2026-01-02".to_owned(),
+                amount: "5.00".to_owned(),
+                currency: "KZT".to_owned(),
+                description: "Move".to_owned(),
+                commission_amount: "0".to_owned(),
+                commission_currency: "KZT".to_owned(),
+            })
+            .unwrap();
+        export_records_xlsx(&db_path, import_path.to_str().unwrap()).unwrap();
+
+        let preview = engine
+            .preview_import_records_xlsx(import_path.to_string_lossy().to_string())
+            .unwrap();
+        assert_eq!(preview.imported, 2);
+        assert!(preview.dry_run);
+
+        let imported = engine
+            .import_records_xlsx(import_path.to_string_lossy().to_string())
+            .unwrap();
+        assert_eq!(imported.imported, 2);
+        assert!(!imported.dry_run);
+
+        let exported = engine
+            .export_records_xlsx(export_path.to_string_lossy().to_string())
+            .unwrap();
+        assert_eq!(exported.exported_rows, 2);
+        assert!(export_path.exists());
 
         fs::remove_file(import_path).ok();
         fs::remove_file(export_path).ok();

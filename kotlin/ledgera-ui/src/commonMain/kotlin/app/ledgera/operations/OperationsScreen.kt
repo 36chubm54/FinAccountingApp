@@ -47,13 +47,13 @@ import app.ledgera.model.TransferDraft
 import app.ledgera.model.WalletOption
 
 interface OperationsFileActions {
-    fun openImportCsvPath(): String?
-    fun saveExportCsvPath(): String?
+    fun openImportPath(): String?
+    fun saveExportPath(): String?
 }
 
 object NoOperationsFileActions : OperationsFileActions {
-    override fun openImportCsvPath(): String? = null
-    override fun saveExportCsvPath(): String? = null
+    override fun openImportPath(): String? = null
+    override fun saveExportPath(): String? = null
 }
 
 @Composable
@@ -116,7 +116,7 @@ fun OperationsScreen(
                         viewModel.clearFeedback()
                         showTransferDialog = true
                     },
-                    onImport = { viewModel.previewImportRecordsCsv(fileActions.openImportCsvPath()) },
+                    onImport = { viewModel.previewImportRecords(fileActions.openImportPath()) },
                     onExport = { confirmExport = true },
                     selectiveDeleteMode = state.selectiveDeleteMode,
                     selectedCount = state.selectedBulkRecordIds.size + state.selectedBulkTransferIds.size,
@@ -266,7 +266,7 @@ fun OperationsScreen(
         ExportOperationsConfirmDialog(
             onConfirm = {
                 confirmExport = false
-                viewModel.exportRecordsCsv(fileActions.saveExportCsvPath())
+                viewModel.exportRecords(fileActions.saveExportPath())
             },
             onCancel = { confirmExport = false },
         )
@@ -277,7 +277,7 @@ fun OperationsScreen(
             path = state.importPath.orEmpty(),
             submitting = state.loading,
             engineError = state.error,
-            onConfirm = viewModel::confirmImportRecordsCsv,
+            onConfirm = viewModel::confirmImportRecords,
             onCancel = viewModel::cancelImportPreview,
         )
     }
@@ -1104,7 +1104,7 @@ private fun ExportOperationsConfirmDialog(onConfirm: () -> Unit, onCancel: () ->
         title = { Text("Export operations") },
         text = {
             Text(
-                "Export creates a readable CSV file with financial data. Save it only to a trusted location."
+                "Export creates a readable file with financial data. Save it only to a trusted location."
             )
         },
         confirmButton = {
@@ -1127,7 +1127,7 @@ private fun ImportPreviewDialog(
 ) {
     AlertDialog(
         onDismissRequest = onCancel,
-        title = { Text("Import CSV preview") },
+        title = { Text("Import preview") },
         text = {
             Column(
                 Modifier.width(DialogContentWidth).heightIn(max = 420.dp).verticalScroll(rememberScrollState()),

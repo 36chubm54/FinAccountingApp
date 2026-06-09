@@ -8,6 +8,8 @@ ledgera_engine_core.workspace = true
 libc.workspace = true
 rusqlite.workspace = true
 csv.workspace = true
+calamine.workspace = true
+rust_xlsxwriter.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true

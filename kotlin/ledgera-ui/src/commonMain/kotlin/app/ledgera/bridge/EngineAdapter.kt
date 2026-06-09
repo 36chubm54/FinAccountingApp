@@ -39,6 +39,9 @@ interface OperationsEngine {
     suspend fun previewImportRecordsCsv(path: String): OperationImportResult
     suspend fun importRecordsCsv(path: String): OperationImportResult
     suspend fun exportRecordsCsv(path: String): OperationExportResult
+    suspend fun previewImportRecordsXlsx(path: String): OperationImportResult
+    suspend fun importRecordsXlsx(path: String): OperationImportResult
+    suspend fun exportRecordsXlsx(path: String): OperationExportResult
     suspend fun listTags(): List<String>
     suspend fun listCategories(recordType: String): List<String>
     suspend fun listWallets(): List<WalletOption>

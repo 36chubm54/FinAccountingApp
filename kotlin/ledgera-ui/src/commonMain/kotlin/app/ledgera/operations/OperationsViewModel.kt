@@ -163,9 +163,17 @@ class OperationsViewModel(
         mutableState.value = mutableState.value.copy(notice = null)
     }
 
-    fun previewImportRecordsCsv(path: String?) {
+    fun previewImportRecords(path: String?) {
         val normalizedPath = path?.trim().orEmpty()
         if (normalizedPath.isEmpty()) {
+            return
+        }
+        val format = importExportFormat(normalizedPath)
+        if (format == null) {
+            mutableState.value = mutableState.value.copy(
+                error = "Unsupported operations file format. Use .csv or .xlsx",
+                notice = null,
+            )
             return
         }
         mutableState.value = mutableState.value.copy(
@@ -177,7 +185,10 @@ class OperationsViewModel(
         )
         launchSafely {
             runCatching {
-                val result = engine.previewImportRecordsCsv(normalizedPath)
+                val result = when (format) {
+                    OperationsFileFormat.Csv -> engine.previewImportRecordsCsv(normalizedPath)
+                    OperationsFileFormat.Xlsx -> engine.previewImportRecordsXlsx(normalizedPath)
+                }
                 mutableState.value = mutableState.value.copy(
                     loading = false,
                     importPreview = result,
@@ -197,20 +208,33 @@ class OperationsViewModel(
         }
     }
 
+    fun previewImportRecordsCsv(path: String?) = previewImportRecords(path)
+
     fun cancelImportPreview() {
         mutableState.value = mutableState.value.copy(importPreview = null, importPath = null, error = null)
     }
 
-    fun confirmImportRecordsCsv() {
+    fun confirmImportRecords() {
         val path = mutableState.value.importPath
         if (path.isNullOrBlank()) {
             mutableState.value = mutableState.value.copy(error = "Import file is required", notice = null)
             return
         }
+        val format = importExportFormat(path)
+        if (format == null) {
+            mutableState.value = mutableState.value.copy(
+                error = "Unsupported operations file format. Use .csv or .xlsx",
+                notice = null,
+            )
+            return
+        }
         mutableState.value = mutableState.value.copy(loading = true, error = null, notice = null)
         launchSafely {
             runCatching {
-                val result = engine.importRecordsCsv(path)
+                val result = when (format) {
+                    OperationsFileFormat.Csv -> engine.importRecordsCsv(path)
+                    OperationsFileFormat.Xlsx -> engine.importRecordsXlsx(path)
+                }
                 mutableState.value = mutableState.value.copy(
                     selectedRecordId = null,
                     editDraft = null,
@@ -232,15 +256,28 @@ class OperationsViewModel(
         }
     }
 
-    fun exportRecordsCsv(path: String?) {
+    fun confirmImportRecordsCsv() = confirmImportRecords()
+
+    fun exportRecords(path: String?) {
         val normalizedPath = path?.trim().orEmpty()
         if (normalizedPath.isEmpty()) {
+            return
+        }
+        val format = importExportFormat(normalizedPath)
+        if (format == null) {
+            mutableState.value = mutableState.value.copy(
+                error = "Unsupported operations file format. Use .csv or .xlsx",
+                notice = null,
+            )
             return
         }
         mutableState.value = mutableState.value.copy(loading = true, error = null, notice = null)
         launchSafely {
             runCatching {
-                val result = engine.exportRecordsCsv(normalizedPath)
+                val result = when (format) {
+                    OperationsFileFormat.Csv -> engine.exportRecordsCsv(normalizedPath)
+                    OperationsFileFormat.Xlsx -> engine.exportRecordsXlsx(normalizedPath)
+                }
                 mutableState.value = mutableState.value.copy(
                     loading = false,
                     error = null,
@@ -255,6 +292,8 @@ class OperationsViewModel(
             }
         }
     }
+
+    fun exportRecordsCsv(path: String?) = exportRecords(path)
 
     fun startSelectiveDelete() {
         mutableState.value = mutableState.value.copy(
@@ -637,7 +676,7 @@ class OperationsViewModel(
     }
 
     private fun importNotice(result: OperationImportResult): String {
-        val base = "Imported ${result.imported} CSV rows"
+        val base = "Imported ${result.imported} rows"
         return if (result.skipped > 0 || result.errors.isNotEmpty()) {
             "$base. Skipped ${result.skipped} rows"
         } else {
@@ -722,3 +761,15 @@ class OperationsViewModel(
 
 private fun isTransferCommissionMarker(description: String): Boolean =
     Regex("""^\[transfer:\d+]$""").matches(description.trim())
+
+private enum class OperationsFileFormat {
+    Csv,
+    Xlsx,
+}
+
+private fun importExportFormat(path: String): OperationsFileFormat? =
+    when (path.substringAfterLast('.', missingDelimiterValue = "").lowercase()) {
+        "csv" -> OperationsFileFormat.Csv
+        "xlsx" -> OperationsFileFormat.Xlsx
+        else -> null
+    }

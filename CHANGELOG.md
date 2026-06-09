@@ -17,7 +17,7 @@ This project adheres to Semantic Versioning.
 - Added beta.1 Kotlin Operations standalone record CRUD for income/expense records, including edit/delete UI, wallet/date/type filters, tag replacement, category/tag lookups, and Rust-side rejection for transfer/debt-linked rows.
 - Added beta.1 Kotlin Operations base-currency transfer create/edit/delete support through Rust/Kotlin UniFFI, including linked source/target record maintenance and preserved or removed commission marker records.
 - Added beta.1 Kotlin Operations safe bulk deletion through Rust/Kotlin UniFFI, including delete-all for Operations-owned standalone records/transfers and selective delete mode for chosen records/transfers.
-- Added beta.1 Kotlin Operations CSV import/export through Rust/Kotlin UniFFI, including previewed replace-import for Operations-owned standalone records/transfers and aggregate transfer CSV rows.
+- Added beta.1 Kotlin Operations CSV/XLSX import/export through Rust/Kotlin UniFFI, including previewed replace-import for Operations-owned standalone records/transfers, Python-style XLSX `Data` sheet styling, and aggregate transfer rows.
 - Added a beta.1 Kotlin Settings wallet slice for listing wallets and creating active base-currency wallets through Rust/Kotlin UniFFI.
 - Added a beta.1 Kotlin Settings Audit card that runs the read-only Rust AuditEngine v2 report through Rust/Kotlin UniFFI and shows findings without repair actions.
 
@@ -28,7 +28,7 @@ This project adheres to Semantic Versioning.
 - Reorganized analytics, planning, import, shell, settings, report, operations, backup, export, spreadsheet, finance, and records helpers into clearer package clusters with narrower ownership boundaries.
 - Renamed the Kotlin Desktop runtime framing from alpha.4 to beta.1 and split the Kotlin adapter contract into runtime and operations capability groups so ViewModels depend only on the surfaces they use.
 - Extended the Kotlin UniFFI Operations contract with standalone record get/update/delete methods plus tag and category lookup surfaces.
-- Extended the Kotlin UniFFI Operations contract with transfer create/get/update/delete, safe bulk delete, and CSV records migration support; transfer list parity, XLSX/JSON import/export, current-rate import, and commission editing remain pending beta.1 slices.
+- Extended the Kotlin UniFFI Operations contract with transfer create/get/update/delete, safe bulk delete, and CSV/XLSX records migration support; transfer list parity, `.xls`/JSON import/export, current-rate import, and commission editing remain pending beta.1 slices.
 - Extended the Kotlin adapter contract with a Settings capability group for wallet list/create/delete and read-only audit flows; wallet edit and broader Settings surfaces remain pending beta.1 slices.
 
 ### Fixed
@@ -43,6 +43,7 @@ This project adheres to Semantic Versioning.
 - Fixed Rust-backed Kotlin wallet creation so the first wallet in a new empty database is marked as the system wallet by default.
 - Fixed Rust-backed Kotlin transfer creation and CSV import so transfer IDs are normalized after gaps and linked operation rows plus commission markers keep the remapped transfer IDs.
 - Fixed CSV replace-import so source file row order is preserved when assigning operation ids, keeping the Kotlin journal order consistent with old-to-new exports.
+- Fixed XLSX replace-import to use the same ordered tabular import pipeline as CSV, preserving source row order and transfer id remapping.
 
 ### Docs
 
@@ -59,7 +60,7 @@ This project adheres to Semantic Versioning.
 - Validated the Operations transfer edit slice with targeted `ledgera_engine_storage` transfer tests, the full `ledgera_engine_kotlin_ffi` lib/bin gate, and `:ledgera-ui:desktopTest` from an ASCII `subst` path.
 - Validated the Operations transfer delete slice with targeted `ledgera_engine_storage` transfer tests, the full `ledgera_engine_kotlin_ffi` lib/bin gate, and `:ledgera-ui:desktopTest` from an ASCII `subst` path.
 - Validated the Operations bulk-delete slice with targeted `ledgera_engine_storage` delete tests, the full `ledgera_engine_kotlin_ffi` lib/bin gate, and `:ledgera-ui:desktopTest` from an ASCII `subst` path.
-- Validated the Operations CSV import/export slice with targeted `ledgera_engine_storage` import tests, the full `ledgera_engine_kotlin_ffi` lib/bin gate, and `:ledgera-ui:desktopTest` from an ASCII `subst` path.
+- Validated the Operations CSV/XLSX import/export slice with targeted `ledgera_engine_storage` import/xlsx tests, the full `ledgera_engine_kotlin_ffi` lib/bin gate, and `:ledgera-ui:desktopTest` from an ASCII `subst` path.
 - Validated the Settings wallet-create slice with targeted `ledgera_engine_storage` wallet tests, the full `ledgera_engine_kotlin_ffi` lib/bin gate, and `:ledgera-ui:desktopTest` from an ASCII `subst` path.
 
 ## [3.0.0-alpha.4] - 2026-06-03

@@ -64,27 +64,31 @@ private fun runApplication(args: Array<String>) = application {
 }
 
 private class DesktopOperationsFileActions(private val owner: AwtWindow) : OperationsFileActions {
-    override fun openImportCsvPath(): String? =
-        FileDialog(null as Frame?, "Import operations CSV", FileDialog.LOAD)
+    override fun openImportPath(): String? =
+        FileDialog(null as Frame?, "Import operations", FileDialog.LOAD)
             .apply {
-                file = "*.csv"
+                file = "*.csv;*.xlsx"
                 isVisible = true
             }
-            .selectedPath()
+            .selectedPath(defaultExtension = "xlsx")
 
-    override fun saveExportCsvPath(): String? =
-        FileDialog(null as Frame?, "Export operations CSV", FileDialog.SAVE)
+    override fun saveExportPath(): String? =
+        FileDialog(null as Frame?, "Export operations", FileDialog.SAVE)
             .apply {
-                file = "operations.csv"
+                file = "operations.xlsx"
                 isVisible = true
             }
-            .selectedPath()
+            .selectedPath(defaultExtension = "xlsx")
 
-    private fun FileDialog.selectedPath(): String? {
+    private fun FileDialog.selectedPath(defaultExtension: String): String? {
         val selectedDirectory = directory ?: return null
         val selectedFile = file ?: return null
         val path = File(selectedDirectory, selectedFile).absolutePath
-        return if (path.endsWith(".csv", ignoreCase = true)) path else "$path.csv"
+        return if (path.endsWith(".csv", ignoreCase = true) || path.endsWith(".xlsx", ignoreCase = true)) {
+            path
+        } else {
+            "$path.$defaultExtension"
+        }
     }
 }
 

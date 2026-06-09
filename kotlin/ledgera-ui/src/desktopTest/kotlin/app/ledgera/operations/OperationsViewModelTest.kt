@@ -268,42 +268,85 @@ class OperationsViewModelTest {
         val adapter = FakeEngineAdapter()
         val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
 
-        viewModel.previewImportRecordsCsv(null)
-        viewModel.exportRecordsCsv(null)
+        viewModel.previewImportRecords(null)
+        viewModel.exportRecords(null)
 
         assertEquals(0, adapter.previewImportCalls)
+        assertEquals(0, adapter.previewImportXlsxCalls)
         assertEquals(0, adapter.importCalls)
+        assertEquals(0, adapter.importXlsxCalls)
         assertEquals(0, adapter.exportCalls)
+        assertEquals(0, adapter.exportXlsxCalls)
         assertEquals(null, viewModel.state.value.notice)
         assertEquals(null, viewModel.state.value.error)
     }
 
     @Test
-    fun importPreviewThenCommitRefreshesAndShowsNotice() {
+    fun importPreviewThenCommitRefreshesAndShowsNoticeForCsv() {
         val adapter = FakeEngineAdapter(records = mutableListOf(operationRecord(id = 1)))
         val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
 
-        viewModel.previewImportRecordsCsv("C:\\Temp\\ops.csv")
+        viewModel.previewImportRecords("C:\\Temp\\ops.csv")
         assertEquals(1, adapter.previewImportCalls)
         assertEquals(2L, viewModel.state.value.importPreview?.imported)
 
-        viewModel.confirmImportRecordsCsv()
+        viewModel.confirmImportRecords()
 
         assertEquals(1, adapter.importCalls)
-        assertEquals("Imported 2 CSV rows", viewModel.state.value.notice)
+        assertEquals("Imported 2 rows", viewModel.state.value.notice)
         assertEquals(listOf(10L, 11L), viewModel.state.value.records.map { it.id })
         assertEquals(null, viewModel.state.value.importPreview)
     }
 
     @Test
-    fun exportSuccessShowsToastNotice() {
+    fun importPreviewThenCommitDispatchesXlsxByExtension() {
+        val adapter = FakeEngineAdapter(records = mutableListOf(operationRecord(id = 1)))
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.previewImportRecords("C:\\Temp\\ops.xlsx")
+        assertEquals(0, adapter.previewImportCalls)
+        assertEquals(1, adapter.previewImportXlsxCalls)
+        assertEquals(2L, viewModel.state.value.importPreview?.imported)
+
+        viewModel.confirmImportRecords()
+
+        assertEquals(0, adapter.importCalls)
+        assertEquals(1, adapter.importXlsxCalls)
+        assertEquals("Imported 2 rows", viewModel.state.value.notice)
+        assertEquals(listOf(10L, 11L), viewModel.state.value.records.map { it.id })
+    }
+
+    @Test
+    fun importExportRejectUnknownExtensionBeforeEngineCall() {
         val adapter = FakeEngineAdapter()
         val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
 
-        viewModel.exportRecordsCsv("C:\\Temp\\ops.csv")
+        viewModel.previewImportRecords("C:\\Temp\\ops.xls")
+        assertEquals("Unsupported operations file format. Use .csv or .xlsx", viewModel.state.value.error)
+        viewModel.exportRecords("C:\\Temp\\ops.json")
+        assertEquals("Unsupported operations file format. Use .csv or .xlsx", viewModel.state.value.error)
+
+        assertEquals(0, adapter.previewImportCalls)
+        assertEquals(0, adapter.previewImportXlsxCalls)
+        assertEquals(0, adapter.exportCalls)
+        assertEquals(0, adapter.exportXlsxCalls)
+    }
+
+    @Test
+    fun exportSuccessShowsToastNoticeForCsvAndXlsx() {
+        val adapter = FakeEngineAdapter()
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.exportRecords("C:\\Temp\\ops.csv")
 
         assertEquals(1, adapter.exportCalls)
         assertEquals("Exported 3 rows to C:\\Temp\\ops.csv", viewModel.state.value.notice)
+        assertEquals(null, viewModel.state.value.error)
+
+        viewModel.exportRecords("C:\\Temp\\ops.xlsx")
+
+        assertEquals(1, adapter.exportXlsxCalls)
+        assertEquals("Exported 3 rows to C:\\Temp\\ops.xlsx", viewModel.state.value.notice)
         assertEquals(null, viewModel.state.value.error)
     }
 
@@ -833,8 +876,11 @@ private class FakeEngineAdapter(
     var updateCalls = 0
     var deleteCalls = 0
     var previewImportCalls = 0
+    var previewImportXlsxCalls = 0
     var importCalls = 0
+    var importXlsxCalls = 0
     var exportCalls = 0
+    var exportXlsxCalls = 0
     var refreshCalls = 0
     var lastDeletedRecordIds: List<Long> = emptyList()
     var lastDeletedTransferIds: List<Long> = emptyList()
@@ -1046,6 +1092,24 @@ private class FakeEngineAdapter(
 
     override suspend fun exportRecordsCsv(path: String): OperationExportResult {
         exportCalls += 1
+        return OperationExportResult(exportedRows = 3, path = path)
+    }
+
+    override suspend fun previewImportRecordsXlsx(path: String): OperationImportResult {
+        previewImportXlsxCalls += 1
+        return OperationImportResult(imported = 2, skipped = 0, errors = emptyList(), dryRun = true)
+    }
+
+    override suspend fun importRecordsXlsx(path: String): OperationImportResult {
+        importXlsxCalls += 1
+        records.clear()
+        records += operationRecord(id = 10, type = "income", category = "Imported")
+        records += operationRecord(id = 11, type = "expense", category = "Imported")
+        return OperationImportResult(imported = 2, skipped = 0, errors = emptyList(), dryRun = false)
+    }
+
+    override suspend fun exportRecordsXlsx(path: String): OperationExportResult {
+        exportXlsxCalls += 1
         return OperationExportResult(exportedRows = 3, path = path)
     }
 
