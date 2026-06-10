@@ -1,0 +1,181 @@
+package app.ledgera.debts
+
+import app.ledgera.bridge.DebtsEngine
+import app.ledgera.model.CreateDebtRequest
+import app.ledgera.model.DebtDraft
+import app.ledgera.model.DebtItem
+import app.ledgera.model.DebtPaymentItem
+import app.ledgera.model.WalletOption
+import app.ledgera.validation.currentLedgerDate
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+
+data class DebtsUiState(
+    val loading: Boolean = false,
+    val debts: List<DebtItem> = emptyList(),
+    val selectedDebtId: Long? = null,
+    val selectedHistory: List<DebtPaymentItem> = emptyList(),
+    val wallets: List<WalletOption> = emptyList(),
+    val baseCurrency: String = "KZT",
+    val createDraft: DebtDraft? = null,
+    val createInProgress: Boolean = false,
+    val error: String? = null,
+    val notice: String? = null,
+)
+
+class DebtsViewModel(
+    private val engine: DebtsEngine,
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main),
+) {
+    private val mutableState = MutableStateFlow(DebtsUiState(loading = true))
+    val state: StateFlow<DebtsUiState> = mutableState.asStateFlow()
+
+    fun refresh() {
+        refresh(notice = null)
+    }
+
+    private fun refresh(notice: String?) {
+        val previous = mutableState.value
+        mutableState.value = previous.copy(loading = true, error = null, notice = notice)
+        launchSafely {
+            runCatching {
+                val baseCurrency = engine.baseCurrency()
+                val wallets = engine.listWallets()
+                val debts = engine.listDebts()
+                val selectedDebtId = previous.selectedDebtId?.takeIf { selectedId ->
+                    debts.any { it.id == selectedId }
+                } ?: debts.firstOrNull()?.id
+                val history = selectedDebtId?.let { engine.listDebtPayments(it) }.orEmpty()
+                mutableState.value = DebtsUiState(
+                    loading = false,
+                    debts = debts,
+                    selectedDebtId = selectedDebtId,
+                    selectedHistory = history,
+                    wallets = wallets,
+                    baseCurrency = baseCurrency,
+                    createDraft = previous.createDraft,
+                    notice = notice,
+                )
+            }.onFailure { error ->
+                mutableState.value = previous.copy(
+                    loading = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
+    fun selectDebt(debtId: Long) {
+        val debt = mutableState.value.debts.firstOrNull { it.id == debtId }
+        if (debt == null) {
+            mutableState.value = mutableState.value.copy(error = "Debt not found", notice = null)
+            return
+        }
+        mutableState.value = mutableState.value.copy(
+            selectedDebtId = debtId,
+            selectedHistory = emptyList(),
+            loading = true,
+            error = null,
+            notice = null,
+        )
+        launchSafely {
+            runCatching {
+                val history = engine.listDebtPayments(debtId)
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    selectedDebtId = debtId,
+                    selectedHistory = history,
+                )
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
+    fun openCreateDialog(kind: String) {
+        val state = mutableState.value
+        mutableState.value = state.copy(
+            createDraft = DebtDraft(
+                kind = kind,
+                walletId = state.wallets.firstOrNull()?.id ?: 0,
+                currency = state.baseCurrency,
+                createdAt = todayText(),
+            ),
+            error = null,
+            notice = null,
+        )
+    }
+
+    fun closeCreateDialog() {
+        mutableState.value = mutableState.value.copy(createDraft = null, createInProgress = false, error = null)
+    }
+
+    fun updateDraft(draft: DebtDraft) {
+        mutableState.value = mutableState.value.copy(createDraft = draft, error = null, notice = null)
+    }
+
+    fun createDebt() {
+        val draft = mutableState.value.createDraft ?: return
+        DebtsValidation.validateCreateDraft(draft, mutableState.value.baseCurrency)?.let { validationError ->
+            mutableState.value = mutableState.value.copy(error = validationError, notice = null)
+            return
+        }
+        mutableState.value = mutableState.value.copy(createInProgress = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                val created = engine.createDebt(
+                    CreateDebtRequest(
+                        kind = draft.kind.trim().lowercase(),
+                        contactName = draft.contactName.trim(),
+                        walletId = draft.walletId,
+                        amount = draft.amount.trim(),
+                        currency = draft.currency.trim().uppercase(),
+                        createdAt = draft.createdAt.trim(),
+                        description = draft.description.trim(),
+                    )
+                )
+                mutableState.value = mutableState.value.copy(
+                    createDraft = null,
+                    createInProgress = false,
+                    selectedDebtId = created.id,
+                )
+                refresh(
+                    notice = if (created.kind == "loan") {
+                        "Loan created (id=${created.id})"
+                    } else {
+                        "Debt created (id=${created.id})"
+                    }
+                )
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    createInProgress = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
+    fun clearNotice() {
+        mutableState.value = mutableState.value.copy(notice = null)
+    }
+
+    private fun launchSafely(block: suspend () -> Unit) {
+        scope.launch { block() }
+    }
+
+    private fun todayText(): String {
+        val today = currentLedgerDate()
+        return "${today.year.toString().padStart(4, '0')}-${today.month.toString().padStart(2, '0')}-${today.day.toString().padStart(2, '0')}"
+    }
+}

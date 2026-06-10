@@ -163,6 +163,49 @@ data class WalletDeleteResult(
     val action: String,
 )
 
+data class DebtItem(
+    val id: Long,
+    val contactName: String,
+    val kind: String,
+    val totalAmount: String,
+    val remainingAmount: String,
+    val currency: String,
+    val interestRate: String,
+    val status: String,
+    val createdAt: String,
+    val closedAt: String? = null,
+)
+
+data class DebtPaymentItem(
+    val id: Long,
+    val debtId: Long,
+    val recordId: Long? = null,
+    val operationType: String,
+    val principalPaid: String,
+    val isWriteOff: Boolean,
+    val paymentDate: String,
+)
+
+data class DebtDraft(
+    val kind: String = "debt",
+    val contactName: String = "",
+    val walletId: Long = 0,
+    val amount: String = "",
+    val currency: String = "KZT",
+    val createdAt: String = "",
+    val description: String = "",
+)
+
+data class CreateDebtRequest(
+    val kind: String,
+    val contactName: String,
+    val walletId: Long,
+    val amount: String,
+    val currency: String,
+    val createdAt: String,
+    val description: String,
+)
+
 data class AuditFinding(
     val check: String,
     val severity: String,

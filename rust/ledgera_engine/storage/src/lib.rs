@@ -1,7 +1,7 @@
 mod csv;
 mod excel;
 
-use calamine::{open_workbook_auto, Data, Reader};
+use calamine::{Data, Reader, open_workbook_auto};
 use csv::{normalize_tabular_key, read_csv_rows, write_csv_rows};
 use excel::StyledWorksheet;
 use ledgera_engine_core::{
@@ -15,11 +15,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(windows)]
-use windows_sys::Win32::{Foundation::SYSTEMTIME, System::SystemInformation::GetLocalTime};
-#[cfg(windows)]
 use windows_sys::Win32::Storage::FileSystem::{
-    MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
 };
+#[cfg(windows)]
+use windows_sys::Win32::{Foundation::SYSTEMTIME, System::SystemInformation::GetLocalTime};
 
 pub type StorageResult<T> = Result<T, String>;
 pub type WalletBalanceRow = (i64, String, String, f64, f64);
@@ -260,11 +260,11 @@ pub use metrics::{
     metrics_spending_by_category, metrics_spending_by_tag, metrics_tag_coverage,
 };
 pub use planning::{
-    BudgetCreatePayload, BudgetPayload, DebtPayload, DebtPaymentPayload, DebtRecalculatePayload,
-    DebtRecordPayload, DistributionItemPayload, DistributionMonthlyPayload,
+    BudgetCreatePayload, BudgetPayload, DebtCreatePayload, DebtPayload, DebtPaymentPayload,
+    DebtRecalculatePayload, DebtRecordPayload, DistributionItemPayload, DistributionMonthlyPayload,
     DistributionSubitemPayload, DistributionValidationRow, FrozenDistributionPayload,
     budget_batch_spent_minor, budget_create, budget_delete, budget_overlap_exists,
-    budget_replace_rows, budget_rows, budget_spent_minor, budget_update_limit,
+    budget_replace_rows, budget_rows, budget_spent_minor, budget_update_limit, debt_create,
     debt_create_obligation, debt_delete, debt_delete_payment, debt_payment_rows,
     debt_payment_total_minor, debt_recalculate_payload, debt_register_payment, debt_replace_rows,
     debt_rows, debt_validate_payment_amount, distribution_available_months,
@@ -1284,7 +1284,10 @@ struct OperationCsvPlan {
     errors: Vec<String>,
 }
 
-pub fn preview_import_records_csv(db_path: &str, path: &str) -> StorageResult<OperationImportResult> {
+pub fn preview_import_records_csv(
+    db_path: &str,
+    path: &str,
+) -> StorageResult<OperationImportResult> {
     let conn = open_sqlite_connection(db_path)?;
     let plan = parse_operation_csv_import(&conn, path)?;
     Ok(OperationImportResult {
@@ -1295,7 +1298,10 @@ pub fn preview_import_records_csv(db_path: &str, path: &str) -> StorageResult<Op
     })
 }
 
-pub fn preview_import_records_xlsx(db_path: &str, path: &str) -> StorageResult<OperationImportResult> {
+pub fn preview_import_records_xlsx(
+    db_path: &str,
+    path: &str,
+) -> StorageResult<OperationImportResult> {
     let conn = open_sqlite_connection(db_path)?;
     let plan = parse_operation_xlsx_import(&conn, path)?;
     Ok(OperationImportResult {
@@ -1339,7 +1345,12 @@ fn import_operation_plan(
     let existing_transfer_ids = all_transfer_ids_in_tx(&tx)?;
     let existing_record_ids = deletable_standalone_record_ids_in_tx(&tx, &existing_transfer_ids)?;
     let skipped_existing = skipped_operation_record_count_in_tx(&tx, &existing_transfer_ids)?;
-    delete_operations_in_tx(&tx, &existing_record_ids, &existing_transfer_ids, skipped_existing)?;
+    delete_operations_in_tx(
+        &tx,
+        &existing_record_ids,
+        &existing_transfer_ids,
+        skipped_existing,
+    )?;
 
     let mut transfer_id_map: HashMap<i64, i64> = HashMap::new();
     let mut imported_standalone_records: Vec<(i64, String)> = Vec::new();
@@ -1451,13 +1462,14 @@ pub fn export_records_csv(db_path: &str, path: &str) -> StorageResult<OperationE
     let conn = open_sqlite_connection(db_path)?;
     let rows = operation_export_rows(&conn)?;
     let temp_path = export_temp_path(path)?;
-    let exported_rows = match write_csv_rows(path_text(&temp_path)?, &OPERATION_TABULAR_HEADERS, &rows) {
-        Ok(exported_rows) => exported_rows,
-        Err(error) => {
-            let _ = fs::remove_file(&temp_path);
-            return Err(error);
-        }
-    };
+    let exported_rows =
+        match write_csv_rows(path_text(&temp_path)?, &OPERATION_TABULAR_HEADERS, &rows) {
+            Ok(exported_rows) => exported_rows,
+            Err(error) => {
+                let _ = fs::remove_file(&temp_path);
+                return Err(error);
+            }
+        };
     replace_export_file(&temp_path, Path::new(path))?;
     Ok(OperationExportResult {
         exported_rows,
@@ -1468,8 +1480,10 @@ pub fn export_records_csv(db_path: &str, path: &str) -> StorageResult<OperationE
 fn operation_export_rows(conn: &Connection) -> StorageResult<Vec<Vec<String>>> {
     let records = record_row_dicts(&conn, &format!("{RECORD_SELECT} ORDER BY id"), &[])?;
     let transfers = transfer_list_rows_from_conn(&conn)?;
-    let transfer_map: HashMap<i64, TransferRow> =
-        transfers.into_iter().map(|transfer| (transfer.id, transfer)).collect();
+    let transfer_map: HashMap<i64, TransferRow> = transfers
+        .into_iter()
+        .map(|transfer| (transfer.id, transfer))
+        .collect();
     let mut exported_transfer_ids = HashSet::new();
     let mut rows = Vec::new();
 
@@ -1505,7 +1519,9 @@ pub fn export_records_xlsx(db_path: &str, path: &str) -> StorageResult<Operation
     )
     .map_err(|error| error.to_string())?;
     for row in &rows {
-        worksheet.append_row(row).map_err(|error| error.to_string())?;
+        worksheet
+            .append_row(row)
+            .map_err(|error| error.to_string())?;
     }
     if let Err(error) = worksheet.save(path_text(&temp_path)?) {
         let _ = fs::remove_file(&temp_path);
@@ -1584,7 +1600,10 @@ fn parse_operation_csv_import(conn: &Connection, path: &str) -> StorageResult<Op
 fn parse_operation_xlsx_import(conn: &Connection, path: &str) -> StorageResult<OperationCsvPlan> {
     let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
     if metadata.len() > MAX_OPERATION_CSV_FILE_SIZE {
-        return Err(format!("XLSX import file is too large: {} bytes", metadata.len()));
+        return Err(format!(
+            "XLSX import file is too large: {} bytes",
+            metadata.len()
+        ));
     }
     let mut workbook = open_workbook_auto(path).map_err(|error| error.to_string())?;
     let Some(sheet_name) = workbook.sheet_names().first().cloned() else {
@@ -1673,15 +1692,15 @@ fn parse_operation_csv_row(
             wallet_ids,
             next_implicit_transfer_id,
         )
-            .and_then(|transfer| {
-                if !logical_transfer_ids.insert(transfer.logical_id) {
-                    return Err(format!(
-                        "{row_label}: duplicate transfer_id {}",
-                        transfer.logical_id
-                    ));
-                }
-                Ok(ParsedOperationCsvRow::Transfer(transfer))
-            });
+        .and_then(|transfer| {
+            if !logical_transfer_ids.insert(transfer.logical_id) {
+                return Err(format!(
+                    "{row_label}: duplicate transfer_id {}",
+                    transfer.logical_id
+                ));
+            }
+            Ok(ParsedOperationCsvRow::Transfer(transfer))
+        });
     }
     if row_type != "income" && row_type != "expense" {
         return Err(format!("{row_label}: unsupported type '{row_type}'"));
@@ -1693,7 +1712,9 @@ fn parse_operation_csv_row(
         ));
     }
     if !csv_value(values, "period").trim().is_empty() {
-        return Err(format!("{row_label}: mandatory rows are not supported in Operations import"));
+        return Err(format!(
+            "{row_label}: mandatory rows are not supported in Operations import"
+        ));
     }
     let date = required_csv_value(values, "date", row_label)?;
     validate_ymd_date(&date)?;
@@ -1764,7 +1785,8 @@ fn parse_operation_csv_transfer(
     let currency = required_csv_value(values, "currency", row_label)?.to_uppercase();
     validate_currency_code(&currency)?;
     validate_transfer_base_currency_only(&currency, base_currency)?;
-    let (_amount_text, amount, amount_minor) = parse_positive_money(values, "amount_original", row_label)?;
+    let (_amount_text, amount, amount_minor) =
+        parse_positive_money(values, "amount_original", row_label)?;
     let (_amount_base_text, _amount_base, amount_base_minor) =
         parse_positive_money(values, "amount_base", row_label)?;
     if amount_minor != amount_base_minor {
@@ -1774,7 +1796,9 @@ fn parse_operation_csv_transfer(
     }
     let (rate_text, rate) = parse_positive_rate(values, "rate_at_operation", row_label)?;
     if rate_text != "1.000000" && (rate - 1.0).abs() > f64::EPSILON {
-        return Err(format!("{row_label}: base-currency transfer rate must be 1"));
+        return Err(format!(
+            "{row_label}: base-currency transfer rate must be 1"
+        ));
     }
     Ok(ParsedOperationCsvTransfer {
         logical_id,
@@ -1929,7 +1953,10 @@ fn active_wallet_ids_in_conn(conn: &Connection) -> StorageResult<HashSet<i64>> {
     rows.collect::<Result<HashSet<_>, _>>().map_err(sqlite_err)
 }
 
-fn remap_transfer_marker_description(description: &str, transfer_id_map: &HashMap<i64, i64>) -> String {
+fn remap_transfer_marker_description(
+    description: &str,
+    transfer_id_map: &HashMap<i64, i64>,
+) -> String {
     let Some(old_transfer_id) = transfer_marker_id(description) else {
         return description.to_owned();
     };
@@ -2747,8 +2774,11 @@ fn normalize_transfer_ids_in_tx(
 
     for (old_id, new_id) in &transfer_id_map {
         let temp_id = -*new_id;
-        tx.execute("UPDATE transfers SET id = ?1 WHERE id = ?2", (temp_id, old_id))
-            .map_err(sqlite_err)?;
+        tx.execute(
+            "UPDATE transfers SET id = ?1 WHERE id = ?2",
+            (temp_id, old_id),
+        )
+        .map_err(sqlite_err)?;
         tx.execute(
             "UPDATE records SET transfer_id = ?1 WHERE transfer_id = ?2",
             (temp_id, old_id),
@@ -2770,8 +2800,11 @@ fn normalize_transfer_ids_in_tx(
 
     for new_id in transfer_id_map.values() {
         let temp_id = -*new_id;
-        tx.execute("UPDATE transfers SET id = ?1 WHERE id = ?2", (new_id, temp_id))
-            .map_err(sqlite_err)?;
+        tx.execute(
+            "UPDATE transfers SET id = ?1 WHERE id = ?2",
+            (new_id, temp_id),
+        )
+        .map_err(sqlite_err)?;
         tx.execute(
             "UPDATE records SET transfer_id = ?1 WHERE transfer_id = ?2",
             (new_id, temp_id),
@@ -3790,7 +3823,11 @@ mod tests {
         .unwrap();
         for row in rows {
             worksheet
-                .append_row(&row.iter().map(|value| value.to_string()).collect::<Vec<_>>())
+                .append_row(
+                    &row.iter()
+                        .map(|value| value.to_string())
+                        .collect::<Vec<_>>(),
+                )
                 .unwrap();
         }
         worksheet.save(path.to_str().unwrap()).unwrap();
@@ -4669,12 +4706,25 @@ mod tests {
 
         assert_eq!(created.id, 2);
         let transfers = transfer_list_rows(&db_path).unwrap();
-        assert_eq!(transfers.iter().map(|transfer| transfer.id).collect::<Vec<_>>(), vec![1, 2]);
+        assert_eq!(
+            transfers
+                .iter()
+                .map(|transfer| transfer.id)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
         let rows = record_list_rows(&db_path).unwrap();
         assert!(rows.iter().any(|record| record.transfer_id == Some(1)));
         assert!(rows.iter().any(|record| record.transfer_id == Some(2)));
-        assert!(rows.iter().any(|record| record.description == "[transfer:2]"));
-        assert!(!rows.iter().any(|record| record.description == "[transfer:3]"));
+        assert!(
+            rows.iter()
+                .any(|record| record.description == "[transfer:2]")
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|record| record.description == "[transfer:3]")
+        );
         remove_test_db(&db_path);
     }
 
@@ -5393,9 +5443,19 @@ mod tests {
                 .map(|value| value.to_string())
                 .collect::<Vec<_>>()
         );
-        assert!(rows.iter().any(|row| row.get(1).map(String::as_str) == Some("transfer")));
-        assert!(rows.iter().any(|row| row.iter().any(|cell| cell == "Move to card")));
-        assert!(!rows.iter().any(|row| row.iter().any(|cell| cell == "mandatory_expense")));
+        assert!(
+            rows.iter()
+                .any(|row| row.get(1).map(String::as_str) == Some("transfer"))
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.iter().any(|cell| cell == "Move to card"))
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.iter().any(|cell| cell == "mandatory_expense"))
+        );
         let transfer_row = raw_rows
             .iter()
             .find(|row| row.get(1).map(xlsx_cell_to_string).as_deref() == Some("transfer"))
@@ -5464,7 +5524,11 @@ mod tests {
         assert_eq!(result.imported, 2);
         assert!(!result.dry_run);
         let records = record_list_rows(&db_path).unwrap();
-        assert!(records.iter().any(|record| record.record_type == "mandatory_expense"));
+        assert!(
+            records
+                .iter()
+                .any(|record| record.record_type == "mandatory_expense")
+        );
         assert!(records.iter().any(|record| {
             record.transfer_id.is_none()
                 && record.record_type == "income"
@@ -5479,7 +5543,11 @@ mod tests {
         let transfers = transfer_list_rows(&db_path).unwrap();
         assert_eq!(transfers.len(), 1);
         assert_eq!(transfers[0].id, 1);
-        assert!(transfer_rows.iter().all(|record| record.transfer_id == Some(1)));
+        assert!(
+            transfer_rows
+                .iter()
+                .all(|record| record.transfer_id == Some(1))
+        );
 
         let _ = fs::remove_file(path);
         remove_test_db(&db_path);
@@ -5543,7 +5611,11 @@ mod tests {
         assert_eq!(result.imported, 2);
         assert!(!result.dry_run);
         let records = record_list_rows(&db_path).unwrap();
-        assert!(records.iter().any(|record| record.record_type == "mandatory_expense"));
+        assert!(
+            records
+                .iter()
+                .any(|record| record.record_type == "mandatory_expense")
+        );
         assert!(records.iter().any(|record| {
             record.transfer_id.is_none()
                 && record.record_type == "income"
@@ -5555,7 +5627,11 @@ mod tests {
             .filter(|record| record.transfer_id.is_some())
             .collect();
         assert_eq!(transfer_rows.len(), 2);
-        assert!(transfer_rows.iter().all(|record| record.transfer_id == Some(1)));
+        assert!(
+            transfer_rows
+                .iter()
+                .all(|record| record.transfer_id == Some(1))
+        );
 
         let _ = fs::remove_file(path);
         remove_test_db(&db_path);
@@ -5611,8 +5687,8 @@ mod tests {
         assert!(oldest_id < same_day_first_id);
         assert!(same_day_first_id < same_day_second_id);
 
-        let journal_rows = filtered_record_list_rows(&db_path, &RecordFilterPayload::default())
-            .unwrap();
+        let journal_rows =
+            filtered_record_list_rows(&db_path, &RecordFilterPayload::default()).unwrap();
         let descriptions: Vec<_> = journal_rows
             .iter()
             .map(|record| record.description.as_str())
@@ -5654,17 +5730,77 @@ mod tests {
         write_operation_xlsx_fixture(
             &path,
             &[
-                vec!["2026-02-01", "income", "1", "Salary", "100.00", "KZT", "1", "100.00", "Oldest", "", "", "", "", ""],
-                vec!["2026-02-02", "expense", "1", "Food", "10.00", "KZT", "1", "10.00", "Same day first", "", "", "", "", ""],
-                vec!["2026-02-02", "expense", "1", "Food", "20.00", "KZT", "1", "20.00", "Same day second", "", "", "", "", ""],
-                vec!["2026-02-03", "transfer", "", "Transfer", "25.00", "KZT", "1", "25.00", "Newest transfer", "", "", "9", "1", "2"],
+                vec![
+                    "2026-02-01",
+                    "income",
+                    "1",
+                    "Salary",
+                    "100.00",
+                    "KZT",
+                    "1",
+                    "100.00",
+                    "Oldest",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                ],
+                vec![
+                    "2026-02-02",
+                    "expense",
+                    "1",
+                    "Food",
+                    "10.00",
+                    "KZT",
+                    "1",
+                    "10.00",
+                    "Same day first",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                ],
+                vec![
+                    "2026-02-02",
+                    "expense",
+                    "1",
+                    "Food",
+                    "20.00",
+                    "KZT",
+                    "1",
+                    "20.00",
+                    "Same day second",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                ],
+                vec![
+                    "2026-02-03",
+                    "transfer",
+                    "",
+                    "Transfer",
+                    "25.00",
+                    "KZT",
+                    "1",
+                    "25.00",
+                    "Newest transfer",
+                    "",
+                    "",
+                    "9",
+                    "1",
+                    "2",
+                ],
             ],
         );
 
         import_records_xlsx(&db_path, path.to_str().unwrap()).unwrap();
 
-        let journal_rows = filtered_record_list_rows(&db_path, &RecordFilterPayload::default())
-            .unwrap();
+        let journal_rows =
+            filtered_record_list_rows(&db_path, &RecordFilterPayload::default()).unwrap();
         let descriptions: Vec<_> = journal_rows
             .iter()
             .map(|record| record.description.as_str())
@@ -5716,7 +5852,12 @@ mod tests {
         assert_eq!(preview.imported, 0);
         assert_eq!(preview.skipped, 2);
         assert!(preview.errors.iter().any(|error| error.contains("future")));
-        assert!(preview.errors.iter().any(|error| error.contains("different")));
+        assert!(
+            preview
+                .errors
+                .iter()
+                .any(|error| error.contains("different"))
+        );
         assert_eq!(record_list_rows(&db_path).unwrap().len(), 5);
 
         let _ = fs::remove_file(path);

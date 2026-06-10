@@ -24,6 +24,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.ledgera.debts.DebtsScreen
+import app.ledgera.debts.DebtsViewModel
 import app.ledgera.operations.OperationsScreen
 import app.ledgera.operations.OperationsFileActions
 import app.ledgera.operations.NoOperationsFileActions
@@ -36,12 +38,14 @@ import app.ledgera.ui.ToastHost
 fun AppShell(
     viewModel: AppShellViewModel,
     operationsViewModel: OperationsViewModel,
+    debtsViewModel: DebtsViewModel,
     settingsViewModel: SettingsViewModel,
     modifier: Modifier = Modifier,
     operationsFileActions: OperationsFileActions = NoOperationsFileActions,
 ) {
     val state by viewModel.state.collectAsState()
     val operationsState by operationsViewModel.state.collectAsState()
+    val debtsState by debtsViewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     LaunchedEffect(Unit) {
         viewModel.refreshStatus()
@@ -50,6 +54,7 @@ fun AppShell(
     ToastHost(
         message = when (state.selectedSection) {
             DesktopSection.Operations -> operationsState.notice
+            DesktopSection.Debts -> debtsState.notice
             DesktopSection.Settings -> settingsState.notice
             else -> null
         },
@@ -57,6 +62,7 @@ fun AppShell(
         onDismiss = {
             when (state.selectedSection) {
                 DesktopSection.Operations -> operationsViewModel.clearNotice()
+                DesktopSection.Debts -> debtsViewModel.clearNotice()
                 DesktopSection.Settings -> settingsViewModel.clearNotice()
                 else -> Unit
             }
@@ -97,7 +103,7 @@ fun AppShell(
                         DesktopSection.Analytics -> PendingSection(state.selectedSection)
                         DesktopSection.Dashboard -> PendingSection(state.selectedSection)
                         DesktopSection.Budget -> PendingSection(state.selectedSection)
-                        DesktopSection.Debts -> PendingSection(state.selectedSection)
+                        DesktopSection.Debts -> DebtsScreen(debtsViewModel)
                         DesktopSection.Distribution -> PendingSection(state.selectedSection)
                         DesktopSection.Mandatory -> PendingSection(state.selectedSection)
                         DesktopSection.Settings -> SettingsScreen(settingsViewModel)

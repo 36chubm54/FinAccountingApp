@@ -1,6 +1,7 @@
 package app.ledgera.bridge
 
 import app.ledgera.engine.CreateRecordRequest as NativeCreateRecordRequest
+import app.ledgera.engine.CreateDebtRequest as NativeCreateDebtRequest
 import app.ledgera.engine.CreateTransferRequest as NativeCreateTransferRequest
 import app.ledgera.engine.CreateWalletRequest as NativeCreateWalletRequest
 import app.ledgera.engine.LedgeraEngine
@@ -10,10 +11,13 @@ import app.ledgera.engine.RecordFilterDto
 import app.ledgera.engine.UpdateRecordRequest as NativeUpdateRecordRequest
 import app.ledgera.engine.UpdateTransferRequest as NativeUpdateTransferRequest
 import app.ledgera.model.AuditFinding
+import app.ledgera.model.CreateDebtRequest
 import app.ledgera.model.CreateOperationRequest
 import app.ledgera.model.CreateTransferRequest
 import app.ledgera.model.CreateTransferResult
 import app.ledgera.model.CreateWalletRequest
+import app.ledgera.model.DebtItem
+import app.ledgera.model.DebtPaymentItem
 import app.ledgera.model.EngineStatus
 import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationDeleteResult
@@ -260,6 +264,64 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
             walletId = result.walletId,
             action = result.action,
         )
+    }
+
+    override suspend fun listDebts(): List<DebtItem> = withContext(Dispatchers.IO) {
+        engine.listDebts().map {
+            DebtItem(
+                id = it.id,
+                contactName = it.contactName,
+                kind = it.kind,
+                totalAmount = it.totalAmount,
+                remainingAmount = it.remainingAmount,
+                currency = it.currency,
+                interestRate = it.interestRate,
+                status = it.status,
+                createdAt = it.createdAt,
+                closedAt = it.closedAt,
+            )
+        }
+    }
+
+    override suspend fun listDebtPayments(debtId: Long): List<DebtPaymentItem> = withContext(Dispatchers.IO) {
+        engine.listDebtPayments(debtId).map {
+            DebtPaymentItem(
+                id = it.id,
+                debtId = it.debtId,
+                recordId = it.recordId,
+                operationType = it.operationType,
+                principalPaid = it.principalPaid,
+                isWriteOff = it.isWriteOff,
+                paymentDate = it.paymentDate,
+            )
+        }
+    }
+
+    override suspend fun createDebt(request: CreateDebtRequest): DebtItem = withContext(Dispatchers.IO) {
+        engine.createDebt(
+            NativeCreateDebtRequest(
+                kind = request.kind,
+                contactName = request.contactName,
+                walletId = request.walletId,
+                amount = request.amount,
+                currency = request.currency,
+                createdAt = request.createdAt,
+                description = request.description,
+            )
+        ).let {
+            DebtItem(
+                id = it.id,
+                contactName = it.contactName,
+                kind = it.kind,
+                totalAmount = it.totalAmount,
+                remainingAmount = it.remainingAmount,
+                currency = it.currency,
+                interestRate = it.interestRate,
+                status = it.status,
+                createdAt = it.createdAt,
+                closedAt = it.closedAt,
+            )
+        }
     }
 
     override suspend fun runAudit(): List<AuditFinding> = withContext(Dispatchers.IO) {

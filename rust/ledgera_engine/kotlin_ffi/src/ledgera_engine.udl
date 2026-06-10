@@ -74,6 +74,16 @@ dictionary CreateWalletRequest {
     boolean allow_negative;
 };
 
+dictionary CreateDebtRequest {
+    string kind;
+    string contact_name;
+    i64 wallet_id;
+    string amount;
+    string currency;
+    string created_at;
+    string description;
+};
+
 dictionary WalletDeleteResultDto {
     i64 wallet_id;
     string action;
@@ -142,6 +152,29 @@ dictionary TransferDto {
     string description;
 };
 
+dictionary DebtDto {
+    i64 id;
+    string contact_name;
+    string kind;
+    string total_amount;
+    string remaining_amount;
+    string currency;
+    string interest_rate;
+    string status;
+    string created_at;
+    string? closed_at;
+};
+
+dictionary DebtPaymentDto {
+    i64 id;
+    i64 debt_id;
+    i64? record_id;
+    string operation_type;
+    string principal_paid;
+    boolean is_write_off;
+    string payment_date;
+};
+
 dictionary WalletBalanceDto {
     i64 wallet_id;
     string name;
@@ -205,6 +238,12 @@ interface LedgeraEngine {
     WalletDto create_wallet(CreateWalletRequest request);
     [Throws=LedgeraEngineError]
     WalletDeleteResultDto delete_wallet(i64 wallet_id);
+    [Throws=LedgeraEngineError]
+    sequence<DebtDto> list_debts();
+    [Throws=LedgeraEngineError]
+    sequence<DebtPaymentDto> list_debt_payments(i64 debt_id);
+    [Throws=LedgeraEngineError]
+    DebtDto create_debt(CreateDebtRequest request);
     [Throws=LedgeraEngineError]
     sequence<AuditFindingDto> audit_run();
     [Throws=LedgeraEngineError]

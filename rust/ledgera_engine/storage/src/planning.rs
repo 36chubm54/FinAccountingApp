@@ -2,7 +2,7 @@ use crate::{
     StorageResult, minor_amount_expr, signed_minor_amount_expr, sqlite_err,
     storage_clear_read_connection_cache, with_cached_read_connection,
 };
-use ledgera_engine_core::minor_to_money_value;
+use ledgera_engine_core::{minor_to_money_value, normalize_currency_code, to_minor_units};
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 
 const FULL_PCT_MINOR: i64 = 10_000;
@@ -131,6 +131,17 @@ pub struct DebtRecordPayload {
     pub category: String,
     pub description: String,
     pub period: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DebtCreatePayload {
+    pub kind: String,
+    pub contact_name: String,
+    pub wallet_id: i64,
+    pub amount: String,
+    pub currency: String,
+    pub created_at: String,
+    pub description: String,
 }
 
 fn apply_pct(amount_minor: i64, pct_minor: i64) -> i64 {
@@ -295,10 +306,7 @@ fn debt_from_conn(conn: &Connection, debt_id: i64) -> StorageResult<DebtPayload>
     .ok_or_else(|| format!("Debt not found: {debt_id}"))
 }
 
-fn debt_payment_from_conn(
-    conn: &Connection,
-    payment_id: i64,
-) -> StorageResult<DebtPaymentPayload> {
+fn debt_payment_from_conn(conn: &Connection, payment_id: i64) -> StorageResult<DebtPaymentPayload> {
     conn.query_row(
         "SELECT id, debt_id, record_id, operation_type, principal_paid_minor,
                 is_write_off, payment_date
@@ -320,6 +328,119 @@ fn debt_payment_from_conn(
     .optional()
     .map_err(sqlite_err)?
     .ok_or_else(|| format!("Debt payment not found: {payment_id}"))
+}
+
+fn active_debt_wallet_in_tx(tx: &rusqlite::Transaction<'_>, wallet_id: i64) -> StorageResult<bool> {
+    let wallet = tx
+        .query_row(
+            "SELECT allow_negative, is_active FROM wallets WHERE id = ?1",
+            [wallet_id],
+            |row| Ok((row.get::<_, i64>(0)? != 0, row.get::<_, i64>(1)? != 0)),
+        )
+        .optional()
+        .map_err(sqlite_err)?;
+    let Some((allow_negative, is_active)) = wallet else {
+        return Err(format!("Wallet not found: {wallet_id}"));
+    };
+    if !is_active {
+        return Err("Cannot create obligation for inactive wallet".to_owned());
+    }
+    Ok(allow_negative)
+}
+
+fn wallet_balance_minor_for_debt_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    wallet_id: i64,
+) -> StorageResult<i64> {
+    let initial_minor = tx
+        .query_row(
+            "SELECT COALESCE(initial_balance_minor, CAST(ROUND(initial_balance * 100.0) AS INTEGER), 0)
+             FROM wallets
+             WHERE id = ?1 AND is_active = 1",
+            [wallet_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(sqlite_err)?;
+    let signed_expr = signed_minor_amount_expr("amount_base", "type");
+    let sql = format!("SELECT COALESCE(SUM({signed_expr}), 0) FROM records WHERE wallet_id = ?1");
+    let delta_minor = tx
+        .query_row(&sql, [wallet_id], |row| row.get::<_, i64>(0))
+        .map_err(sqlite_err)?;
+    Ok(initial_minor + delta_minor)
+}
+
+fn base_currency_code_for_debt_in_tx(tx: &rusqlite::Transaction<'_>) -> StorageResult<String> {
+    let has_schema_meta = tx
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_meta'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(sqlite_err)?
+        .is_some();
+    if !has_schema_meta {
+        return Ok("KZT".to_owned());
+    }
+    let value = tx
+        .query_row(
+            "SELECT value FROM schema_meta WHERE key = 'base_currency' LIMIT 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(sqlite_err)?
+        .unwrap_or_else(|| "KZT".to_owned());
+    let normalized = value.trim().to_uppercase();
+    if normalized.is_empty() {
+        Ok("KZT".to_owned())
+    } else {
+        Ok(normalized)
+    }
+}
+
+fn validate_debt_date(value: &str) -> StorageResult<()> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return Err("Date must use YYYY-MM-DD format".to_owned());
+    }
+    let year = parse_debt_date_part(value, 0, 4, "year")?;
+    let month = parse_debt_date_part(value, 5, 7, "month")?;
+    let day = parse_debt_date_part(value, 8, 10, "day")?;
+    if !(1..=12).contains(&month) {
+        return Err("Date month must be between 01 and 12".to_owned());
+    }
+    let max_day = debt_days_in_month(year, month);
+    if day < 1 || day > max_day {
+        return Err(format!("Date day must be between 01 and {max_day:02}"));
+    }
+    if (year, month, day) > crate::current_local_date() {
+        return Err("Date cannot be in the future".to_owned());
+    }
+    Ok(())
+}
+
+fn parse_debt_date_part(value: &str, start: usize, end: usize, name: &str) -> StorageResult<i32> {
+    let part = &value[start..end];
+    if !part.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(format!("Date {name} must contain digits only"));
+    }
+    part.parse::<i32>()
+        .map_err(|_| format!("Date {name} is invalid"))
+}
+
+fn debt_days_in_month(year: i32, month: i32) -> i32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if debt_is_leap_year(year) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn debt_is_leap_year(year: i32) -> bool {
+    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
 }
 
 fn insert_debt_row(conn: &Connection, debt: &DebtPayload, with_id: bool) -> StorageResult<i64> {
@@ -1605,6 +1726,91 @@ pub fn debt_create_obligation(
     debt_from_conn(&conn, debt_id)
 }
 
+pub fn debt_create(db_path: &str, payload: &DebtCreatePayload) -> StorageResult<DebtPayload> {
+    let kind = payload.kind.trim().to_lowercase();
+    if kind != "debt" && kind != "loan" {
+        return Err("Debt kind must be debt or loan".to_owned());
+    }
+    let contact_name = payload.contact_name.trim();
+    if contact_name.is_empty() {
+        return Err("Contact name is required".to_owned());
+    }
+    if payload.wallet_id <= 0 {
+        return Err("Wallet is required".to_owned());
+    }
+    let created_at = payload.created_at.trim();
+    validate_debt_date(created_at)?;
+    let amount_minor = to_minor_units(&payload.amount)?;
+    if amount_minor <= 0 {
+        return Err("Amount must be positive".to_owned());
+    }
+
+    let mut conn = open_write_connection(db_path)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    let base_currency = base_currency_code_for_debt_in_tx(&tx)?;
+    let currency = normalize_currency_code(&payload.currency, &base_currency);
+    if !currency.eq_ignore_ascii_case(&base_currency) {
+        return Err(format!(
+            "Kotlin Debts currently supports base-currency obligations only ({base_currency})"
+        ));
+    }
+    let allow_negative = active_debt_wallet_in_tx(&tx, payload.wallet_id)?;
+    if kind == "loan" && !allow_negative {
+        let balance_minor = wallet_balance_minor_for_debt_in_tx(&tx, payload.wallet_id)?;
+        if balance_minor - amount_minor < 0 {
+            return Err("Insufficient funds in wallet".to_owned());
+        }
+    }
+
+    let amount_base = minor_to_money_value(amount_minor);
+    let debt = DebtPayload {
+        id: 0,
+        contact_name: contact_name.to_owned(),
+        kind: kind.clone(),
+        total_amount_minor: amount_minor,
+        remaining_amount_minor: amount_minor,
+        currency: currency.clone(),
+        interest_rate: 0.0,
+        status: "open".to_owned(),
+        created_at: created_at.to_owned(),
+        closed_at: None,
+    };
+    let debt_id = insert_debt_row(&tx, &debt, false)?;
+    let description = payload.description.trim();
+    let record = DebtRecordPayload {
+        record_type: if kind == "debt" {
+            "income".to_owned()
+        } else {
+            "expense".to_owned()
+        },
+        date: created_at.to_owned(),
+        wallet_id: payload.wallet_id,
+        amount_original: amount_base,
+        amount_original_minor: amount_minor,
+        currency,
+        rate_at_operation: 1.0,
+        rate_at_operation_text: "1.000000".to_owned(),
+        amount_base,
+        amount_base_minor: amount_minor,
+        category: if kind == "debt" {
+            "Debt".to_owned()
+        } else {
+            "Loan".to_owned()
+        },
+        description: if description.is_empty() {
+            contact_name.to_owned()
+        } else {
+            description.to_owned()
+        },
+        period: None,
+    };
+    insert_debt_record_row(&tx, &record, debt_id)?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    let conn = open_write_connection(db_path)?;
+    debt_from_conn(&conn, debt_id)
+}
+
 pub fn debt_delete(db_path: &str, debt_id: i64) -> StorageResult<()> {
     let mut conn = open_write_connection(db_path)?;
     debt_from_conn(&conn, debt_id)?;
@@ -1638,7 +1844,8 @@ pub fn debt_register_payment(
         None
     };
     let payment_id = insert_debt_payment_row(&tx, payment, debt_id, record_id, false)?;
-    let remaining_amount_minor = (debt.remaining_amount_minor - payment.principal_paid_minor).max(0);
+    let remaining_amount_minor =
+        (debt.remaining_amount_minor - payment.principal_paid_minor).max(0);
     let is_closed = remaining_amount_minor == 0;
     tx.execute(
         "UPDATE debts
@@ -1683,8 +1890,8 @@ pub fn debt_delete_payment(
     }
     tx.execute("DELETE FROM debt_payments WHERE id = ?", [payment_id])
         .map_err(sqlite_err)?;
-    let restored_remaining = (debt.remaining_amount_minor + payment.principal_paid_minor)
-        .min(debt.total_amount_minor);
+    let restored_remaining =
+        (debt.remaining_amount_minor + payment.principal_paid_minor).min(debt.total_amount_minor);
     tx.execute(
         "UPDATE debts
          SET remaining_amount_minor = ?, status = ?, closed_at = ?
@@ -1748,8 +1955,11 @@ pub fn debt_replace_rows(
     tx.execute("DELETE FROM debt_payments", [])
         .map_err(sqlite_err)?;
     tx.execute("DELETE FROM debts", []).map_err(sqlite_err)?;
-    tx.execute("DELETE FROM sqlite_sequence WHERE name IN ('debts', 'debt_payments')", [])
-        .map_err(sqlite_err)?;
+    tx.execute(
+        "DELETE FROM sqlite_sequence WHERE name IN ('debts', 'debt_payments')",
+        [],
+    )
+    .map_err(sqlite_err)?;
 
     let mut sorted_debts = debts.to_vec();
     sorted_debts.sort_by_key(|debt| debt.id);
@@ -1768,7 +1978,11 @@ pub fn debt_replace_rows(
         }
         if let Some(record_id) = payment.record_id {
             let exists = tx
-                .query_row("SELECT 1 FROM records WHERE id = ?", [record_id], |_| Ok(()))
+                .query_row(
+                    "SELECT 1 FROM records WHERE id = ?",
+                    [record_id],
+                    |_| Ok(()),
+                )
                 .optional()
                 .map_err(sqlite_err)?
                 .is_some();
@@ -1914,6 +2128,20 @@ mod tests {
                 description TEXT NOT NULL DEFAULT '',
                 period TEXT
             );
+            CREATE TABLE wallets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                currency TEXT NOT NULL,
+                initial_balance REAL NOT NULL DEFAULT 0,
+                initial_balance_minor INTEGER DEFAULT NULL,
+                system INTEGER NOT NULL DEFAULT 0,
+                allow_negative INTEGER NOT NULL DEFAULT 0,
+                is_active INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE schema_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             CREATE TABLE tags (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -1984,6 +2212,32 @@ mod tests {
             ",
         )
         .expect("schema");
+        conn.execute(
+            "INSERT INTO schema_meta (key, value) VALUES ('base_currency', 'KZT')",
+            [],
+        )
+        .expect("base currency");
+        conn.execute(
+            "INSERT INTO wallets (
+                id, name, currency, initial_balance, initial_balance_minor, system, allow_negative, is_active
+             ) VALUES (1, 'Cash', 'KZT', 1000.0, 100000, 1, 0, 1)",
+            [],
+        )
+        .expect("wallet 1");
+        conn.execute(
+            "INSERT INTO wallets (
+                id, name, currency, initial_balance, initial_balance_minor, system, allow_negative, is_active
+             ) VALUES (2, 'Negative', 'KZT', 0.0, 0, 0, 1, 1)",
+            [],
+        )
+        .expect("wallet 2");
+        conn.execute(
+            "INSERT INTO wallets (
+                id, name, currency, initial_balance, initial_balance_minor, system, allow_negative, is_active
+             ) VALUES (3, 'Inactive', 'KZT', 0.0, 0, 0, 0, 0)",
+            [],
+        )
+        .expect("wallet 3");
     }
 
     fn test_debt(contact_name: &str, amount_minor: i64) -> DebtPayload {
@@ -2296,9 +2550,13 @@ mod tests {
         );
         drop(conn);
 
-        let write_off =
-            debt_register_payment(&db_path, debt.id, &test_payment(debt.id, 50_000, true), None)
-                .expect("write off");
+        let write_off = debt_register_payment(
+            &db_path,
+            debt.id,
+            &test_payment(debt.id, 50_000, true),
+            None,
+        )
+        .expect("write off");
         assert!(write_off.record_id.is_none());
         let conn = Connection::open(&db_path).expect("open");
         assert_eq!(
@@ -2331,6 +2589,128 @@ mod tests {
             debt_delete(&db_path, 999)
                 .expect_err("missing delete")
                 .contains("Debt not found: 999")
+        );
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn debt_create_validates_and_links_open_records() {
+        let db_path = test_db_path("debt_create_validated");
+        init_distribution_schema(&db_path);
+
+        let debt = debt_create(
+            &db_path,
+            &DebtCreatePayload {
+                kind: "debt".to_owned(),
+                contact_name: "Alice".to_owned(),
+                wallet_id: 1,
+                amount: "500.00".to_owned(),
+                currency: "KZT".to_owned(),
+                created_at: "2026-03-01".to_owned(),
+                description: "".to_owned(),
+            },
+        )
+        .expect("create debt");
+        assert_eq!(debt.kind, "debt");
+        assert_eq!(debt.total_amount_minor, 50_000);
+
+        let conn = Connection::open(&db_path).expect("open");
+        let linked: (String, i64, i64, String) = conn
+            .query_row(
+                "SELECT type, wallet_id, related_debt_id, category FROM records WHERE related_debt_id = ?",
+                [debt.id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("linked record");
+        assert_eq!(linked, ("income".to_owned(), 1, debt.id, "Debt".to_owned()));
+        drop(conn);
+
+        let loan = debt_create(
+            &db_path,
+            &DebtCreatePayload {
+                kind: "loan".to_owned(),
+                contact_name: "Bob".to_owned(),
+                wallet_id: 1,
+                amount: "100.00".to_owned(),
+                currency: "KZT".to_owned(),
+                created_at: "2026-03-02".to_owned(),
+                description: "Loan to Bob".to_owned(),
+            },
+        )
+        .expect("create loan");
+        let conn = Connection::open(&db_path).expect("open");
+        let linked_type: String = conn
+            .query_row(
+                "SELECT type FROM records WHERE related_debt_id = ?",
+                [loan.id],
+                |row| row.get(0),
+            )
+            .expect("loan record");
+        assert_eq!(linked_type, "expense");
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn debt_create_rejects_invalid_inputs() {
+        let db_path = test_db_path("debt_create_invalid");
+        init_distribution_schema(&db_path);
+        let request = |kind: &str,
+                       contact_name: &str,
+                       wallet_id: i64,
+                       amount: &str,
+                       currency: &str,
+                       created_at: &str| {
+            DebtCreatePayload {
+                kind: kind.to_owned(),
+                contact_name: contact_name.to_owned(),
+                wallet_id,
+                amount: amount.to_owned(),
+                currency: currency.to_owned(),
+                created_at: created_at.to_owned(),
+                description: "".to_owned(),
+            }
+        };
+        assert!(
+            debt_create(&db_path, &request("debt", "", 1, "10", "KZT", "2026-03-01"))
+                .expect_err("blank contact")
+                .contains("Contact name")
+        );
+        assert!(
+            debt_create(&db_path, &request("debt", "A", 1, "0", "KZT", "2026-03-01"))
+                .expect_err("zero amount")
+                .contains("positive")
+        );
+        assert!(
+            debt_create(
+                &db_path,
+                &request("debt", "A", 1, "10", "USD", "2026-03-01")
+            )
+            .expect_err("currency")
+            .contains("base-currency")
+        );
+        assert!(
+            debt_create(
+                &db_path,
+                &request("debt", "A", 3, "10", "KZT", "2026-03-01")
+            )
+            .expect_err("inactive")
+            .contains("inactive")
+        );
+        assert!(
+            debt_create(
+                &db_path,
+                &request("loan", "A", 1, "2000", "KZT", "2026-03-01")
+            )
+            .expect_err("insufficient")
+            .contains("Insufficient funds")
+        );
+        assert!(
+            debt_create(
+                &db_path,
+                &request("debt", "A", 1, "10", "KZT", "9999-01-01")
+            )
+            .expect_err("future")
+            .contains("future")
         );
         fs::remove_file(db_path).ok();
     }

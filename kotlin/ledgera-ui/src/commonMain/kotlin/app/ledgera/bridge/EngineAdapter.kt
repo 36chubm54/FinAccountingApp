@@ -1,10 +1,13 @@
 package app.ledgera.bridge
 
 import app.ledgera.model.CreateOperationRequest
+import app.ledgera.model.CreateDebtRequest
 import app.ledgera.model.CreateTransferRequest
 import app.ledgera.model.CreateTransferResult
 import app.ledgera.model.CreateWalletRequest
 import app.ledgera.model.AuditFinding
+import app.ledgera.model.DebtItem
+import app.ledgera.model.DebtPaymentItem
 import app.ledgera.model.EngineStatus
 import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationDeleteResult
@@ -56,4 +59,12 @@ interface SettingsEngine {
     suspend fun runAudit(): List<AuditFinding>
 }
 
-interface EngineAdapter : RuntimeEngine, OperationsEngine, SettingsEngine
+interface DebtsEngine {
+    suspend fun baseCurrency(): String
+    suspend fun listWallets(): List<WalletOption>
+    suspend fun listDebts(): List<DebtItem>
+    suspend fun listDebtPayments(debtId: Long): List<DebtPaymentItem>
+    suspend fun createDebt(request: CreateDebtRequest): DebtItem
+}
+
+interface EngineAdapter : RuntimeEngine, OperationsEngine, SettingsEngine, DebtsEngine

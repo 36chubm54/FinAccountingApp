@@ -1,13 +1,13 @@
 use ledgera_engine_storage::{
-    AuditFindingRow, OperationDeleteResult, OperationExportResult, OperationImportResult,
-    RecordFilterPayload, RecordRow,
+    AuditFindingRow, DebtCreatePayload, DebtPayload, DebtPaymentPayload, OperationDeleteResult,
+    OperationExportResult, OperationImportResult, RecordFilterPayload, RecordRow,
     StandaloneRecordCreatePayload, StandaloneRecordUpdatePayload, TransferCreatePayload,
     TransferRow, TransferUpdatePayload, WalletBalanceRow, WalletCreatePayload, WalletRow,
     audit_run_for_date, base_currency_code, create_standalone_record, create_transfer,
-    create_wallet, current_local_date, delete_all_operations,
-    delete_operations_selection, delete_standalone_record, delete_transfer, delete_wallet,
-    distinct_record_categories, export_records_csv, export_records_xlsx, filtered_record_list_rows,
-    import_records_csv, import_records_xlsx, preview_import_records_csv,
+    create_wallet, current_local_date, debt_create, debt_payment_rows, debt_rows,
+    delete_all_operations, delete_operations_selection, delete_standalone_record, delete_transfer,
+    delete_wallet, distinct_record_categories, export_records_csv, export_records_xlsx,
+    filtered_record_list_rows, import_records_csv, import_records_xlsx, preview_import_records_csv,
     preview_import_records_xlsx, standalone_record_get_row, tag_names, transfer_get_row,
     update_standalone_record, update_transfer, wallet_balance_row, wallet_balance_rows,
     wallet_list_rows,
@@ -94,6 +94,17 @@ pub struct CreateWalletRequest {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct CreateDebtRequest {
+    pub kind: String,
+    pub contact_name: String,
+    pub wallet_id: i64,
+    pub amount: String,
+    pub currency: String,
+    pub created_at: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct WalletDeleteResultDto {
     pub wallet_id: i64,
     pub action: String,
@@ -175,6 +186,31 @@ pub struct TransferDto {
     pub rate_at_operation: String,
     pub amount_base: String,
     pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DebtDto {
+    pub id: i64,
+    pub contact_name: String,
+    pub kind: String,
+    pub total_amount: String,
+    pub remaining_amount: String,
+    pub currency: String,
+    pub interest_rate: String,
+    pub status: String,
+    pub created_at: String,
+    pub closed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DebtPaymentDto {
+    pub id: i64,
+    pub debt_id: i64,
+    pub record_id: Option<i64>,
+    pub operation_type: String,
+    pub principal_paid: String,
+    pub is_write_off: bool,
+    pub payment_date: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -468,6 +504,36 @@ impl LedgeraEngine {
             .map_err(storage_error)
     }
 
+    pub fn list_debts(&self) -> Result<Vec<DebtDto>, LedgeraEngineError> {
+        debt_rows(&self.db_path)
+            .map(|rows| rows.into_iter().map(debt_to_dto).collect())
+            .map_err(storage_error)
+    }
+
+    pub fn list_debt_payments(
+        &self,
+        debt_id: i64,
+    ) -> Result<Vec<DebtPaymentDto>, LedgeraEngineError> {
+        debt_payment_rows(&self.db_path, Some(debt_id))
+            .map(|rows| rows.into_iter().map(debt_payment_to_dto).collect())
+            .map_err(storage_error)
+    }
+
+    pub fn create_debt(&self, request: CreateDebtRequest) -> Result<DebtDto, LedgeraEngineError> {
+        let payload = DebtCreatePayload {
+            kind: request.kind,
+            contact_name: request.contact_name,
+            wallet_id: request.wallet_id,
+            amount: request.amount,
+            currency: request.currency,
+            created_at: request.created_at,
+            description: request.description,
+        };
+        debt_create(&self.db_path, &payload)
+            .map(debt_to_dto)
+            .map_err(storage_error)
+    }
+
     pub fn audit_run(&self) -> Result<Vec<AuditFindingDto>, LedgeraEngineError> {
         audit_run_for_date(&self.db_path, &current_local_date_text())
             .map(|findings| findings.into_iter().map(audit_finding_to_dto).collect())
@@ -689,8 +755,41 @@ fn transfer_to_dto(row: TransferRow) -> TransferDto {
     }
 }
 
+fn debt_to_dto(row: DebtPayload) -> DebtDto {
+    DebtDto {
+        id: row.id,
+        contact_name: row.contact_name,
+        kind: row.kind,
+        total_amount: format_money_minor(row.total_amount_minor),
+        remaining_amount: format_money_minor(row.remaining_amount_minor),
+        currency: row.currency,
+        interest_rate: format_rate(row.interest_rate),
+        status: row.status,
+        created_at: row.created_at,
+        closed_at: row.closed_at,
+    }
+}
+
+fn debt_payment_to_dto(row: DebtPaymentPayload) -> DebtPaymentDto {
+    DebtPaymentDto {
+        id: row.id,
+        debt_id: row.debt_id,
+        record_id: row.record_id,
+        operation_type: row.operation_type,
+        principal_paid: format_money_minor(row.principal_paid_minor),
+        is_write_off: row.is_write_off,
+        payment_date: row.payment_date,
+    }
+}
+
 fn format_money(value: f64) -> String {
     format!("{value:.2}")
+}
+
+fn format_money_minor(value: i64) -> String {
+    let sign = if value < 0 { "-" } else { "" };
+    let abs = value.abs();
+    format!("{sign}{}.{:02}", abs / 100, abs % 100)
 }
 
 fn format_rate(value: f64) -> String {
@@ -798,6 +897,27 @@ mod tests {
                 record_id INTEGER NOT NULL,
                 tag_id INTEGER NOT NULL,
                 PRIMARY KEY(record_id, tag_id)
+            );
+            CREATE TABLE debts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                contact_name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                total_amount_minor INTEGER NOT NULL,
+                remaining_amount_minor INTEGER NOT NULL,
+                currency TEXT NOT NULL,
+                interest_rate REAL NOT NULL DEFAULT 0,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                closed_at TEXT
+            );
+            CREATE TABLE debt_payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                debt_id INTEGER NOT NULL,
+                record_id INTEGER,
+                operation_type TEXT NOT NULL,
+                principal_paid_minor INTEGER NOT NULL,
+                is_write_off INTEGER NOT NULL DEFAULT 0,
+                payment_date TEXT NOT NULL
             );
             INSERT INTO wallets (id, name, currency, initial_balance, initial_balance_minor, is_active)
             VALUES (1, 'Main', 'KZT', 100.0, 10000, 1);
@@ -1564,6 +1684,129 @@ mod tests {
     }
 
     #[test]
+    fn engine_creates_and_lists_debts() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+
+        let debt = engine
+            .create_debt(CreateDebtRequest {
+                kind: "debt".to_owned(),
+                contact_name: "Alice".to_owned(),
+                wallet_id: 1,
+                amount: "25.50".to_owned(),
+                currency: "KZT".to_owned(),
+                created_at: "2026-03-01".to_owned(),
+                description: "".to_owned(),
+            })
+            .expect("create debt");
+        assert_eq!(debt.id, 1);
+        assert_eq!(debt.contact_name, "Alice");
+        assert_eq!(debt.kind, "debt");
+        assert_eq!(debt.total_amount, "25.50");
+        assert_eq!(debt.remaining_amount, "25.50");
+        assert_eq!(debt.status, "open");
+
+        let debts = engine.list_debts().expect("list debts");
+        assert_eq!(debts, vec![debt.clone()]);
+        let conn = Connection::open(&db_path).expect("open");
+        let linked_type: String = conn
+            .query_row(
+                "SELECT type FROM records WHERE related_debt_id = ?1",
+                [debt.id],
+                |row| row.get(0),
+            )
+            .expect("linked debt record");
+        assert_eq!(linked_type, "income");
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_creates_loan_and_rejects_invalid_debt_requests() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+
+        let loan = engine
+            .create_debt(CreateDebtRequest {
+                kind: "loan".to_owned(),
+                contact_name: "Bob".to_owned(),
+                wallet_id: 1,
+                amount: "10.00".to_owned(),
+                currency: "KZT".to_owned(),
+                created_at: "2026-03-01".to_owned(),
+                description: "Loan to Bob".to_owned(),
+            })
+            .expect("create loan");
+        assert_eq!(loan.kind, "loan");
+        let conn = Connection::open(&db_path).expect("open");
+        let linked_type: String = conn
+            .query_row(
+                "SELECT type FROM records WHERE related_debt_id = ?1",
+                [loan.id],
+                |row| row.get(0),
+            )
+            .expect("linked loan record");
+        assert_eq!(linked_type, "expense");
+        drop(conn);
+
+        let error = engine
+            .create_debt(CreateDebtRequest {
+                kind: "loan".to_owned(),
+                contact_name: "Too much".to_owned(),
+                wallet_id: 1,
+                amount: "999.00".to_owned(),
+                currency: "KZT".to_owned(),
+                created_at: "2026-03-01".to_owned(),
+                description: "".to_owned(),
+            })
+            .expect_err("insufficient funds");
+        assert!(error.to_string().contains("Insufficient funds"));
+
+        let error = engine
+            .create_debt(CreateDebtRequest {
+                kind: "debt".to_owned(),
+                contact_name: "USD".to_owned(),
+                wallet_id: 1,
+                amount: "1.00".to_owned(),
+                currency: "USD".to_owned(),
+                created_at: "2026-03-01".to_owned(),
+                description: "".to_owned(),
+            })
+            .expect_err("non-base currency");
+        assert!(error.to_string().contains("base-currency"));
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_lists_debt_payment_history() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+        let conn = Connection::open(&db_path).expect("open");
+        conn.execute(
+            "INSERT INTO debts (
+                id, contact_name, kind, total_amount_minor, remaining_amount_minor,
+                currency, interest_rate, status, created_at, closed_at
+             ) VALUES (1, 'Alice', 'debt', 5000, 3000, 'KZT', 0, 'open', '2026-03-01', NULL)",
+            [],
+        )
+        .expect("debt");
+        conn.execute(
+            "INSERT INTO debt_payments (
+                id, debt_id, record_id, operation_type, principal_paid_minor, is_write_off, payment_date
+             ) VALUES (1, 1, NULL, 'debt_repay', 2000, 0, '2026-03-05')",
+            [],
+        )
+        .expect("payment");
+        drop(conn);
+
+        let payments = engine.list_debt_payments(1).expect("payments");
+        assert_eq!(payments.len(), 1);
+        assert_eq!(payments[0].debt_id, 1);
+        assert_eq!(payments[0].principal_paid, "20.00");
+        assert_eq!(payments[0].operation_type, "debt_repay");
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
     fn engine_rejects_duplicate_wallet_names() {
         let db_path = fixture_db();
         let engine = LedgeraEngine::new(db_path.clone());
@@ -1586,7 +1829,11 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, LedgeraEngineError::Storage { .. }));
-        assert!(error.to_string().contains("Wallet name already exists: emergency"));
+        assert!(
+            error
+                .to_string()
+                .contains("Wallet name already exists: emergency")
+        );
         fs::remove_file(db_path).ok();
     }
 

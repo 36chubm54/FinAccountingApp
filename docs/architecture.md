@@ -93,6 +93,10 @@ Current Kotlin/Rust contract:
   creation/deletion, and read-only AuditEngine v2 report runs through
   Rust/Kotlin UniFFI; wallet edit, runtime currency, sync, updater controls,
   audit repair actions, and migrations remain separate beta.1 slices
+- Kotlin Debts has the first Rust/Kotlin UniFFI foundation slice for debt/loan
+  listing, selected debt payment history, and base-currency debt/loan creation
+  with Rust-owned linked cashflow rows; payment, write-off, close, delete,
+  debt import/export, and debt-card editing remain separate beta.1 slices
 - Kotlin Operations rejects transfer-linked and debt-linked record edits at the
   Rust storage boundary; transfer-linked mirror rows are grouped into one
   transfer journal row with source/target wallet direction and transfer-level

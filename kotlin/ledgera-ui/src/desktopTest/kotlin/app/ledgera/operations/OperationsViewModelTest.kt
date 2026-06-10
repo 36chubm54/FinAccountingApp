@@ -2,10 +2,13 @@ package app.ledgera.operations
 
 import app.ledgera.bridge.EngineAdapter
 import app.ledgera.model.AuditFinding
+import app.ledgera.model.CreateDebtRequest
 import app.ledgera.model.CreateOperationRequest
 import app.ledgera.model.CreateTransferRequest
 import app.ledgera.model.CreateTransferResult
 import app.ledgera.model.CreateWalletRequest
+import app.ledgera.model.DebtItem
+import app.ledgera.model.DebtPaymentItem
 import app.ledgera.model.EngineStatus
 import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationDeleteResult
@@ -1158,6 +1161,23 @@ private class FakeEngineAdapter(
 
     override suspend fun deleteWallet(walletId: Long): WalletDeleteResult =
         WalletDeleteResult(walletId, "hard_deleted")
+
+    override suspend fun listDebts(): List<DebtItem> = emptyList()
+
+    override suspend fun listDebtPayments(debtId: Long): List<DebtPaymentItem> = emptyList()
+
+    override suspend fun createDebt(request: CreateDebtRequest): DebtItem =
+        DebtItem(
+            id = 1,
+            contactName = request.contactName,
+            kind = request.kind,
+            totalAmount = request.amount,
+            remainingAmount = request.amount,
+            currency = request.currency,
+            interestRate = "0.000000",
+            status = "open",
+            createdAt = request.createdAt,
+        )
 
     override suspend fun runAudit(): List<AuditFinding> = emptyList()
 

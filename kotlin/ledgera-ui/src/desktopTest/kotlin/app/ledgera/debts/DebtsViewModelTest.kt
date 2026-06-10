@@ -1,0 +1,163 @@
+package app.ledgera.debts
+
+import app.ledgera.bridge.DebtsEngine
+import app.ledgera.model.CreateDebtRequest
+import app.ledgera.model.DebtItem
+import app.ledgera.model.DebtPaymentItem
+import app.ledgera.model.WalletOption
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+
+class DebtsViewModelTest {
+    @Test
+    fun refreshLoadsDebtsWalletsAndSelectedHistory() {
+        val engine = FakeDebtsEngine()
+        val viewModel = DebtsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+
+        assertEquals("KZT", viewModel.state.value.baseCurrency)
+        assertEquals(listOf("Cash"), viewModel.state.value.wallets.map { it.name })
+        assertEquals(listOf("Alice"), viewModel.state.value.debts.map { it.contactName })
+        assertEquals(1, viewModel.state.value.selectedHistory.size)
+    }
+
+    @Test
+    fun selectDebtLoadsHistory() {
+        val engine = FakeDebtsEngine(
+            debts = listOf(debtItem(id = 1, contactName = "Alice"), debtItem(id = 2, contactName = "Bob")),
+            historyByDebt = mapOf(2L to listOf(paymentItem(id = 2, debtId = 2))),
+        )
+        val viewModel = DebtsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.selectDebt(2)
+
+        assertEquals(2, viewModel.state.value.selectedDebtId)
+        assertEquals(listOf(2L), viewModel.state.value.selectedHistory.map { it.id })
+    }
+
+    @Test
+    fun createDebtRejectsInvalidDraftBeforeEngineCall() {
+        val engine = FakeDebtsEngine()
+        val viewModel = DebtsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.openCreateDialog("debt")
+        viewModel.updateDraft(viewModel.state.value.createDraft!!.copy(contactName = "", amount = "10"))
+        viewModel.createDebt()
+
+        assertEquals("Contact name is required", viewModel.state.value.error)
+        assertEquals(0, engine.createCalls)
+    }
+
+    @Test
+    fun createDebtSuccessRefreshesAndShowsNotice() {
+        val engine = FakeDebtsEngine(debts = emptyList())
+        val viewModel = DebtsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.openCreateDialog("loan")
+        viewModel.updateDraft(
+            viewModel.state.value.createDraft!!.copy(
+                contactName = "Bob",
+                amount = "25.00",
+                createdAt = "2026-03-01",
+            )
+        )
+        viewModel.createDebt()
+
+        assertEquals(1, engine.createCalls)
+        assertNull(viewModel.state.value.createDraft)
+        assertEquals("Loan created (id=1)", viewModel.state.value.notice)
+        assertEquals(listOf("Bob"), viewModel.state.value.debts.map { it.contactName })
+    }
+
+    @Test
+    fun createDebtEngineErrorKeepsDialogOpen() {
+        val engine = FakeDebtsEngine(createError = IllegalStateException("storage failed"))
+        val viewModel = DebtsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.openCreateDialog("debt")
+        viewModel.updateDraft(
+            viewModel.state.value.createDraft!!.copy(
+                contactName = "Alice",
+                amount = "25.00",
+                createdAt = "2026-03-01",
+            )
+        )
+        viewModel.createDebt()
+
+        assertEquals("storage failed", viewModel.state.value.error)
+        assertEquals("Alice", viewModel.state.value.createDraft?.contactName)
+        assertNull(viewModel.state.value.notice)
+    }
+}
+
+private class FakeDebtsEngine(
+    private val debts: List<DebtItem> = listOf(debtItem()),
+    private val historyByDebt: Map<Long, List<DebtPaymentItem>> = mapOf(1L to listOf(paymentItem())),
+    private val createError: Throwable? = null,
+) : DebtsEngine {
+    private val mutableDebts = debts.toMutableList()
+    var createCalls = 0
+
+    override suspend fun baseCurrency(): String = "KZT"
+
+    override suspend fun listWallets(): List<WalletOption> =
+        listOf(WalletOption(id = 1, name = "Cash", currency = "KZT", balance = "100.00"))
+
+    override suspend fun listDebts(): List<DebtItem> = mutableDebts.toList()
+
+    override suspend fun listDebtPayments(debtId: Long): List<DebtPaymentItem> =
+        historyByDebt[debtId].orEmpty()
+
+    override suspend fun createDebt(request: CreateDebtRequest): DebtItem {
+        createError?.let { throw it }
+        createCalls += 1
+        val debt = debtItem(
+            id = (mutableDebts.maxOfOrNull { it.id } ?: 0) + 1,
+            contactName = request.contactName,
+            kind = request.kind,
+            totalAmount = request.amount,
+            remainingAmount = request.amount,
+            createdAt = request.createdAt,
+        )
+        mutableDebts += debt
+        return debt
+    }
+}
+
+private fun debtItem(
+    id: Long = 1,
+    contactName: String = "Alice",
+    kind: String = "debt",
+    totalAmount: String = "50.00",
+    remainingAmount: String = "30.00",
+    createdAt: String = "2026-03-01",
+): DebtItem =
+    DebtItem(
+        id = id,
+        contactName = contactName,
+        kind = kind,
+        totalAmount = totalAmount,
+        remainingAmount = remainingAmount,
+        currency = "KZT",
+        interestRate = "0.000000",
+        status = "open",
+        createdAt = createdAt,
+    )
+
+private fun paymentItem(id: Long = 1, debtId: Long = 1): DebtPaymentItem =
+    DebtPaymentItem(
+        id = id,
+        debtId = debtId,
+        operationType = "debt_repay",
+        principalPaid = "20.00",
+        isWriteOff = false,
+        paymentDate = "2026-03-05",
+    )
