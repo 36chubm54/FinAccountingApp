@@ -3,6 +3,7 @@ package app.ledgera.debts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +20,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -44,25 +46,16 @@ fun DebtsScreen(viewModel: DebtsViewModel, modifier: Modifier = Modifier) {
         viewModel.refresh()
     }
 
-    Column(
-        modifier = modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text("Debts", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-
-        Row(
-            Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            DebtsActionsCard(
-                hasWallets = state.wallets.isNotEmpty(),
-                onAddDebt = { viewModel.openCreateDialog("debt") },
-                onAddLoan = { viewModel.openCreateDialog("loan") },
-                modifier = Modifier.weight(0.34f),
-            )
+            Text("Debts", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+
             Column(
-                Modifier.weight(0.66f).fillMaxSize(),
+                Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 DebtsListCard(
@@ -79,42 +72,27 @@ fun DebtsScreen(viewModel: DebtsViewModel, modifier: Modifier = Modifier) {
                 )
             }
         }
-    }
 
-    state.createDraft?.let { draft ->
-        CreateDebtDialog(
-            draft = draft,
-            wallets = state.wallets,
-            baseCurrency = state.baseCurrency,
-            engineError = state.error,
-            submitting = state.createInProgress,
-            onDraftChange = viewModel::updateDraft,
-            onSubmit = viewModel::createDebt,
-            onCancel = viewModel::closeCreateDialog,
-        )
-    }
-}
+        FloatingActionButton(
+            onClick = { viewModel.openCreateDialog("debt") },
+            modifier = Modifier.align(Alignment.BottomEnd).padding(32.dp),
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+        ) {
+            Text("+", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        }
 
-@Composable
-private fun DebtsActionsCard(
-    hasWallets: Boolean,
-    onAddDebt: () -> Unit,
-    onAddLoan: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Card(modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Debts", style = MaterialTheme.typography.titleMedium)
-            if (!hasWallets) {
-                Text(
-                    "Create an active wallet in Settings before adding debts or loans.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = onAddDebt, enabled = hasWallets) { Text("Add debt") }
-                Button(onClick = onAddLoan, enabled = hasWallets) { Text("Add loan") }
-            }
+        state.createDraft?.let { draft ->
+            CreateDebtDialog(
+                draft = draft,
+                wallets = state.wallets,
+                baseCurrency = state.baseCurrency,
+                engineError = state.error,
+                submitting = state.createInProgress,
+                onDraftChange = viewModel::updateDraft,
+                onSubmit = viewModel::createDebt,
+                onCancel = viewModel::closeCreateDialog,
+            )
         }
     }
 }
