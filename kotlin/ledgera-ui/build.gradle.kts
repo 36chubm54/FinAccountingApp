@@ -93,19 +93,10 @@ val buildRustKotlinFfi by tasks.registering(Exec::class) {
 val generateUniffiKotlin by tasks.registering(Exec::class) {
     dependsOn(buildRustKotlinFfi)
     workingDir = rootProject.layout.projectDirectory.asFile
-    inputs.files(uniffiDefinition, uniffiConfig, rustLibraryDir.file(uniffiBindgenName))
+    inputs.files(uniffiDefinition, uniffiConfig)
     outputs.dir(uniffiOutDir)
     commandLine(
-        "cargo",
-        "run",
-        "--release",
-        "--manifest-path",
-        rustManifest.asFile.absolutePath,
-        "-p",
-        "ledgera_engine_kotlin_ffi",
-        "--bin",
-        "uniffi-bindgen",
-        "--",
+        rustLibraryDir.file(uniffiBindgenName).asFile.absolutePath,
         "generate",
         uniffiDefinition.asFile.absolutePath,
         "--language",
