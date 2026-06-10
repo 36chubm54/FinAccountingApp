@@ -609,6 +609,9 @@ pub fn create_wallet(db_path: &str, payload: &WalletCreatePayload) -> StorageRes
     if name.is_empty() {
         return Err("Wallet name is required".to_owned());
     }
+    if wallet_name_exists_in_tx(&tx, name)? {
+        return Err(format!("Wallet name already exists: {name}"));
+    }
     let currency = payload.currency.trim().to_uppercase();
     validate_currency_code(&currency)?;
     let base_currency = base_currency_code_in_tx(&tx)?;
@@ -656,6 +659,17 @@ pub fn create_wallet(db_path: &str, payload: &WalletCreatePayload) -> StorageRes
         .into_iter()
         .find(|row| row.id == wallet_id)
         .ok_or_else(|| format!("Wallet not found: {wallet_id}"))
+}
+
+fn wallet_name_exists_in_tx(tx: &rusqlite::Transaction<'_>, name: &str) -> StorageResult<bool> {
+    tx.query_row(
+        "SELECT 1 FROM wallets WHERE LOWER(TRIM(name)) = LOWER(?1) LIMIT 1",
+        [name],
+        |_| Ok(()),
+    )
+    .optional()
+    .map(|row| row.is_some())
+    .map_err(sqlite_err)
 }
 
 pub fn delete_wallet(db_path: &str, wallet_id: i64) -> StorageResult<WalletDeleteResult> {
@@ -3894,7 +3908,7 @@ mod tests {
     }
 
     #[test]
-    fn create_wallet_allows_duplicate_names_for_python_compatibility() {
+    fn create_wallet_rejects_duplicate_names_case_insensitively() {
         let db_path = create_balance_test_db();
 
         let first = create_wallet(
@@ -3907,19 +3921,19 @@ mod tests {
             },
         )
         .unwrap();
-        let second = create_wallet(
+        let error = create_wallet(
             &db_path,
             &WalletCreatePayload {
-                name: "Savings".to_owned(),
+                name: " savings ".to_owned(),
                 currency: "KZT".to_owned(),
                 initial_balance: "5".to_owned(),
                 allow_negative: false,
             },
         )
-        .unwrap();
+        .unwrap_err();
 
-        assert_ne!(first.id, second.id);
-        assert_eq!(first.name, second.name);
+        assert_eq!(first.name, "Savings");
+        assert_eq!(error, "Wallet name already exists: savings");
         remove_test_db(&db_path);
     }
 

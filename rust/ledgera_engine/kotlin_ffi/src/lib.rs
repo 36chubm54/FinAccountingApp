@@ -1545,7 +1545,7 @@ mod tests {
 
         let wallet = engine
             .create_wallet(CreateWalletRequest {
-                name: "Savings".to_owned(),
+                name: "Emergency".to_owned(),
                 currency: "kzt".to_owned(),
                 initial_balance: "12.345".to_owned(),
                 allow_negative: true,
@@ -1553,13 +1553,40 @@ mod tests {
             .unwrap();
 
         assert_eq!(wallet.id, 3);
-        assert_eq!(wallet.name, "Savings");
+        assert_eq!(wallet.name, "Emergency");
         assert_eq!(wallet.currency, "KZT");
         assert_eq!(wallet.initial_balance, "12.35");
         assert!(!wallet.system);
         assert!(wallet.allow_negative);
         assert!(wallet.is_active);
         assert_eq!(engine.list_wallets().unwrap().len(), 3);
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_rejects_duplicate_wallet_names() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+
+        engine
+            .create_wallet(CreateWalletRequest {
+                name: "Emergency".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "0".to_owned(),
+                allow_negative: false,
+            })
+            .unwrap();
+        let error = engine
+            .create_wallet(CreateWalletRequest {
+                name: " emergency ".to_owned(),
+                currency: "KZT".to_owned(),
+                initial_balance: "0".to_owned(),
+                allow_negative: false,
+            })
+            .unwrap_err();
+
+        assert!(matches!(error, LedgeraEngineError::Storage { .. }));
+        assert!(error.to_string().contains("Wallet name already exists: emergency"));
         fs::remove_file(db_path).ok();
     }
 
