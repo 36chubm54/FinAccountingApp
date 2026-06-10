@@ -1190,9 +1190,9 @@ private fun OperationRow(
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(item.meta)
-                if (item.transferId != null) {
+                if (item.linkedLabel != null) {
                     Text(
-                        "Transfer-linked",
+                        item.linkedLabel,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

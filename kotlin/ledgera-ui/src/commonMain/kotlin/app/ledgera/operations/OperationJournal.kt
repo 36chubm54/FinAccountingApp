@@ -11,6 +11,7 @@ internal data class OperationJournalItem(
     val tags: List<String>,
     val selectableRecordId: Long?,
     val transferId: Long?,
+    val linkedLabel: String?,
     val selected: Boolean,
     val bulkSelectable: Boolean,
 )
@@ -64,6 +65,7 @@ private fun standaloneJournalItem(
         tags = record.tags,
         selectableRecordId = record.id,
         transferId = null,
+        linkedLabel = if (record.relatedDebtId != null) "Debt-linked" else null,
         selected = selectedRecordId == record.id || selected,
         bulkSelectable = bulkSelectable,
     )
@@ -95,6 +97,7 @@ private fun transferJournalItem(
         tags = emptyList(),
         selectableRecordId = null,
         transferId = transferId,
+        linkedLabel = "Transfer-linked",
         selected = selectedBulkTransferIds.contains(transferId),
         bulkSelectable = true,
     )

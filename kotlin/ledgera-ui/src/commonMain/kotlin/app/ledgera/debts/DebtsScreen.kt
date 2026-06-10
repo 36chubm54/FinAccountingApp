@@ -56,8 +56,7 @@ fun DebtsScreen(viewModel: DebtsViewModel, modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             DebtsActionsCard(
-                wallets = state.wallets,
-                loading = state.loading,
+                hasWallets = state.wallets.isNotEmpty(),
                 onAddDebt = { viewModel.openCreateDialog("debt") },
                 onAddLoan = { viewModel.openCreateDialog("loan") },
                 modifier = Modifier.weight(0.34f),
@@ -98,8 +97,7 @@ fun DebtsScreen(viewModel: DebtsViewModel, modifier: Modifier = Modifier) {
 
 @Composable
 private fun DebtsActionsCard(
-    wallets: List<WalletOption>,
-    loading: Boolean,
+    hasWallets: Boolean,
     onAddDebt: () -> Unit,
     onAddLoan: () -> Unit,
     modifier: Modifier = Modifier,
@@ -107,24 +105,15 @@ private fun DebtsActionsCard(
     Card(modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Debts", style = MaterialTheme.typography.titleMedium)
-            Text("${wallets.size} active wallets available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(wallets, key = { it.id }) { wallet ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(wallet.name)
-                        Text("${wallet.balance} ${wallet.currency}")
-                    }
-                }
-            }
-            if (loading) {
-                CircularProgressIndicator()
+            if (!hasWallets) {
+                Text(
+                    "Create an active wallet in Settings before adding debts or loans.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = onAddDebt, enabled = wallets.isNotEmpty()) { Text("Add debt") }
-                Button(onClick = onAddLoan, enabled = wallets.isNotEmpty()) { Text("Add loan") }
+                Button(onClick = onAddDebt, enabled = hasWallets) { Text("Add debt") }
+                Button(onClick = onAddLoan, enabled = hasWallets) { Text("Add loan") }
             }
         }
     }

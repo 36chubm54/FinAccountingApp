@@ -277,7 +277,6 @@ impl LedgeraEngine {
         filtered_record_list_rows(&self.db_path, &payload)
             .map(|rows| {
                 rows.into_iter()
-                    .filter(|row| row.related_debt_id.is_none())
                     .map(record_to_dto)
                     .collect()
             })
@@ -1708,6 +1707,13 @@ mod tests {
 
         let debts = engine.list_debts().expect("list debts");
         assert_eq!(debts, vec![debt.clone()]);
+        let records = engine.list_records(RecordFilterDto::default()).unwrap();
+        let linked_record = records
+            .iter()
+            .find(|record| record.related_debt_id == Some(debt.id))
+            .expect("debt-linked record is visible to Operations");
+        assert_eq!(linked_record.record_type, "income");
+        assert_eq!(linked_record.category, "Debt");
         let conn = Connection::open(&db_path).expect("open");
         let linked_type: String = conn
             .query_row(

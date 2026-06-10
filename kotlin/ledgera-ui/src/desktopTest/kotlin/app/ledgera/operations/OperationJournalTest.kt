@@ -34,6 +34,19 @@ class OperationJournalTest {
         assertEquals(3, items.single().selectableRecordId)
         assertEquals(null, items.single().transferId)
     }
+
+    @Test
+    fun debtLinkedRowsRemainVisibleButNotBulkSelectable() {
+        val rows = listOf(operationRecord(id = 4, category = "Debt", relatedDebtId = 9))
+
+        val items = operationJournalItems(rows, selectedRecordId = null)
+
+        assertEquals(1, items.size)
+        assertEquals("record:4", items.single().key)
+        assertEquals("Debt-linked", items.single().linkedLabel)
+        assertEquals(4, items.single().selectableRecordId)
+        assertEquals(false, items.single().bulkSelectable)
+    }
 }
 
 private fun operationRecord(
@@ -42,13 +55,14 @@ private fun operationRecord(
     walletId: Long = 1,
     category: String = "Transfer",
     transferId: Long? = null,
+    relatedDebtId: Long? = null,
 ) = OperationRecord(
     id = id,
     type = type,
     date = "2026-01-01",
     walletId = walletId,
     transferId = transferId,
-    relatedDebtId = null,
+    relatedDebtId = relatedDebtId,
     amountOriginal = "10.00",
     currency = "KZT",
     rateAtOperation = "1.000000",
