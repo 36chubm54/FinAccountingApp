@@ -36,6 +36,7 @@ data class OperationsUiState(
     val transferDraft: TransferDraft? = null,
     val importPreview: OperationImportResult? = null,
     val importPath: String? = null,
+    val importFileSnapshot: String? = null,
     val error: String? = null,
     val notice: String? = null,
 ) {
@@ -54,6 +55,7 @@ data class OperationsUiState(
 class OperationsViewModel(
     private val engine: OperationsEngine,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main),
+    private val importFileSnapshotProvider: ImportFileSnapshotProvider = NoImportFileSnapshotProvider,
 ) {
     private val mutableState = MutableStateFlow(OperationsUiState(loading = true))
     val state: StateFlow<OperationsUiState> = mutableState.asStateFlow()
@@ -97,6 +99,7 @@ class OperationsViewModel(
                     transferDraft = mutableState.value.transferDraft,
                     importPreview = mutableState.value.importPreview,
                     importPath = mutableState.value.importPath,
+                    importFileSnapshot = mutableState.value.importFileSnapshot,
                     notice = notice,
                 )
             }.onFailure { error ->
@@ -150,6 +153,7 @@ class OperationsViewModel(
             transferDraft = null,
             importPreview = null,
             importPath = null,
+            importFileSnapshot = null,
             error = null,
             notice = null,
         )
@@ -182,6 +186,7 @@ class OperationsViewModel(
             notice = null,
             importPreview = null,
             importPath = normalizedPath,
+            importFileSnapshot = importFileSnapshotProvider.snapshot(normalizedPath),
         )
         launchSafely {
             runCatching {
@@ -193,6 +198,7 @@ class OperationsViewModel(
                     loading = false,
                     importPreview = result,
                     importPath = normalizedPath,
+                    importFileSnapshot = importFileSnapshotProvider.snapshot(normalizedPath),
                     error = null,
                     notice = null,
                 )
@@ -201,6 +207,7 @@ class OperationsViewModel(
                     loading = false,
                     importPreview = null,
                     importPath = null,
+                    importFileSnapshot = null,
                     error = error.message ?: error::class.simpleName ?: "Unknown error",
                     notice = null,
                 )
@@ -211,13 +218,28 @@ class OperationsViewModel(
     fun previewImportRecordsCsv(path: String?) = previewImportRecords(path)
 
     fun cancelImportPreview() {
-        mutableState.value = mutableState.value.copy(importPreview = null, importPath = null, error = null)
+        mutableState.value = mutableState.value.copy(
+            importPreview = null,
+            importPath = null,
+            importFileSnapshot = null,
+            error = null,
+        )
     }
 
     fun confirmImportRecords() {
         val path = mutableState.value.importPath
         if (path.isNullOrBlank()) {
             mutableState.value = mutableState.value.copy(error = "Import file is required", notice = null)
+            return
+        }
+        val expectedSnapshot = mutableState.value.importFileSnapshot
+        val currentSnapshot = importFileSnapshotProvider.snapshot(path)
+        if (expectedSnapshot != null && currentSnapshot != expectedSnapshot) {
+            mutableState.value = mutableState.value.copy(
+                loading = false,
+                error = "Import file changed after preview. Run preview again.",
+                notice = null,
+            )
             return
         }
         val format = importExportFormat(path)
@@ -241,6 +263,7 @@ class OperationsViewModel(
                     transferDraft = null,
                     importPreview = null,
                     importPath = null,
+                    importFileSnapshot = null,
                     selectiveDeleteMode = false,
                     selectedBulkRecordIds = emptySet(),
                     selectedBulkTransferIds = emptySet(),
@@ -773,3 +796,11 @@ private fun importExportFormat(path: String): OperationsFileFormat? =
         "xlsx" -> OperationsFileFormat.Xlsx
         else -> null
     }
+
+fun interface ImportFileSnapshotProvider {
+    fun snapshot(path: String): String?
+}
+
+private object NoImportFileSnapshotProvider : ImportFileSnapshotProvider {
+    override fun snapshot(path: String): String? = null
+}

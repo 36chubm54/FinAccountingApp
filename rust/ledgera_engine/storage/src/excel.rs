@@ -9,6 +9,7 @@ pub(crate) struct StyledWorksheet {
     workbook: Workbook,
     column_widths: Vec<usize>,
     amount_columns: Vec<usize>,
+    integer_columns: Vec<usize>,
     row_count: u32,
 }
 
@@ -17,6 +18,7 @@ impl StyledWorksheet {
         sheet_name: &str,
         headers: &[&str],
         amount_columns: &[usize],
+        integer_columns: &[usize],
     ) -> Result<Self, XlsxError> {
         let mut workbook = Workbook::new();
         let worksheet = workbook.add_worksheet();
@@ -33,6 +35,7 @@ impl StyledWorksheet {
             workbook,
             column_widths,
             amount_columns: amount_columns.to_vec(),
+            integer_columns: integer_columns.to_vec(),
             row_count: 1,
         })
     }
@@ -52,6 +55,20 @@ impl StyledWorksheet {
                 match value.parse::<f64>() {
                     Ok(number) => {
                         worksheet.write_number_with_format(row, column as u16, number, format)?;
+                    }
+                    Err(_) => {
+                        worksheet.write_string_with_format(row, column as u16, value, format)?;
+                    }
+                };
+            } else if self.integer_columns.contains(&column) {
+                match value.parse::<i64>() {
+                    Ok(number) => {
+                        worksheet.write_number_with_format(
+                            row,
+                            column as u16,
+                            number as f64,
+                            format,
+                        )?;
                     }
                     Err(_) => {
                         worksheet.write_string_with_format(row, column as u16, value, format)?;
@@ -82,7 +99,9 @@ impl StyledWorksheet {
 }
 
 fn active_worksheet(workbook: &mut Workbook) -> &mut Worksheet {
-    workbook.worksheet_from_index(0).expect("records worksheet exists")
+    workbook
+        .worksheet_from_index(0)
+        .expect("records worksheet exists")
 }
 
 fn header_format() -> Format {

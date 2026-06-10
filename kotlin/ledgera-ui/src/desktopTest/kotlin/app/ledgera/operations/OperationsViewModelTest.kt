@@ -299,6 +299,27 @@ class OperationsViewModelTest {
     }
 
     @Test
+    fun importCommitRejectsChangedFileAfterPreview() {
+        val adapter = FakeEngineAdapter(records = mutableListOf(operationRecord(id = 1)))
+        val snapshotProvider = MutableSnapshotProvider("100:1")
+        val viewModel = OperationsViewModel(
+            adapter,
+            CoroutineScope(Dispatchers.Unconfined),
+            snapshotProvider,
+        )
+
+        viewModel.previewImportRecords("C:\\Temp\\ops.csv")
+        snapshotProvider.snapshot = "101:2"
+        viewModel.confirmImportRecords()
+
+        assertEquals(1, adapter.previewImportCalls)
+        assertEquals(0, adapter.importCalls)
+        assertEquals("Import file changed after preview. Run preview again.", viewModel.state.value.error)
+        assertEquals(2L, viewModel.state.value.importPreview?.imported)
+        assertEquals("C:\\Temp\\ops.csv", viewModel.state.value.importPath)
+    }
+
+    @Test
     fun importPreviewThenCommitDispatchesXlsxByExtension() {
         val adapter = FakeEngineAdapter(records = mutableListOf(operationRecord(id = 1)))
         val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
@@ -1148,6 +1169,10 @@ private class FakeEngineAdapter(
         val wallet = wallets[index]
         wallets[index] = wallet.copy(balance = String.format(Locale.US, "%.2f", update(wallet.balance.toDouble())))
     }
+}
+
+private class MutableSnapshotProvider(var snapshot: String?) : ImportFileSnapshotProvider {
+    override fun snapshot(path: String): String? = snapshot
 }
 
 private fun validTransferRequest(

@@ -659,6 +659,7 @@ dependencies = [
  "rusqlite",
  "rust_xlsxwriter",
  "windows-sys",
+ "zip 4.6.1",
 ]
 
 [[package]]

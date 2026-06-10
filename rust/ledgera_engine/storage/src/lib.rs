@@ -12,9 +12,14 @@ use rusqlite::{Connection, OptionalExtension};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(windows)]
 use windows_sys::Win32::{Foundation::SYSTEMTIME, System::SystemInformation::GetLocalTime};
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::{
+    MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+};
 
 pub type StorageResult<T> = Result<T, String>;
 pub type WalletBalanceRow = (i64, String, String, f64, f64);
@@ -1221,6 +1226,8 @@ const OPERATION_TABULAR_HEADERS: [&str; 14] = [
     "from_wallet_id",
     "to_wallet_id",
 ];
+const OPERATION_XLSX_AMOUNT_COLUMNS: [usize; 3] = [4, 6, 7];
+const OPERATION_XLSX_INTEGER_COLUMNS: [usize; 4] = [2, 11, 12, 13];
 const MAX_OPERATION_CSV_FILE_SIZE: u64 = 10 * 1024 * 1024;
 const MAX_OPERATION_CSV_ROWS: usize = 200_000;
 
@@ -1429,7 +1436,15 @@ fn import_operation_plan(
 pub fn export_records_csv(db_path: &str, path: &str) -> StorageResult<OperationExportResult> {
     let conn = open_sqlite_connection(db_path)?;
     let rows = operation_export_rows(&conn)?;
-    let exported_rows = write_csv_rows(path, &OPERATION_TABULAR_HEADERS, &rows)?;
+    let temp_path = export_temp_path(path)?;
+    let exported_rows = match write_csv_rows(path_text(&temp_path)?, &OPERATION_TABULAR_HEADERS, &rows) {
+        Ok(exported_rows) => exported_rows,
+        Err(error) => {
+            let _ = fs::remove_file(&temp_path);
+            return Err(error);
+        }
+    };
+    replace_export_file(&temp_path, Path::new(path))?;
     Ok(OperationExportResult {
         exported_rows,
         path: path.to_owned(),
@@ -1467,20 +1482,79 @@ fn operation_export_rows(conn: &Connection) -> StorageResult<Vec<Vec<String>>> {
 pub fn export_records_xlsx(db_path: &str, path: &str) -> StorageResult<OperationExportResult> {
     let conn = open_sqlite_connection(db_path)?;
     let rows = operation_export_rows(&conn)?;
+    let temp_path = export_temp_path(path)?;
     let mut worksheet = StyledWorksheet::new_records_sheet(
         "Data",
         &OPERATION_TABULAR_HEADERS,
-        &[4, 6, 7],
+        &OPERATION_XLSX_AMOUNT_COLUMNS,
+        &OPERATION_XLSX_INTEGER_COLUMNS,
     )
     .map_err(|error| error.to_string())?;
     for row in &rows {
         worksheet.append_row(row).map_err(|error| error.to_string())?;
     }
-    worksheet.save(path).map_err(|error| error.to_string())?;
+    if let Err(error) = worksheet.save(path_text(&temp_path)?) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error.to_string());
+    }
+    replace_export_file(&temp_path, Path::new(path))?;
     Ok(OperationExportResult {
         exported_rows: i64::try_from(rows.len()).unwrap_or(i64::MAX),
         path: path.to_owned(),
     })
+}
+
+fn export_temp_path(path: &str) -> StorageResult<PathBuf> {
+    let target = Path::new(path);
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = target
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "Export path must include a file name".to_owned())?;
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_nanos();
+    Ok(parent.join(format!(".{file_name}.{unique}.tmp")))
+}
+
+fn path_text(path: &Path) -> StorageResult<&str> {
+    path.to_str()
+        .ok_or_else(|| "Export path must be valid UTF-8".to_owned())
+}
+
+#[cfg(not(windows))]
+fn replace_export_file(temp_path: &Path, target_path: &Path) -> StorageResult<()> {
+    fs::rename(temp_path, target_path).map_err(|error| error.to_string())
+}
+
+#[cfg(windows)]
+fn replace_export_file(temp_path: &Path, target_path: &Path) -> StorageResult<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    let temp_wide = temp_path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let target_wide = target_path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        MoveFileExW(
+            temp_wide.as_ptr(),
+            target_wide.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        let error = std::io::Error::last_os_error().to_string();
+        let _ = fs::remove_file(temp_path);
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn parse_operation_csv_import(conn: &Connection, path: &str) -> StorageResult<OperationCsvPlan> {
@@ -1614,6 +1688,12 @@ fn parse_operation_csv_row(
         return Err(format!("{row_label}: wallet not found ({wallet_id})"));
     }
     let category = required_csv_value(values, "category", row_label)?;
+    let description = csv_value(values, "description");
+    if let Some(marker_transfer_id) = transfer_marker_id(&description) {
+        return Err(format!(
+            "{row_label}: transfer commission marker [transfer:{marker_transfer_id}] requires an aggregate transfer row"
+        ));
+    }
     let currency = required_csv_value(values, "currency", row_label)?.to_uppercase();
     validate_currency_code(&currency)?;
     validate_base_currency_only(&currency, base_currency)?;
@@ -1634,7 +1714,7 @@ fn parse_operation_csv_row(
         amount_base,
         amount_base_minor,
         category,
-        description: csv_value(values, "description"),
+        description,
         tags: parse_csv_tags(&csv_value(values, "tags")),
     }))
 }
@@ -3512,6 +3592,7 @@ mod tests {
     use super::*;
     use rusqlite::Connection;
     use std::fs;
+    use std::io::Read;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -3686,15 +3767,28 @@ mod tests {
     }
 
     fn write_operation_xlsx_fixture(path: &std::path::Path, rows: &[Vec<&str>]) {
-        let mut worksheet =
-            StyledWorksheet::new_records_sheet("Data", &OPERATION_TABULAR_HEADERS, &[4, 6, 7])
-                .unwrap();
+        let mut worksheet = StyledWorksheet::new_records_sheet(
+            "Data",
+            &OPERATION_TABULAR_HEADERS,
+            &OPERATION_XLSX_AMOUNT_COLUMNS,
+            &OPERATION_XLSX_INTEGER_COLUMNS,
+        )
+        .unwrap();
         for row in rows {
             worksheet
                 .append_row(&row.iter().map(|value| value.to_string()).collect::<Vec<_>>())
                 .unwrap();
         }
         worksheet.save(path.to_str().unwrap()).unwrap();
+    }
+
+    fn xlsx_entry_text(path: &std::path::Path, entry_name: &str) -> String {
+        let file = fs::File::open(path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let mut entry = archive.by_name(entry_name).unwrap();
+        let mut text = String::new();
+        entry.read_to_string(&mut text).unwrap();
+        text
     }
 
     #[test]
@@ -5240,11 +5334,13 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
+        fs::write(&path, "stale export").unwrap();
 
         let result = export_records_csv(&db_path, path.to_str().unwrap()).unwrap();
 
         assert_eq!(result.exported_rows, 3);
         let contents = fs::read_to_string(&path).unwrap();
+        assert!(!contents.contains("stale export"));
         assert!(contents.contains("date,type,wallet_id,category"));
         assert_eq!(contents.matches(",transfer,").count(), 1);
         assert!(contents.contains("Move to card"));
@@ -5271,6 +5367,7 @@ mod tests {
         let mut workbook = open_workbook_auto(&path).unwrap();
         assert_eq!(workbook.sheet_names()[0], "Data");
         let range = workbook.worksheet_range("Data").unwrap();
+        let raw_rows: Vec<Vec<Data>> = range.rows().map(|row| row.to_vec()).collect();
         let rows: Vec<Vec<String>> = range
             .rows()
             .map(|row| row.iter().map(xlsx_cell_to_string).collect())
@@ -5285,6 +5382,41 @@ mod tests {
         assert!(rows.iter().any(|row| row.get(1).map(String::as_str) == Some("transfer")));
         assert!(rows.iter().any(|row| row.iter().any(|cell| cell == "Move to card")));
         assert!(!rows.iter().any(|row| row.iter().any(|cell| cell == "mandatory_expense")));
+        let transfer_row = raw_rows
+            .iter()
+            .find(|row| row.get(1).map(xlsx_cell_to_string).as_deref() == Some("transfer"))
+            .unwrap();
+        assert!(matches!(
+            transfer_row.get(11),
+            Some(Data::Int(1)) | Some(Data::Float(1.0))
+        ));
+        assert!(matches!(
+            transfer_row.get(12),
+            Some(Data::Int(1)) | Some(Data::Float(1.0))
+        ));
+        assert!(matches!(
+            transfer_row.get(13),
+            Some(Data::Int(2)) | Some(Data::Float(2.0))
+        ));
+        let standalone_row = raw_rows
+            .iter()
+            .find(|row| row.iter().any(|cell| xlsx_cell_to_string(cell) == "Food"))
+            .unwrap();
+        assert!(matches!(
+            standalone_row.get(2),
+            Some(Data::Int(1)) | Some(Data::Float(1.0))
+        ));
+
+        let sheet_xml = xlsx_entry_text(&path, "xl/worksheets/sheet1.xml");
+        assert!(sheet_xml.contains("<pane ySplit=\"1\" topLeftCell=\"A2\""));
+        assert!(sheet_xml.contains("<autoFilter ref=\"A1:N4\""));
+        assert!(sheet_xml.contains("<c r=\"C2\" s=\""));
+        assert!(sheet_xml.contains("<c r=\"E2\" s=\""));
+        assert!(sheet_xml.contains("<c r=\"L2\" s=\""));
+        let styles_xml = xlsx_entry_text(&path, "xl/styles.xml");
+        assert!(styles_xml.contains("<fgColor rgb=\"FF1F4E78\""));
+        assert!(styles_xml.contains("<color rgb=\"FFFFFFFF\""));
+        assert!(styles_xml.contains("formatCode=\"#,##0.00\""));
 
         let _ = fs::remove_file(path);
         remove_test_db(&db_path);
@@ -5571,6 +5703,42 @@ mod tests {
         assert_eq!(preview.skipped, 2);
         assert!(preview.errors.iter().any(|error| error.contains("future")));
         assert!(preview.errors.iter().any(|error| error.contains("different")));
+        assert_eq!(record_list_rows(&db_path).unwrap().len(), 5);
+
+        let _ = fs::remove_file(path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn import_records_csv_rejects_orphan_transfer_commission_marker() {
+        let db_path = create_balance_test_db();
+        let path = std::env::temp_dir().join(format!(
+            "ledgera_ops_import_orphan_marker_{}.csv",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::write(
+            &path,
+            "date,type,wallet_id,category,amount_original,currency,rate_at_operation,amount_base,description,tags,period,transfer_id,from_wallet_id,to_wallet_id\n\
+             2026-02-01,expense,1,Commission,5.00,KZT,1,5.00,[transfer:99],,,,,\n",
+        )
+        .unwrap();
+
+        let preview = preview_import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+
+        assert_eq!(preview.imported, 0);
+        assert_eq!(preview.skipped, 1);
+        assert!(preview.errors.iter().any(|error| {
+            error.contains(
+                "transfer commission marker [transfer:99] requires an aggregate transfer row",
+            )
+        }));
+        assert_eq!(record_list_rows(&db_path).unwrap().len(), 5);
+
+        let result = import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+        assert_eq!(result.imported, 0);
         assert_eq!(record_list_rows(&db_path).unwrap().len(), 5);
 
         let _ = fs::remove_file(path);

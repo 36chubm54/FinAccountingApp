@@ -9,6 +9,7 @@ import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import app.ledgera.bridge.RustEngineAdapter
+import app.ledgera.operations.ImportFileSnapshotProvider
 import app.ledgera.operations.OperationsViewModel
 import app.ledgera.operations.OperationsFileActions
 import app.ledgera.settings.SettingsViewModel
@@ -20,6 +21,7 @@ import java.awt.FileDialog
 import java.awt.Frame
 import java.awt.event.ComponentEvent
 import java.io.File
+import java.io.FilenameFilter
 import javax.swing.SwingUtilities
 import kotlinx.coroutines.delay
 
@@ -53,7 +55,10 @@ private fun runApplication(args: Array<String>) = application {
                     val engine = RustEngineAdapter(dbPath)
                     AppShell(
                         viewModel = AppShellViewModel(engine),
-                        operationsViewModel = OperationsViewModel(engine),
+                        operationsViewModel = OperationsViewModel(
+                            engine,
+                            importFileSnapshotProvider = DesktopImportFileSnapshotProvider,
+                        ),
                         settingsViewModel = SettingsViewModel(engine),
                         operationsFileActions = DesktopOperationsFileActions(window),
                     )
@@ -65,20 +70,24 @@ private fun runApplication(args: Array<String>) = application {
 
 private class DesktopOperationsFileActions(private val owner: AwtWindow) : OperationsFileActions {
     override fun openImportPath(): String? =
-        FileDialog(null as Frame?, "Import operations", FileDialog.LOAD)
+        FileDialog(ownerFrame(), "Import operations", FileDialog.LOAD)
             .apply {
                 file = "*.csv;*.xlsx"
+                filenameFilter = operationsFileFilter
                 isVisible = true
             }
             .selectedPath(defaultExtension = "xlsx")
 
     override fun saveExportPath(): String? =
-        FileDialog(null as Frame?, "Export operations", FileDialog.SAVE)
+        FileDialog(ownerFrame(), "Export operations", FileDialog.SAVE)
             .apply {
                 file = "operations.xlsx"
+                filenameFilter = operationsFileFilter
                 isVisible = true
             }
             .selectedPath(defaultExtension = "xlsx")
+
+    private fun ownerFrame(): Frame? = owner as? Frame
 
     private fun FileDialog.selectedPath(defaultExtension: String): String? {
         val selectedDirectory = directory ?: return null
@@ -89,6 +98,19 @@ private class DesktopOperationsFileActions(private val owner: AwtWindow) : Opera
         } else {
             "$path.$defaultExtension"
         }
+    }
+
+    private companion object {
+        val operationsFileFilter = FilenameFilter { _, name ->
+            name.endsWith(".csv", ignoreCase = true) || name.endsWith(".xlsx", ignoreCase = true)
+        }
+    }
+}
+
+private object DesktopImportFileSnapshotProvider : ImportFileSnapshotProvider {
+    override fun snapshot(path: String): String? {
+        val file = File(path)
+        return if (file.isFile) "${file.length()}:${file.lastModified()}" else null
     }
 }
 

@@ -17,7 +17,7 @@ calamine = "0.31"
 rust_xlsxwriter = "0.92"
 uniffi = "0.29.4"
 libc = "0.2.186"
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_SystemInformation"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_SystemInformation"] }
 ledgera_engine_core = { path = "core" }
 ledgera_engine_storage = { path = "storage" }
 ledgera_engine_sync = { path = "sync" }
