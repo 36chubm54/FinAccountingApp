@@ -45,6 +45,7 @@ import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.TransferDraft
 import app.ledgera.model.WalletOption
+import app.ledgera.validation.currentLedgerDate
 
 interface OperationsFileActions {
     fun openImportPath(): String?
@@ -617,7 +618,7 @@ private fun CreateOperationDialog(
     onCancel: () -> Unit,
 ) {
     var type by remember { mutableStateOf("income") }
-    var date by remember { mutableStateOf("2026-01-01") }
+    var date by remember { mutableStateOf(todayText()) }
     var amount by remember { mutableStateOf("") }
     var category by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
@@ -703,6 +704,11 @@ private fun CreateOperationDialog(
             TextButton(onClick = onCancel) { Text("Cancel") }
         },
     )
+}
+
+private fun todayText(): String {
+    val today = currentLedgerDate()
+    return "${today.year.toString().padStart(4, '0')}-${today.month.toString().padStart(2, '0')}-${today.day.toString().padStart(2, '0')}"
 }
 
 @Composable
