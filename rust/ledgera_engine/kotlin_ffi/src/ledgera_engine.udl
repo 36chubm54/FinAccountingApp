@@ -109,6 +109,7 @@ dictionary OperationImportResultDto {
     i64 skipped;
     sequence<string> errors;
     boolean dry_run;
+    boolean blocking_errors;
 };
 
 dictionary OperationExportResultDto {

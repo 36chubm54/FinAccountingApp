@@ -231,6 +231,14 @@ class OperationsViewModel(
             mutableState.value = mutableState.value.copy(error = "Import file is required", notice = null)
             return
         }
+        if (mutableState.value.importPreview?.blockingErrors == true) {
+            mutableState.value = mutableState.value.copy(
+                loading = false,
+                error = "Import preview has blocking errors. Fix the file and run preview again.",
+                notice = null,
+            )
+            return
+        }
         val expectedSnapshot = mutableState.value.importFileSnapshot
         val currentSnapshot = importFileSnapshotProvider.snapshot(path)
         if (expectedSnapshot != null && currentSnapshot != expectedSnapshot) {
@@ -699,7 +707,12 @@ class OperationsViewModel(
     private fun importNotice(result: OperationImportResult): String {
         val base = "Imported ${result.imported} rows"
         return if (result.skipped > 0 || result.errors.isNotEmpty()) {
-            "$base. Skipped ${result.skipped} rows"
+            val firstError = result.errors.firstOrNull()
+            if (firstError == null) {
+                "$base. Skipped ${result.skipped} rows"
+            } else {
+                "$base. Skipped ${result.skipped} rows. First error: $firstError"
+            }
         } else {
             base
         }

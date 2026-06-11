@@ -55,6 +55,7 @@ pub struct OperationImportResult {
     pub skipped: i64,
     pub errors: Vec<String>,
     pub dry_run: bool,
+    pub blocking_errors: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1321,6 +1322,7 @@ pub fn preview_import_records_csv(
         skipped: plan.skipped,
         errors: plan.errors,
         dry_run: true,
+        blocking_errors: plan.has_blocking_errors,
     })
 }
 
@@ -1335,6 +1337,7 @@ pub fn preview_import_records_xlsx(
         skipped: plan.skipped,
         errors: plan.errors,
         dry_run: true,
+        blocking_errors: plan.has_blocking_errors,
     })
 }
 
@@ -1374,6 +1377,7 @@ fn import_operation_plan(
             skipped: plan.skipped,
             errors: plan.errors,
             dry_run: false,
+            blocking_errors: plan.has_blocking_errors,
         });
     }
     if plan.has_blocking_errors {
@@ -1518,6 +1522,7 @@ fn import_operation_plan(
         skipped: plan.skipped,
         errors: plan.errors,
         dry_run: false,
+        blocking_errors: plan.has_blocking_errors,
     })
 }
 
@@ -1712,6 +1717,7 @@ fn parse_operation_tabular_import(
         if values.values().all(|value| value.trim().is_empty()) {
             continue;
         }
+        let debt_linked_row = !csv_value(&values, "related_debt_id").trim().is_empty();
         let row = parse_operation_csv_row(
             conn,
             &values,
@@ -1740,7 +1746,7 @@ fn parse_operation_tabular_import(
                 plan.imported += 1;
             }
             Err(error) => {
-                if is_blocking_debt_linked_import_error(&error) {
+                if debt_linked_row {
                     plan.has_blocking_errors = true;
                 }
                 plan.skipped += 1;
@@ -1876,13 +1882,6 @@ fn parse_operation_csv_row(
         description,
         tags: parse_csv_tags(&csv_value(values, "tags")),
     }))
-}
-
-fn is_blocking_debt_linked_import_error(error: &str) -> bool {
-    error.contains("debt not found")
-        || error.contains("debt-linked")
-        || error.contains("Debt-linked")
-        || error.contains("Debt payment")
 }
 
 fn validate_debt_linked_import_source_in_conn(
@@ -6368,6 +6367,7 @@ mod tests {
 
         assert_eq!(preview.imported, 0);
         assert_eq!(preview.skipped, 1);
+        assert!(preview.blocking_errors);
         assert!(
             preview
                 .errors
@@ -6411,6 +6411,7 @@ mod tests {
 
         assert_eq!(preview.imported, 0);
         assert_eq!(preview.skipped, 1);
+        assert!(preview.blocking_errors);
         assert!(
             preview
                 .errors
@@ -6461,6 +6462,7 @@ mod tests {
 
         assert_eq!(preview.imported, 1);
         assert_eq!(preview.skipped, 1);
+        assert!(preview.blocking_errors);
         assert!(
             preview
                 .errors
@@ -6566,6 +6568,7 @@ mod tests {
 
         assert_eq!(preview.imported, 0);
         assert_eq!(preview.skipped, 1);
+        assert!(preview.blocking_errors);
         assert!(
             preview
                 .errors
@@ -6633,6 +6636,7 @@ mod tests {
 
         assert_eq!(preview.imported, 0);
         assert_eq!(preview.skipped, 1);
+        assert!(preview.blocking_errors);
         assert!(
             preview
                 .errors
@@ -6728,6 +6732,7 @@ mod tests {
 
         assert_eq!(preview.imported, 0);
         assert_eq!(preview.skipped, 1);
+        assert!(preview.blocking_errors);
         assert!(
             preview
                 .errors

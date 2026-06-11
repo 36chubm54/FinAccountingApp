@@ -127,6 +127,7 @@ data class OperationImportResult(
     val skipped: Long,
     val errors: List<String>,
     val dryRun: Boolean,
+    val blockingErrors: Boolean = false,
 )
 
 data class OperationExportResult(

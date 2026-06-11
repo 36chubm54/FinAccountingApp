@@ -135,6 +135,7 @@ pub struct OperationImportResultDto {
     pub skipped: i64,
     pub errors: Vec<String>,
     pub dry_run: bool,
+    pub blocking_errors: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -773,6 +774,7 @@ fn operation_import_to_dto(result: OperationImportResult) -> OperationImportResu
         skipped: result.skipped,
         errors: result.errors,
         dry_run: result.dry_run,
+        blocking_errors: result.blocking_errors,
     }
 }
 

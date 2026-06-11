@@ -411,6 +411,7 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
             skipped = skipped,
             errors = errors,
             dryRun = dryRun,
+            blockingErrors = blockingErrors,
         )
 
     private fun OperationExportResultDto.toModel(): OperationExportResult =

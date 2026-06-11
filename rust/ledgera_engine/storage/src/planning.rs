@@ -2097,10 +2097,53 @@ pub fn debt_delete_payment(
     let tx = conn.transaction().map_err(sqlite_err)?;
     if delete_linked_record {
         if let Some(record_id) = payment.record_id {
+            let linked_record = tx
+                .query_row(
+                    "SELECT type, transfer_id, related_debt_id
+                     FROM records
+                     WHERE id = ?",
+                    [record_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, Option<i64>>(1)?,
+                            row.get::<_, Option<i64>>(2)?,
+                        ))
+                    },
+                )
+                .optional()
+                .map_err(sqlite_err)?;
+            let Some((record_type, transfer_id, related_debt_id)) = linked_record else {
+                return Err(format!(
+                    "Debt payment #{payment_id} linked record not found: {record_id}"
+                ));
+            };
+            if transfer_id.is_some()
+                || related_debt_id != Some(payment.debt_id)
+                || (record_type != "income" && record_type != "expense")
+            {
+                return Err(format!(
+                    "Debt payment #{payment_id} linked record {record_id} does not belong to debt {}",
+                    payment.debt_id
+                ));
+            }
             tx.execute("DELETE FROM record_tags WHERE record_id = ?", [record_id])
                 .map_err(sqlite_err)?;
-            tx.execute("DELETE FROM records WHERE id = ?", [record_id])
+            let deleted = tx
+                .execute(
+                    "DELETE FROM records
+                     WHERE id = ?
+                       AND related_debt_id = ?
+                       AND transfer_id IS NULL
+                       AND type IN ('income', 'expense')",
+                    (record_id, payment.debt_id),
+                )
                 .map_err(sqlite_err)?;
+            if deleted != 1 {
+                return Err(format!(
+                    "Debt payment #{payment_id} linked record delete failed: {record_id}"
+                ));
+            }
             refresh_tag_metrics_in_tx(&tx)?;
             prune_orphan_tags_in_tx(&tx)?;
             normalize_record_ids_in_tx(&tx)?;
@@ -2905,6 +2948,75 @@ mod tests {
                 .expect_err("missing delete")
                 .contains("Debt not found: 999")
         );
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn debt_delete_payment_rejects_linked_record_owned_by_another_contract() {
+        let db_path = test_db_path("debt_delete_payment_corrupt_link");
+        init_distribution_schema(&db_path);
+        let debt = debt_create_obligation(
+            &db_path,
+            &test_debt("Alice", 50_000),
+            &test_debt_record("income", 50_000),
+        )
+        .expect("create debt");
+        let payment = debt_register_payment(
+            &db_path,
+            debt.id,
+            &test_payment(debt.id, 20_000, false),
+            Some(&test_debt_record("expense", 20_000)),
+        )
+        .expect("register payment");
+        let conn = Connection::open(&db_path).expect("open");
+        conn.execute(
+            "INSERT INTO records (
+                id, type, date, wallet_id, transfer_id, related_debt_id,
+                amount_original, amount_original_minor, currency,
+                rate_at_operation, rate_at_operation_text,
+                amount_base, amount_base_minor, category, description
+             )
+             VALUES (
+                99, 'income', '2026-03-05', 1, NULL, NULL,
+                10.0, 1000, 'KZT', 1.0, '1',
+                10.0, 1000, 'Other', 'Standalone'
+             )",
+            [],
+        )
+        .expect("standalone record");
+        conn.execute(
+            "UPDATE debt_payments SET record_id = 99 WHERE id = ?",
+            [payment.id],
+        )
+        .expect("corrupt backlink");
+        drop(conn);
+
+        let error = debt_delete_payment(&db_path, payment.id, true).expect_err("reject");
+
+        assert!(error.contains("does not belong to debt"));
+        let conn = Connection::open(&db_path).expect("open");
+        let standalone_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM records WHERE id = 99", [], |row| {
+                row.get(0)
+            })
+            .expect("standalone survives");
+        let payment_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM debt_payments WHERE id = ?",
+                [payment.id],
+                |row| row.get(0),
+            )
+            .expect("payment survives");
+        let remaining: i64 = conn
+            .query_row(
+                "SELECT remaining_amount_minor FROM debts WHERE id = ?",
+                [debt.id],
+                |row| row.get(0),
+            )
+            .expect("remaining");
+        assert_eq!(standalone_count, 1);
+        assert_eq!(payment_count, 1);
+        assert_eq!(remaining, 30_000);
         fs::remove_file(db_path).ok();
     }
 

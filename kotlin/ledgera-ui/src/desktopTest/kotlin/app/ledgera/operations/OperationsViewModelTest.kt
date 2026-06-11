@@ -324,6 +324,29 @@ class OperationsViewModelTest {
     }
 
     @Test
+    fun importCommitRejectsBlockingPreviewBeforeEngineCall() {
+        val adapter = FakeEngineAdapter(
+            records = mutableListOf(operationRecord(id = 1)),
+            importPreview = OperationImportResult(
+                imported = 1,
+                skipped = 1,
+                errors = listOf("row 2: debt not found (99)"),
+                dryRun = true,
+                blockingErrors = true,
+            ),
+        )
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.previewImportRecords("C:\\Temp\\ops.csv")
+        viewModel.confirmImportRecords()
+
+        assertEquals(1, adapter.previewImportCalls)
+        assertEquals(0, adapter.importCalls)
+        assertEquals("Import preview has blocking errors. Fix the file and run preview again.", viewModel.state.value.error)
+        assertEquals(1L, viewModel.state.value.importPreview?.imported)
+    }
+
+    @Test
     fun importPreviewThenCommitDispatchesXlsxByExtension() {
         val adapter = FakeEngineAdapter(records = mutableListOf(operationRecord(id = 1)))
         val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
@@ -339,6 +362,28 @@ class OperationsViewModelTest {
         assertEquals(1, adapter.importXlsxCalls)
         assertEquals("Imported 2 rows", viewModel.state.value.notice)
         assertEquals(listOf(10L, 11L), viewModel.state.value.records.map { it.id })
+    }
+
+    @Test
+    fun importNoticeIncludesFirstSkippedRowError() {
+        val adapter = FakeEngineAdapter(
+            records = mutableListOf(operationRecord(id = 1)),
+            importResult = OperationImportResult(
+                imported = 1,
+                skipped = 1,
+                errors = listOf("row 3: unsupported type 'note'"),
+                dryRun = false,
+            ),
+        )
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.previewImportRecords("C:\\Temp\\ops.csv")
+        viewModel.confirmImportRecords()
+
+        assertEquals(
+            "Imported 1 rows. Skipped 1 rows. First error: row 3: unsupported type 'note'",
+            viewModel.state.value.notice,
+        )
     }
 
     @Test
@@ -922,6 +967,18 @@ private class FakeEngineAdapter(
     private val deleteTransferError: Throwable? = null,
     private val deleteAllOperationsError: Throwable? = null,
     private val deleteSelectionError: Throwable? = null,
+    private val importPreview: OperationImportResult = OperationImportResult(
+        imported = 2,
+        skipped = 0,
+        errors = emptyList(),
+        dryRun = true,
+    ),
+    private val importResult: OperationImportResult = OperationImportResult(
+        imported = 2,
+        skipped = 0,
+        errors = emptyList(),
+        dryRun = false,
+    ),
     private val wallets: MutableList<WalletOption> = mutableListOf(
         WalletOption(id = 1, name = "Cash", currency = "KZT", balance = "100.00"),
         WalletOption(id = 2, name = "Card", currency = "KZT", balance = "0.00"),
@@ -1149,7 +1206,7 @@ private class FakeEngineAdapter(
 
     override suspend fun previewImportRecordsCsv(path: String): OperationImportResult {
         previewImportCalls += 1
-        return OperationImportResult(imported = 2, skipped = 0, errors = emptyList(), dryRun = true)
+        return importPreview
     }
 
     override suspend fun importRecordsCsv(path: String): OperationImportResult {
@@ -1157,7 +1214,7 @@ private class FakeEngineAdapter(
         records.clear()
         records += operationRecord(id = 10, type = "income", category = "Imported")
         records += operationRecord(id = 11, type = "expense", category = "Imported")
-        return OperationImportResult(imported = 2, skipped = 0, errors = emptyList(), dryRun = false)
+        return importResult
     }
 
     override suspend fun exportRecordsCsv(path: String): OperationExportResult {
@@ -1167,7 +1224,7 @@ private class FakeEngineAdapter(
 
     override suspend fun previewImportRecordsXlsx(path: String): OperationImportResult {
         previewImportXlsxCalls += 1
-        return OperationImportResult(imported = 2, skipped = 0, errors = emptyList(), dryRun = true)
+        return importPreview
     }
 
     override suspend fun importRecordsXlsx(path: String): OperationImportResult {
@@ -1175,7 +1232,7 @@ private class FakeEngineAdapter(
         records.clear()
         records += operationRecord(id = 10, type = "income", category = "Imported")
         records += operationRecord(id = 11, type = "expense", category = "Imported")
-        return OperationImportResult(imported = 2, skipped = 0, errors = emptyList(), dryRun = false)
+        return importResult
     }
 
     override suspend fun exportRecordsXlsx(path: String): OperationExportResult {

@@ -1152,16 +1152,22 @@ private fun ImportPreviewDialog(
                         Text("- $error", color = MaterialTheme.colorScheme.error)
                     }
                 }
+                if (preview.blockingErrors) {
+                    Text(
+                        "This preview has blocking debt-linked integrity errors. Fix the file and run preview again.",
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 engineError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 Text(
-                    "Current standalone operations and transfers will be replaced. Debt-linked and unsupported rows are kept.",
+                    "Current standalone operations and transfers will be replaced. Verified debt-linked rows replace their source operation rows; unsupported linked rows are kept.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
         confirmButton = {
-            Button(onClick = onConfirm, enabled = !submitting && preview.imported > 0) {
+            Button(onClick = onConfirm, enabled = !submitting && preview.imported > 0 && !preview.blockingErrors) {
                 Text("Import")
             }
         },
