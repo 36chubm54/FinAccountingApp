@@ -144,6 +144,15 @@ pub struct DebtCreatePayload {
     pub description: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct DebtPaymentRequestPayload {
+    pub debt_id: i64,
+    pub wallet_id: Option<i64>,
+    pub amount: String,
+    pub payment_date: String,
+    pub description: String,
+}
+
 fn apply_pct(amount_minor: i64, pct_minor: i64) -> i64 {
     let numerator = i128::from(amount_minor) * i128::from(pct_minor);
     let sign = if numerator < 0 { -1 } else { 1 };
@@ -1811,6 +1820,127 @@ pub fn debt_create(db_path: &str, payload: &DebtCreatePayload) -> StorageResult<
     debt_from_conn(&conn, debt_id)
 }
 
+pub fn debt_register_payment_validated(
+    db_path: &str,
+    payload: &DebtPaymentRequestPayload,
+) -> StorageResult<DebtPaymentPayload> {
+    let amount_minor = to_minor_units(&payload.amount)?;
+    let mut conn = open_write_connection(db_path)?;
+    let debt = debt_from_conn(&conn, payload.debt_id)?;
+    if debt.status == "closed" || debt.remaining_amount_minor <= 0 {
+        return Err("Debt is already closed".to_owned());
+    }
+    let payment_amount_minor =
+        debt_validate_payment_amount(debt.remaining_amount_minor, amount_minor)?;
+    let payment_date = payload.payment_date.trim();
+    validate_debt_date(payment_date)?;
+    let wallet_id = payload
+        .wallet_id
+        .filter(|wallet_id| *wallet_id > 0)
+        .ok_or_else(|| "Wallet is required".to_owned())?;
+
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    let allow_negative = active_debt_wallet_in_tx(&tx, wallet_id)?;
+    if debt.kind == "debt" && !allow_negative {
+        let balance_minor = wallet_balance_minor_for_debt_in_tx(&tx, wallet_id)?;
+        if balance_minor - payment_amount_minor < 0 {
+            return Err("Insufficient funds in wallet".to_owned());
+        }
+    }
+    drop(tx);
+
+    let amount_base = minor_to_money_value(payment_amount_minor);
+    let payment = DebtPaymentPayload {
+        id: 0,
+        debt_id: debt.id,
+        record_id: None,
+        operation_type: if debt.kind == "loan" {
+            "loan_collect".to_owned()
+        } else {
+            "debt_repay".to_owned()
+        },
+        principal_paid_minor: payment_amount_minor,
+        is_write_off: false,
+        payment_date: payment_date.to_owned(),
+    };
+    let record = DebtRecordPayload {
+        record_type: if debt.kind == "loan" {
+            "income".to_owned()
+        } else {
+            "expense".to_owned()
+        },
+        date: payment_date.to_owned(),
+        wallet_id,
+        amount_original: amount_base,
+        amount_original_minor: payment_amount_minor,
+        currency: debt.currency.clone(),
+        rate_at_operation: 1.0,
+        rate_at_operation_text: "1".to_owned(),
+        amount_base,
+        amount_base_minor: payment_amount_minor,
+        category: if debt.kind == "loan" {
+            "Loan payment".to_owned()
+        } else {
+            "Debt payment".to_owned()
+        },
+        description: if payload.description.trim().is_empty() {
+            debt.contact_name
+        } else {
+            payload.description.trim().to_owned()
+        },
+        period: None,
+    };
+    debt_register_payment(db_path, debt.id, &payment, Some(&record))
+}
+
+pub fn debt_register_write_off_validated(
+    db_path: &str,
+    payload: &DebtPaymentRequestPayload,
+) -> StorageResult<DebtPaymentPayload> {
+    let amount_minor = to_minor_units(&payload.amount)?;
+    let conn = open_write_connection(db_path)?;
+    let debt = debt_from_conn(&conn, payload.debt_id)?;
+    if debt.status == "closed" || debt.remaining_amount_minor <= 0 {
+        return Err("Debt is already closed".to_owned());
+    }
+    let payment_amount_minor =
+        debt_validate_payment_amount(debt.remaining_amount_minor, amount_minor)?;
+    let payment_date = payload.payment_date.trim();
+    validate_debt_date(payment_date)?;
+    let payment = DebtPaymentPayload {
+        id: 0,
+        debt_id: debt.id,
+        record_id: None,
+        operation_type: "debt_forgive".to_owned(),
+        principal_paid_minor: payment_amount_minor,
+        is_write_off: true,
+        payment_date: payment_date.to_owned(),
+    };
+    debt_register_payment(db_path, debt.id, &payment, None)
+}
+
+pub fn debt_close_validated(
+    db_path: &str,
+    payload: &DebtPaymentRequestPayload,
+) -> StorageResult<DebtPayload> {
+    let conn = open_write_connection(db_path)?;
+    let debt = debt_from_conn(&conn, payload.debt_id)?;
+    if debt.status == "closed" || debt.remaining_amount_minor <= 0 {
+        return Ok(debt);
+    }
+    drop(conn);
+    let close_payload = DebtPaymentRequestPayload {
+        debt_id: payload.debt_id,
+        wallet_id: payload.wallet_id,
+        amount: minor_to_money_value(debt.remaining_amount_minor).to_string(),
+        payment_date: payload.payment_date.clone(),
+        description: payload.description.clone(),
+    };
+    debt_register_payment_validated(db_path, &close_payload)?;
+    let conn = open_write_connection(db_path)?;
+    debt_from_conn(&conn, payload.debt_id)
+}
+
 pub fn debt_delete(db_path: &str, debt_id: i64) -> StorageResult<()> {
     let mut conn = open_write_connection(db_path)?;
     debt_from_conn(&conn, debt_id)?;
@@ -2647,6 +2777,209 @@ mod tests {
             )
             .expect("loan record");
         assert_eq!(linked_type, "expense");
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn debt_payment_facade_validates_and_links_rows() {
+        let db_path = test_db_path("debt_payment_validated");
+        init_distribution_schema(&db_path);
+        let debt = debt_create(
+            &db_path,
+            &DebtCreatePayload {
+                kind: "debt".to_owned(),
+                contact_name: "Alice".to_owned(),
+                wallet_id: 1,
+                amount: "500.00".to_owned(),
+                currency: "KZT".to_owned(),
+                created_at: "2026-03-01".to_owned(),
+                description: "".to_owned(),
+            },
+        )
+        .expect("create debt");
+
+        let payment = debt_register_payment_validated(
+            &db_path,
+            &DebtPaymentRequestPayload {
+                debt_id: debt.id,
+                wallet_id: Some(1),
+                amount: "200.00".to_owned(),
+                payment_date: "2026-03-05".to_owned(),
+                description: "cash".to_owned(),
+            },
+        )
+        .expect("payment");
+        assert_eq!(payment.operation_type, "debt_repay");
+        assert!(!payment.is_write_off);
+        assert!(payment.record_id.is_some());
+        let conn = Connection::open(&db_path).expect("open");
+        assert_eq!(
+            conn.query_row(
+                "SELECT type, wallet_id, related_debt_id, category FROM records WHERE id = ?",
+                [payment.record_id.expect("record")],
+                |row| Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                )),
+            )
+            .expect("linked record"),
+            ("expense".to_owned(), 1, debt.id, "Debt payment".to_owned())
+        );
+        drop(conn);
+        assert_eq!(
+            debt_from_conn(&Connection::open(&db_path).expect("open"), debt.id)
+                .expect("debt")
+                .remaining_amount_minor,
+            30_000
+        );
+
+        let write_off = debt_register_write_off_validated(
+            &db_path,
+            &DebtPaymentRequestPayload {
+                debt_id: debt.id,
+                wallet_id: None,
+                amount: "300.00".to_owned(),
+                payment_date: "2026-03-06".to_owned(),
+                description: "".to_owned(),
+            },
+        )
+        .expect("write off");
+        assert_eq!(write_off.operation_type, "debt_forgive");
+        assert!(write_off.is_write_off);
+        assert!(write_off.record_id.is_none());
+        let closed = debt_from_conn(&Connection::open(&db_path).expect("open"), debt.id)
+            .expect("closed debt");
+        assert_eq!(closed.status, "closed");
+        assert_eq!(closed.closed_at.as_deref(), Some("2026-03-06"));
+
+        let loan = debt_create(
+            &db_path,
+            &DebtCreatePayload {
+                kind: "loan".to_owned(),
+                contact_name: "Bob".to_owned(),
+                wallet_id: 1,
+                amount: "100.00".to_owned(),
+                currency: "KZT".to_owned(),
+                created_at: "2026-03-01".to_owned(),
+                description: "".to_owned(),
+            },
+        )
+        .expect("create loan");
+        let closed_loan = debt_close_validated(
+            &db_path,
+            &DebtPaymentRequestPayload {
+                debt_id: loan.id,
+                wallet_id: Some(1),
+                amount: "1.00".to_owned(),
+                payment_date: "2026-03-07".to_owned(),
+                description: "close".to_owned(),
+            },
+        )
+        .expect("close loan");
+        assert_eq!(closed_loan.status, "closed");
+        let loan_payment = debt_payment_rows(&db_path, Some(loan.id))
+            .expect("loan payments")
+            .into_iter()
+            .next()
+            .expect("loan payment");
+        assert_eq!(loan_payment.operation_type, "loan_collect");
+
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn debt_payment_facade_rejects_invalid_inputs() {
+        let db_path = test_db_path("debt_payment_invalid");
+        init_distribution_schema(&db_path);
+        let debt = debt_create(
+            &db_path,
+            &DebtCreatePayload {
+                kind: "debt".to_owned(),
+                contact_name: "Alice".to_owned(),
+                wallet_id: 1,
+                amount: "200.00".to_owned(),
+                currency: "KZT".to_owned(),
+                created_at: "2026-03-01".to_owned(),
+                description: "".to_owned(),
+            },
+        )
+        .expect("create debt");
+        let request = |amount: &str, wallet_id: Option<i64>, date: &str| DebtPaymentRequestPayload {
+            debt_id: debt.id,
+            wallet_id,
+            amount: amount.to_owned(),
+            payment_date: date.to_owned(),
+            description: "".to_owned(),
+        };
+        assert!(
+            debt_register_payment_validated(&db_path, &request("0", Some(1), "2026-03-05"))
+                .expect_err("zero")
+                .contains("positive")
+        );
+        assert!(
+            debt_register_payment_validated(&db_path, &request("300.00", Some(1), "2026-03-05"))
+                .expect_err("too much")
+                .contains("exceeds")
+        );
+        assert!(
+            debt_register_payment_validated(&db_path, &request("1.00", Some(1), "2999-01-01"))
+                .expect_err("future")
+                .contains("future")
+        );
+        assert!(
+            debt_register_payment_validated(&db_path, &request("1.00", None, "2026-03-05"))
+                .expect_err("wallet required")
+                .contains("Wallet is required")
+        );
+        assert!(
+            debt_register_payment_validated(&db_path, &request("1.00", Some(3), "2026-03-05"))
+                .expect_err("inactive")
+                .contains("inactive")
+        );
+        let conn = Connection::open(&db_path).expect("open");
+        conn.execute(
+            "INSERT INTO records (
+                type, date, wallet_id, amount_original, amount_original_minor,
+                currency, rate_at_operation, rate_at_operation_text,
+                amount_base, amount_base_minor, category
+             ) VALUES ('expense', '2026-03-02', 1, 1199.0, 119900, 'KZT', 1.0, '1', 1199.0, 119900, 'Drain')",
+            [],
+        )
+        .expect("drain");
+        drop(conn);
+        assert!(
+            debt_register_payment_validated(&db_path, &request("2.00", Some(1), "2026-03-05"))
+                .expect_err("insufficient")
+                .contains("Insufficient funds")
+        );
+        debt_register_write_off_validated(
+            &db_path,
+            &DebtPaymentRequestPayload {
+                debt_id: debt.id,
+                wallet_id: None,
+                amount: "200.00".to_owned(),
+                payment_date: "2026-03-06".to_owned(),
+                description: "".to_owned(),
+            },
+        )
+        .expect("close");
+        assert!(
+            debt_register_write_off_validated(
+                &db_path,
+                &DebtPaymentRequestPayload {
+                    debt_id: debt.id,
+                    wallet_id: None,
+                    amount: "1.00".to_owned(),
+                    payment_date: "2026-03-07".to_owned(),
+                    description: "".to_owned(),
+                },
+            )
+            .expect_err("closed")
+            .contains("already closed")
+        );
+
         fs::remove_file(db_path).ok();
     }
 

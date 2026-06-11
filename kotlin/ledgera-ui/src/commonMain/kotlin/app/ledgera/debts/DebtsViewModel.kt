@@ -2,9 +2,11 @@ package app.ledgera.debts
 
 import app.ledgera.bridge.DebtsEngine
 import app.ledgera.model.CreateDebtRequest
+import app.ledgera.model.DebtActionDraft
 import app.ledgera.model.DebtDraft
 import app.ledgera.model.DebtItem
 import app.ledgera.model.DebtPaymentItem
+import app.ledgera.model.RegisterDebtPaymentRequest
 import app.ledgera.model.WalletOption
 import app.ledgera.validation.currentLedgerDate
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +26,8 @@ data class DebtsUiState(
     val baseCurrency: String = "KZT",
     val createDraft: DebtDraft? = null,
     val createInProgress: Boolean = false,
+    val actionDraft: DebtActionDraft? = null,
+    val actionInProgress: Boolean = false,
     val error: String? = null,
     val notice: String? = null,
 )
@@ -59,6 +63,8 @@ class DebtsViewModel(
                     wallets = wallets,
                     baseCurrency = baseCurrency,
                     createDraft = previous.createDraft,
+                    actionDraft = previous.actionDraft,
+                    actionInProgress = previous.actionInProgress,
                     notice = notice,
                 )
             }.onFailure { error ->
@@ -166,6 +172,89 @@ class DebtsViewModel(
         }
     }
 
+    fun openDebtAction(action: String) {
+        val state = mutableState.value
+        val debt = selectedDebt(state)
+        if (debt == null) {
+            mutableState.value = state.copy(error = "Select a debt or loan first", notice = null)
+            return
+        }
+        if (debt.status == "closed") {
+            mutableState.value = state.copy(error = "Debt is already closed", notice = null)
+            return
+        }
+        mutableState.value = state.copy(
+            actionDraft = DebtActionDraft(
+                action = action,
+                debtId = debt.id,
+                walletId = state.wallets.firstOrNull()?.id ?: 0,
+                amount = if (action == "close") debt.remainingAmount else "",
+                paymentDate = todayText(),
+            ),
+            error = null,
+            notice = null,
+        )
+    }
+
+    fun closeActionDialog() {
+        mutableState.value = mutableState.value.copy(actionDraft = null, actionInProgress = false, error = null)
+    }
+
+    fun updateActionDraft(draft: DebtActionDraft) {
+        mutableState.value = mutableState.value.copy(actionDraft = draft, error = null, notice = null)
+    }
+
+    fun submitDebtAction() {
+        val draft = mutableState.value.actionDraft ?: return
+        val requiresWallet = draft.action != "write_off"
+        DebtsValidation.validateActionDraft(draft, requiresWallet)?.let { validationError ->
+            mutableState.value = mutableState.value.copy(error = validationError, notice = null)
+            return
+        }
+        mutableState.value = mutableState.value.copy(actionInProgress = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                val request = RegisterDebtPaymentRequest(
+                    debtId = draft.debtId,
+                    walletId = if (requiresWallet) draft.walletId else null,
+                    amount = draft.amount.trim(),
+                    paymentDate = draft.paymentDate.trim(),
+                    description = draft.description.trim(),
+                )
+                val notice = when (draft.action) {
+                    "write_off" -> {
+                        val payment = engine.registerDebtWriteOff(request)
+                        "Write-off registered (id=${payment.id})"
+                    }
+                    "close" -> {
+                        val closed = engine.closeDebt(request)
+                        if (closed.kind == "loan") {
+                            "Loan closed (id=${closed.id})"
+                        } else {
+                            "Debt closed (id=${closed.id})"
+                        }
+                    }
+                    else -> {
+                        val payment = engine.registerDebtPayment(request)
+                        "Payment registered (id=${payment.id})"
+                    }
+                }
+                mutableState.value = mutableState.value.copy(
+                    actionDraft = null,
+                    actionInProgress = false,
+                    selectedDebtId = draft.debtId,
+                )
+                refresh(notice = notice)
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    actionInProgress = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
     fun clearNotice() {
         mutableState.value = mutableState.value.copy(notice = null)
     }
@@ -178,4 +267,7 @@ class DebtsViewModel(
         val today = currentLedgerDate()
         return "${today.year.toString().padStart(4, '0')}-${today.month.toString().padStart(2, '0')}-${today.day.toString().padStart(2, '0')}"
     }
+
+    private fun selectedDebt(state: DebtsUiState): DebtItem? =
+        state.debts.firstOrNull { it.id == state.selectedDebtId }
 }

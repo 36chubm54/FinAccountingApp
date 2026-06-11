@@ -1,16 +1,17 @@
 use ledgera_engine_storage::{
-    AuditFindingRow, DebtCreatePayload, DebtPayload, DebtPaymentPayload, OperationDeleteResult,
-    OperationExportResult, OperationImportResult, RecordFilterPayload, RecordRow,
-    StandaloneRecordCreatePayload, StandaloneRecordUpdatePayload, TransferCreatePayload,
-    TransferRow, TransferUpdatePayload, WalletBalanceRow, WalletCreatePayload, WalletRow,
-    audit_run_for_date, base_currency_code, create_standalone_record, create_transfer,
-    create_wallet, current_local_date, debt_create, debt_payment_rows, debt_rows,
-    delete_all_operations, delete_operations_selection, delete_standalone_record, delete_transfer,
-    delete_wallet, distinct_record_categories, export_records_csv, export_records_xlsx,
-    filtered_record_list_rows, import_records_csv, import_records_xlsx, preview_import_records_csv,
-    preview_import_records_xlsx, standalone_record_get_row, tag_names, transfer_get_row,
-    update_standalone_record, update_transfer, wallet_balance_row, wallet_balance_rows,
-    wallet_list_rows,
+    AuditFindingRow, DebtCreatePayload, DebtPayload, DebtPaymentPayload,
+    DebtPaymentRequestPayload, OperationDeleteResult, OperationExportResult, OperationImportResult,
+    RecordFilterPayload, RecordRow, StandaloneRecordCreatePayload, StandaloneRecordUpdatePayload,
+    TransferCreatePayload, TransferRow, TransferUpdatePayload, WalletBalanceRow,
+    WalletCreatePayload, WalletRow, audit_run_for_date, base_currency_code,
+    create_standalone_record, create_transfer, create_wallet, current_local_date,
+    debt_close_validated, debt_create, debt_payment_rows, debt_register_payment_validated,
+    debt_register_write_off_validated, debt_rows, delete_all_operations, delete_operations_selection,
+    delete_standalone_record, delete_transfer, delete_wallet, distinct_record_categories,
+    export_records_csv, export_records_xlsx, filtered_record_list_rows, import_records_csv,
+    import_records_xlsx, preview_import_records_csv, preview_import_records_xlsx,
+    standalone_record_get_row, tag_names, transfer_get_row, update_standalone_record,
+    update_transfer, wallet_balance_row, wallet_balance_rows, wallet_list_rows,
 };
 use std::fmt;
 use std::path::Path;
@@ -101,6 +102,15 @@ pub struct CreateDebtRequest {
     pub amount: String,
     pub currency: String,
     pub created_at: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegisterDebtPaymentRequest {
+    pub debt_id: i64,
+    pub wallet_id: Option<i64>,
+    pub amount: String,
+    pub payment_date: String,
     pub description: String,
 }
 
@@ -533,6 +543,33 @@ impl LedgeraEngine {
             .map_err(storage_error)
     }
 
+    pub fn register_debt_payment(
+        &self,
+        request: RegisterDebtPaymentRequest,
+    ) -> Result<DebtPaymentDto, LedgeraEngineError> {
+        debt_register_payment_validated(&self.db_path, &debt_payment_request_payload(request))
+            .map(debt_payment_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn register_debt_write_off(
+        &self,
+        request: RegisterDebtPaymentRequest,
+    ) -> Result<DebtPaymentDto, LedgeraEngineError> {
+        debt_register_write_off_validated(&self.db_path, &debt_payment_request_payload(request))
+            .map(debt_payment_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn close_debt(
+        &self,
+        request: RegisterDebtPaymentRequest,
+    ) -> Result<DebtDto, LedgeraEngineError> {
+        debt_close_validated(&self.db_path, &debt_payment_request_payload(request))
+            .map(debt_to_dto)
+            .map_err(storage_error)
+    }
+
     pub fn audit_run(&self) -> Result<Vec<AuditFindingDto>, LedgeraEngineError> {
         audit_run_for_date(&self.db_path, &current_local_date_text())
             .map(|findings| findings.into_iter().map(audit_finding_to_dto).collect())
@@ -778,6 +815,16 @@ fn debt_payment_to_dto(row: DebtPaymentPayload) -> DebtPaymentDto {
         principal_paid: format_money_minor(row.principal_paid_minor),
         is_write_off: row.is_write_off,
         payment_date: row.payment_date,
+    }
+}
+
+fn debt_payment_request_payload(request: RegisterDebtPaymentRequest) -> DebtPaymentRequestPayload {
+    DebtPaymentRequestPayload {
+        debt_id: request.debt_id,
+        wallet_id: request.wallet_id,
+        amount: request.amount,
+        payment_date: request.payment_date,
+        description: request.description,
     }
 }
 
@@ -1779,6 +1826,86 @@ mod tests {
             })
             .expect_err("non-base currency");
         assert!(error.to_string().contains("base-currency"));
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_registers_debt_actions() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+        let debt = engine
+            .create_debt(CreateDebtRequest {
+                kind: "debt".to_owned(),
+                contact_name: "Alice".to_owned(),
+                wallet_id: 1,
+                amount: "50.00".to_owned(),
+                currency: "KZT".to_owned(),
+                created_at: "2026-03-01".to_owned(),
+                description: "".to_owned(),
+            })
+            .expect("create debt");
+
+        let payment = engine
+            .register_debt_payment(RegisterDebtPaymentRequest {
+                debt_id: debt.id,
+                wallet_id: Some(1),
+                amount: "20.00".to_owned(),
+                payment_date: "2026-03-05".to_owned(),
+                description: "cash".to_owned(),
+            })
+            .expect("payment");
+        assert_eq!(payment.debt_id, debt.id);
+        assert_eq!(payment.operation_type, "debt_repay");
+        assert_eq!(payment.principal_paid, "20.00");
+        assert!(payment.record_id.is_some());
+
+        let write_off = engine
+            .register_debt_write_off(RegisterDebtPaymentRequest {
+                debt_id: debt.id,
+                wallet_id: None,
+                amount: "30.00".to_owned(),
+                payment_date: "2026-03-06".to_owned(),
+                description: "".to_owned(),
+            })
+            .expect("write off");
+        assert_eq!(write_off.operation_type, "debt_forgive");
+        assert!(write_off.is_write_off);
+        assert!(write_off.record_id.is_none());
+        let updated = engine.list_debts().expect("debts").remove(0);
+        assert_eq!(updated.status, "closed");
+        assert_eq!(updated.closed_at.as_deref(), Some("2026-03-06"));
+
+        let loan = engine
+            .create_debt(CreateDebtRequest {
+                kind: "loan".to_owned(),
+                contact_name: "Bob".to_owned(),
+                wallet_id: 1,
+                amount: "10.00".to_owned(),
+                currency: "KZT".to_owned(),
+                created_at: "2026-03-01".to_owned(),
+                description: "".to_owned(),
+            })
+            .expect("create loan");
+        let closed_loan = engine
+            .close_debt(RegisterDebtPaymentRequest {
+                debt_id: loan.id,
+                wallet_id: Some(1),
+                amount: "0.01".to_owned(),
+                payment_date: "2026-03-07".to_owned(),
+                description: "close".to_owned(),
+            })
+            .expect("close loan");
+        assert_eq!(closed_loan.status, "closed");
+        assert_eq!(
+            engine
+                .list_debt_payments(loan.id)
+                .expect("loan history")
+                .first()
+                .expect("loan payment")
+                .operation_type,
+            "loan_collect"
+        );
+
         fs::remove_file(db_path).ok();
     }
 

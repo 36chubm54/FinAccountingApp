@@ -15,6 +15,7 @@ import app.ledgera.model.OperationDeleteResult
 import app.ledgera.model.OperationExportResult
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
+import app.ledgera.model.RegisterDebtPaymentRequest
 import app.ledgera.model.TransferDetails
 import app.ledgera.model.UpdateOperationRequest
 import app.ledgera.model.UpdateTransferRequest
@@ -1179,6 +1180,26 @@ private class FakeEngineAdapter(
             createdAt = request.createdAt,
         )
 
+    override suspend fun registerDebtPayment(request: RegisterDebtPaymentRequest): DebtPaymentItem =
+        debtPaymentItem(request.debtId)
+
+    override suspend fun registerDebtWriteOff(request: RegisterDebtPaymentRequest): DebtPaymentItem =
+        debtPaymentItem(request.debtId).copy(operationType = "debt_forgive", isWriteOff = true)
+
+    override suspend fun closeDebt(request: RegisterDebtPaymentRequest): DebtItem =
+        DebtItem(
+            id = request.debtId,
+            contactName = "Alice",
+            kind = "debt",
+            totalAmount = request.amount,
+            remainingAmount = "0.00",
+            currency = "KZT",
+            interestRate = "0.000000",
+            status = "closed",
+            createdAt = request.paymentDate,
+            closedAt = request.paymentDate,
+        )
+
     override suspend fun runAudit(): List<AuditFinding> = emptyList()
 
     private fun replaceWalletBalance(walletId: Long, update: (Double) -> Double) {
@@ -1243,3 +1264,14 @@ private fun operationRecord(
     description = description,
     tags = tags,
 )
+
+private fun debtPaymentItem(debtId: Long): DebtPaymentItem =
+    DebtPaymentItem(
+        id = 1,
+        debtId = debtId,
+        recordId = 1,
+        operationType = "debt_repay",
+        principalPaid = "10.00",
+        isWriteOff = false,
+        paymentDate = "2026-01-01",
+    )

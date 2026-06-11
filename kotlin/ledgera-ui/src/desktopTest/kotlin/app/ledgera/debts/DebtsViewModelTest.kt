@@ -4,6 +4,7 @@ import app.ledgera.bridge.DebtsEngine
 import app.ledgera.model.CreateDebtRequest
 import app.ledgera.model.DebtItem
 import app.ledgera.model.DebtPaymentItem
+import app.ledgera.model.RegisterDebtPaymentRequest
 import app.ledgera.model.WalletOption
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -96,15 +97,84 @@ class DebtsViewModelTest {
         assertEquals("Alice", viewModel.state.value.createDraft?.contactName)
         assertNull(viewModel.state.value.notice)
     }
+
+    @Test
+    fun paymentValidationBlocksBeforeEngineCall() {
+        val engine = FakeDebtsEngine()
+        val viewModel = DebtsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.openDebtAction("payment")
+        viewModel.updateActionDraft(viewModel.state.value.actionDraft!!.copy(amount = "0"))
+        viewModel.submitDebtAction()
+
+        assertEquals("Amount must be a positive number", viewModel.state.value.error)
+        assertEquals(0, engine.paymentCalls)
+    }
+
+    @Test
+    fun paymentSuccessRefreshesHistoryAndShowsNotice() {
+        val engine = FakeDebtsEngine(historyByDebt = mapOf(1L to emptyList()))
+        val viewModel = DebtsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.openDebtAction("payment")
+        viewModel.updateActionDraft(
+            viewModel.state.value.actionDraft!!.copy(amount = "10.00", paymentDate = "2026-03-05")
+        )
+        viewModel.submitDebtAction()
+
+        assertEquals(1, engine.paymentCalls)
+        assertNull(viewModel.state.value.actionDraft)
+        assertEquals("Payment registered (id=1)", viewModel.state.value.notice)
+        assertEquals(listOf(1L), viewModel.state.value.selectedHistory.map { it.id })
+    }
+
+    @Test
+    fun writeOffEngineErrorKeepsDialogOpen() {
+        val engine = FakeDebtsEngine(actionError = IllegalStateException("write-off failed"))
+        val viewModel = DebtsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.openDebtAction("write_off")
+        viewModel.updateActionDraft(
+            viewModel.state.value.actionDraft!!.copy(amount = "10.00", paymentDate = "2026-03-05")
+        )
+        viewModel.submitDebtAction()
+
+        assertEquals("write-off failed", viewModel.state.value.error)
+        assertEquals("write_off", viewModel.state.value.actionDraft?.action)
+        assertNull(viewModel.state.value.notice)
+    }
+
+    @Test
+    fun closeSuccessRefreshesDebtAndShowsNotice() {
+        val engine = FakeDebtsEngine()
+        val viewModel = DebtsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.openDebtAction("close")
+        viewModel.submitDebtAction()
+
+        assertEquals(1, engine.closeCalls)
+        assertNull(viewModel.state.value.actionDraft)
+        assertEquals("Debt closed (id=1)", viewModel.state.value.notice)
+        assertEquals("closed", viewModel.state.value.debts.single().status)
+    }
 }
 
 private class FakeDebtsEngine(
     private val debts: List<DebtItem> = listOf(debtItem()),
     private val historyByDebt: Map<Long, List<DebtPaymentItem>> = mapOf(1L to listOf(paymentItem())),
     private val createError: Throwable? = null,
+    private val actionError: Throwable? = null,
 ) : DebtsEngine {
     private val mutableDebts = debts.toMutableList()
+    private val mutableHistory = historyByDebt.mapValues { it.value.toMutableList() }.toMutableMap()
     var createCalls = 0
+    var paymentCalls = 0
+    var writeOffCalls = 0
+    var closeCalls = 0
 
     override suspend fun baseCurrency(): String = "KZT"
 
@@ -114,7 +184,7 @@ private class FakeDebtsEngine(
     override suspend fun listDebts(): List<DebtItem> = mutableDebts.toList()
 
     override suspend fun listDebtPayments(debtId: Long): List<DebtPaymentItem> =
-        historyByDebt[debtId].orEmpty()
+        mutableHistory[debtId].orEmpty()
 
     override suspend fun createDebt(request: CreateDebtRequest): DebtItem {
         createError?.let { throw it }
@@ -130,6 +200,43 @@ private class FakeDebtsEngine(
         mutableDebts += debt
         return debt
     }
+
+    override suspend fun registerDebtPayment(request: RegisterDebtPaymentRequest): DebtPaymentItem {
+        actionError?.let { throw it }
+        paymentCalls += 1
+        val payment = paymentItem(id = nextPaymentId(request.debtId), debtId = request.debtId)
+        mutableHistory.getOrPut(request.debtId) { mutableListOf() } += payment
+        return payment
+    }
+
+    override suspend fun registerDebtWriteOff(request: RegisterDebtPaymentRequest): DebtPaymentItem {
+        actionError?.let { throw it }
+        writeOffCalls += 1
+        val payment = paymentItem(
+            id = nextPaymentId(request.debtId),
+            debtId = request.debtId,
+            operationType = "debt_forgive",
+            isWriteOff = true,
+        )
+        mutableHistory.getOrPut(request.debtId) { mutableListOf() } += payment
+        return payment
+    }
+
+    override suspend fun closeDebt(request: RegisterDebtPaymentRequest): DebtItem {
+        actionError?.let { throw it }
+        closeCalls += 1
+        val index = mutableDebts.indexOfFirst { it.id == request.debtId }
+        val closed = mutableDebts[index].copy(status = "closed", remainingAmount = "0.00", closedAt = request.paymentDate)
+        mutableDebts[index] = closed
+        mutableHistory.getOrPut(request.debtId) { mutableListOf() } += paymentItem(
+            id = nextPaymentId(request.debtId),
+            debtId = request.debtId,
+        )
+        return closed
+    }
+
+    private fun nextPaymentId(debtId: Long): Long =
+        (mutableHistory[debtId].orEmpty().maxOfOrNull { it.id } ?: 0) + 1
 }
 
 private fun debtItem(
@@ -152,12 +259,17 @@ private fun debtItem(
         createdAt = createdAt,
     )
 
-private fun paymentItem(id: Long = 1, debtId: Long = 1): DebtPaymentItem =
+private fun paymentItem(
+    id: Long = 1,
+    debtId: Long = 1,
+    operationType: String = "debt_repay",
+    isWriteOff: Boolean = false,
+): DebtPaymentItem =
     DebtPaymentItem(
         id = id,
         debtId = debtId,
-        operationType = "debt_repay",
+        operationType = operationType,
         principalPaid = "20.00",
-        isWriteOff = false,
+        isWriteOff = isWriteOff,
         paymentDate = "2026-03-05",
     )

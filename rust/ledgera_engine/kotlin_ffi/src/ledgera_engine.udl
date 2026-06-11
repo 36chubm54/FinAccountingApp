@@ -84,6 +84,14 @@ dictionary CreateDebtRequest {
     string description;
 };
 
+dictionary RegisterDebtPaymentRequest {
+    i64 debt_id;
+    i64? wallet_id;
+    string amount;
+    string payment_date;
+    string description;
+};
+
 dictionary WalletDeleteResultDto {
     i64 wallet_id;
     string action;
@@ -244,6 +252,12 @@ interface LedgeraEngine {
     sequence<DebtPaymentDto> list_debt_payments(i64 debt_id);
     [Throws=LedgeraEngineError]
     DebtDto create_debt(CreateDebtRequest request);
+    [Throws=LedgeraEngineError]
+    DebtPaymentDto register_debt_payment(RegisterDebtPaymentRequest request);
+    [Throws=LedgeraEngineError]
+    DebtPaymentDto register_debt_write_off(RegisterDebtPaymentRequest request);
+    [Throws=LedgeraEngineError]
+    DebtDto close_debt(RegisterDebtPaymentRequest request);
     [Throws=LedgeraEngineError]
     sequence<AuditFindingDto> audit_run();
     [Throws=LedgeraEngineError]

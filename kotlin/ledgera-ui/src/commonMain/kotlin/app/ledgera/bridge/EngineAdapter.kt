@@ -14,6 +14,7 @@ import app.ledgera.model.OperationDeleteResult
 import app.ledgera.model.OperationExportResult
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
+import app.ledgera.model.RegisterDebtPaymentRequest
 import app.ledgera.model.TransferDetails
 import app.ledgera.model.UpdateOperationRequest
 import app.ledgera.model.UpdateTransferRequest
@@ -65,6 +66,9 @@ interface DebtsEngine {
     suspend fun listDebts(): List<DebtItem>
     suspend fun listDebtPayments(debtId: Long): List<DebtPaymentItem>
     suspend fun createDebt(request: CreateDebtRequest): DebtItem
+    suspend fun registerDebtPayment(request: RegisterDebtPaymentRequest): DebtPaymentItem
+    suspend fun registerDebtWriteOff(request: RegisterDebtPaymentRequest): DebtPaymentItem
+    suspend fun closeDebt(request: RegisterDebtPaymentRequest): DebtItem
 }
 
 interface EngineAdapter : RuntimeEngine, OperationsEngine, SettingsEngine, DebtsEngine

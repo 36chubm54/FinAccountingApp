@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.ledgera.model.DebtActionDraft
 import app.ledgera.model.DebtDraft
 import app.ledgera.model.DebtItem
 import app.ledgera.model.DebtPaymentItem
@@ -68,6 +69,9 @@ fun DebtsScreen(viewModel: DebtsViewModel, modifier: Modifier = Modifier) {
                 DebtHistoryCard(
                     selectedDebt = state.debts.firstOrNull { it.id == state.selectedDebtId },
                     history = state.selectedHistory,
+                    onPay = { viewModel.openDebtAction("payment") },
+                    onWriteOff = { viewModel.openDebtAction("write_off") },
+                    onClose = { viewModel.openDebtAction("close") },
                     modifier = Modifier.weight(0.42f),
                 )
             }
@@ -103,6 +107,19 @@ fun DebtsScreen(viewModel: DebtsViewModel, modifier: Modifier = Modifier) {
                 onDraftChange = viewModel::updateDraft,
                 onSubmit = viewModel::createDebt,
                 onCancel = viewModel::closeCreateDialog,
+            )
+        }
+
+        state.actionDraft?.let { draft ->
+            DebtActionDialog(
+                draft = draft,
+                wallets = state.wallets,
+                selectedDebt = state.debts.firstOrNull { it.id == draft.debtId },
+                engineError = state.error,
+                submitting = state.actionInProgress,
+                onDraftChange = viewModel::updateActionDraft,
+                onSubmit = viewModel::submitDebtAction,
+                onCancel = viewModel::closeActionDialog,
             )
         }
     }
@@ -170,11 +187,26 @@ private fun DebtRow(debt: DebtItem, selected: Boolean, onClick: () -> Unit) {
 private fun DebtHistoryCard(
     selectedDebt: DebtItem?,
     history: List<DebtPaymentItem>,
+    onPay: () -> Unit,
+    onWriteOff: () -> Unit,
+    onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Card(modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("History", style = MaterialTheme.typography.titleMedium)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("History", style = MaterialTheme.typography.titleMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val actionsEnabled = selectedDebt != null && selectedDebt.status != "closed"
+                    OutlinedButton(onClick = onPay, enabled = actionsEnabled) { Text("Pay") }
+                    OutlinedButton(onClick = onWriteOff, enabled = actionsEnabled) { Text("Write off") }
+                    Button(onClick = onClose, enabled = actionsEnabled) { Text("Close") }
+                }
+            }
             if (selectedDebt == null) {
                 Text("Select a debt or loan to view history.")
             } else if (history.isEmpty()) {
@@ -299,6 +331,102 @@ private fun CreateDebtDialog(
         confirmButton = {
             Button(onClick = onSubmit, enabled = !submitting && validationError == null) {
                 Text(if (submitting) "Saving..." else "Create")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel, enabled = !submitting) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+private fun DebtActionDialog(
+    draft: DebtActionDraft,
+    wallets: List<WalletOption>,
+    selectedDebt: DebtItem?,
+    engineError: String?,
+    submitting: Boolean,
+    onDraftChange: (DebtActionDraft) -> Unit,
+    onSubmit: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val requiresWallet = draft.action != "write_off"
+    val validationError = DebtsValidation.validateActionDraft(draft, requiresWallet)
+    val title = when (draft.action) {
+        "write_off" -> "Write off debt"
+        "close" -> "Close debt"
+        else -> "Register payment"
+    }
+    AlertDialog(
+        onDismissRequest = { if (!submitting) onCancel() },
+        title = { Text(title) },
+        text = {
+            Column(
+                Modifier.widthIn(min = 420.dp, max = 520.dp)
+                    .heightIn(max = 560.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                selectedDebt?.let {
+                    Text("${it.contactName} · ${it.remainingAmount} ${it.currency} remaining")
+                }
+                if (requiresWallet) {
+                    Text("Wallet", fontWeight = FontWeight.SemiBold)
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        wallets.forEach { wallet ->
+                            val selected = wallet.id == draft.walletId
+                            if (selected) {
+                                Button(onClick = { onDraftChange(draft.copy(walletId = wallet.id)) }) {
+                                    Text("${wallet.name} · ${wallet.currency}")
+                                }
+                            } else {
+                                OutlinedButton(onClick = { onDraftChange(draft.copy(walletId = wallet.id)) }) {
+                                    Text("${wallet.name} · ${wallet.currency}")
+                                }
+                            }
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = draft.paymentDate,
+                    onValueChange = { onDraftChange(draft.copy(paymentDate = it.lineSafe())) },
+                    label = { Text("Date YYYY-MM-DD") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = draft.amount,
+                    onValueChange = {
+                        if (draft.action != "close") {
+                            onDraftChange(draft.copy(amount = it.lineSafe()))
+                        }
+                    },
+                    label = { Text("Amount") },
+                    singleLine = true,
+                    readOnly = draft.action == "close",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (draft.action != "write_off") {
+                    OutlinedTextField(
+                        value = draft.description,
+                        onValueChange = { onDraftChange(draft.copy(description = it.lineSafe())) },
+                        label = { Text("Description") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                validationError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                engineError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onSubmit, enabled = !submitting && validationError == null) {
+                Text(if (submitting) "Saving..." else "Save")
             }
         },
         dismissButton = {

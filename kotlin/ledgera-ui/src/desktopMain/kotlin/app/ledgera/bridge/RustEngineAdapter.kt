@@ -8,6 +8,7 @@ import app.ledgera.engine.LedgeraEngine
 import app.ledgera.engine.OperationExportResultDto
 import app.ledgera.engine.OperationImportResultDto
 import app.ledgera.engine.RecordFilterDto
+import app.ledgera.engine.RegisterDebtPaymentRequest as NativeRegisterDebtPaymentRequest
 import app.ledgera.engine.UpdateRecordRequest as NativeUpdateRecordRequest
 import app.ledgera.engine.UpdateTransferRequest as NativeUpdateTransferRequest
 import app.ledgera.model.AuditFinding
@@ -24,6 +25,7 @@ import app.ledgera.model.OperationDeleteResult
 import app.ledgera.model.OperationExportResult
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
+import app.ledgera.model.RegisterDebtPaymentRequest
 import app.ledgera.model.TransferDetails
 import app.ledgera.model.UpdateOperationRequest
 import app.ledgera.model.UpdateTransferRequest
@@ -284,17 +286,7 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
     }
 
     override suspend fun listDebtPayments(debtId: Long): List<DebtPaymentItem> = withContext(Dispatchers.IO) {
-        engine.listDebtPayments(debtId).map {
-            DebtPaymentItem(
-                id = it.id,
-                debtId = it.debtId,
-                recordId = it.recordId,
-                operationType = it.operationType,
-                principalPaid = it.principalPaid,
-                isWriteOff = it.isWriteOff,
-                paymentDate = it.paymentDate,
-            )
-        }
+        engine.listDebtPayments(debtId).map(::toDebtPaymentItem)
     }
 
     override suspend fun createDebt(request: CreateDebtRequest): DebtItem = withContext(Dispatchers.IO) {
@@ -309,19 +301,22 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
                 description = request.description,
             )
         ).let {
-            DebtItem(
-                id = it.id,
-                contactName = it.contactName,
-                kind = it.kind,
-                totalAmount = it.totalAmount,
-                remainingAmount = it.remainingAmount,
-                currency = it.currency,
-                interestRate = it.interestRate,
-                status = it.status,
-                createdAt = it.createdAt,
-                closedAt = it.closedAt,
-            )
+            toDebtItem(it)
         }
+    }
+
+    override suspend fun registerDebtPayment(request: RegisterDebtPaymentRequest): DebtPaymentItem =
+        withContext(Dispatchers.IO) {
+            engine.registerDebtPayment(request.toNative()).let(::toDebtPaymentItem)
+        }
+
+    override suspend fun registerDebtWriteOff(request: RegisterDebtPaymentRequest): DebtPaymentItem =
+        withContext(Dispatchers.IO) {
+            engine.registerDebtWriteOff(request.toNative()).let(::toDebtPaymentItem)
+        }
+
+    override suspend fun closeDebt(request: RegisterDebtPaymentRequest): DebtItem = withContext(Dispatchers.IO) {
+        engine.closeDebt(request.toNative()).let(::toDebtItem)
     }
 
     override suspend fun runAudit(): List<AuditFinding> = withContext(Dispatchers.IO) {
@@ -363,6 +358,40 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
             rateAtOperation = transfer.rateAtOperation,
             amountBase = transfer.amountBase,
             description = transfer.description,
+        )
+
+    private fun toDebtItem(debt: app.ledgera.engine.DebtDto): DebtItem =
+        DebtItem(
+            id = debt.id,
+            contactName = debt.contactName,
+            kind = debt.kind,
+            totalAmount = debt.totalAmount,
+            remainingAmount = debt.remainingAmount,
+            currency = debt.currency,
+            interestRate = debt.interestRate,
+            status = debt.status,
+            createdAt = debt.createdAt,
+            closedAt = debt.closedAt,
+        )
+
+    private fun toDebtPaymentItem(payment: app.ledgera.engine.DebtPaymentDto): DebtPaymentItem =
+        DebtPaymentItem(
+            id = payment.id,
+            debtId = payment.debtId,
+            recordId = payment.recordId,
+            operationType = payment.operationType,
+            principalPaid = payment.principalPaid,
+            isWriteOff = payment.isWriteOff,
+            paymentDate = payment.paymentDate,
+        )
+
+    private fun RegisterDebtPaymentRequest.toNative(): NativeRegisterDebtPaymentRequest =
+        NativeRegisterDebtPaymentRequest(
+            debtId = debtId,
+            walletId = walletId,
+            amount = amount,
+            paymentDate = paymentDate,
+            description = description,
         )
 
     private fun OperationImportResultDto.toModel(): OperationImportResult =

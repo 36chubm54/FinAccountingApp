@@ -36,10 +36,11 @@ Current status:
   import/export, and commission editing remain later Operations slices.
 - Settings wallet listing and active base-currency wallet creation are wired,
   which unlocks manual transfer-creator smoke testing on copied ledger DBs.
-- Debts foundation wiring is started: Kotlin Desktop can list debts/loans,
-  show selected debt payment history, and create base-currency debts/loans
-  through Rust/Kotlin UniFFI while payment, write-off, close, delete, and
-  import/export stay pending follow-up slices.
+- Debts wiring is moving in phased slices: Kotlin Desktop can list debts/loans,
+  show selected debt payment history, create base-currency debts/loans, register
+  payments, register write-offs, and close debts/loans through Rust/Kotlin
+  UniFFI while delete, debt-card editing, and import/export stay pending
+  follow-up slices.
 - Remaining beta.1 work is capability wiring and screen parity for the other
   Operations flows and the other sections through Rust/Kotlin UniFFI, not a
   Kotlin-to-Python runtime bridge.

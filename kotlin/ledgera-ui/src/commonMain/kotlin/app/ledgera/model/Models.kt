@@ -196,6 +196,15 @@ data class DebtDraft(
     val description: String = "",
 )
 
+data class DebtActionDraft(
+    val action: String = "payment",
+    val debtId: Long = 0,
+    val walletId: Long = 0,
+    val amount: String = "",
+    val paymentDate: String = "",
+    val description: String = "",
+)
+
 data class CreateDebtRequest(
     val kind: String,
     val contactName: String,
@@ -203,6 +212,14 @@ data class CreateDebtRequest(
     val amount: String,
     val currency: String,
     val createdAt: String,
+    val description: String,
+)
+
+data class RegisterDebtPaymentRequest(
+    val debtId: Long,
+    val walletId: Long?,
+    val amount: String,
+    val paymentDate: String,
     val description: String,
 )
 
