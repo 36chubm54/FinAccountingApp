@@ -1858,6 +1858,19 @@ mod tests {
         assert_eq!(payment.operation_type, "debt_repay");
         assert_eq!(payment.principal_paid, "20.00");
         assert!(payment.record_id.is_some());
+        assert!(
+            engine
+                .register_debt_payment(RegisterDebtPaymentRequest {
+                    debt_id: debt.id,
+                    wallet_id: Some(1),
+                    amount: "40.00".to_owned(),
+                    payment_date: "2026-03-06".to_owned(),
+                    description: "too much".to_owned(),
+                })
+                .expect_err("overpayment")
+                .to_string()
+                .contains("exceeds")
+        );
 
         let write_off = engine
             .register_debt_write_off(RegisterDebtPaymentRequest {

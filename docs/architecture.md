@@ -98,6 +98,10 @@ Current Kotlin/Rust contract:
   history, base-currency debt/loan creation with Rust-owned linked cashflow
   rows, payment registration, write-offs, and close-by-payment flows; delete,
   debt import/export, and debt-card editing remain separate beta.1 slices
+- Debts payment, write-off, and close actions keep remaining-balance validation,
+  linked cashflow row writes, debt payment inserts, and debt status updates in a
+  single Rust storage transaction; closing an already closed debt remains
+  idempotent to match the Python legacy contract
 - Kotlin Operations rejects transfer-linked and debt-linked record edits at the
   Rust storage boundary; transfer-linked mirror rows are grouped into one
   transfer journal row with source/target wallet direction and transfer-level

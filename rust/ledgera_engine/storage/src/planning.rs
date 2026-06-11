@@ -1826,12 +1826,6 @@ pub fn debt_register_payment_validated(
 ) -> StorageResult<DebtPaymentPayload> {
     let amount_minor = to_minor_units(&payload.amount)?;
     let mut conn = open_write_connection(db_path)?;
-    let debt = debt_from_conn(&conn, payload.debt_id)?;
-    if debt.status == "closed" || debt.remaining_amount_minor <= 0 {
-        return Err("Debt is already closed".to_owned());
-    }
-    let payment_amount_minor =
-        debt_validate_payment_amount(debt.remaining_amount_minor, amount_minor)?;
     let payment_date = payload.payment_date.trim();
     validate_debt_date(payment_date)?;
     let wallet_id = payload
@@ -1840,6 +1834,12 @@ pub fn debt_register_payment_validated(
         .ok_or_else(|| "Wallet is required".to_owned())?;
 
     let tx = conn.transaction().map_err(sqlite_err)?;
+    let debt = debt_from_conn(&tx, payload.debt_id)?;
+    if debt.status == "closed" || debt.remaining_amount_minor <= 0 {
+        return Err("Debt is already closed".to_owned());
+    }
+    let payment_amount_minor =
+        debt_validate_payment_amount(debt.remaining_amount_minor, amount_minor)?;
     let allow_negative = active_debt_wallet_in_tx(&tx, wallet_id)?;
     if debt.kind == "debt" && !allow_negative {
         let balance_minor = wallet_balance_minor_for_debt_in_tx(&tx, wallet_id)?;
@@ -1847,7 +1847,6 @@ pub fn debt_register_payment_validated(
             return Err("Insufficient funds in wallet".to_owned());
         }
     }
-    drop(tx);
 
     let amount_base = minor_to_money_value(payment_amount_minor);
     let payment = DebtPaymentPayload {
@@ -1890,7 +1889,11 @@ pub fn debt_register_payment_validated(
         },
         period: None,
     };
-    debt_register_payment(db_path, debt.id, &payment, Some(&record))
+    let payment_id = debt_register_payment_in_tx(&tx, debt.id, &payment, Some(&record))?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    let conn = open_write_connection(db_path)?;
+    debt_payment_from_conn(&conn, payment_id)
 }
 
 pub fn debt_register_write_off_validated(
@@ -1898,15 +1901,16 @@ pub fn debt_register_write_off_validated(
     payload: &DebtPaymentRequestPayload,
 ) -> StorageResult<DebtPaymentPayload> {
     let amount_minor = to_minor_units(&payload.amount)?;
-    let conn = open_write_connection(db_path)?;
-    let debt = debt_from_conn(&conn, payload.debt_id)?;
+    let mut conn = open_write_connection(db_path)?;
+    let payment_date = payload.payment_date.trim();
+    validate_debt_date(payment_date)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    let debt = debt_from_conn(&tx, payload.debt_id)?;
     if debt.status == "closed" || debt.remaining_amount_minor <= 0 {
         return Err("Debt is already closed".to_owned());
     }
     let payment_amount_minor =
         debt_validate_payment_amount(debt.remaining_amount_minor, amount_minor)?;
-    let payment_date = payload.payment_date.trim();
-    validate_debt_date(payment_date)?;
     let payment = DebtPaymentPayload {
         id: 0,
         debt_id: debt.id,
@@ -1916,27 +1920,80 @@ pub fn debt_register_write_off_validated(
         is_write_off: true,
         payment_date: payment_date.to_owned(),
     };
-    debt_register_payment(db_path, debt.id, &payment, None)
+    let payment_id = debt_register_payment_in_tx(&tx, debt.id, &payment, None)?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    let conn = open_write_connection(db_path)?;
+    debt_payment_from_conn(&conn, payment_id)
 }
 
 pub fn debt_close_validated(
     db_path: &str,
     payload: &DebtPaymentRequestPayload,
 ) -> StorageResult<DebtPayload> {
-    let conn = open_write_connection(db_path)?;
-    let debt = debt_from_conn(&conn, payload.debt_id)?;
+    let mut conn = open_write_connection(db_path)?;
+    let payment_date = payload.payment_date.trim();
+    validate_debt_date(payment_date)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    let debt = debt_from_conn(&tx, payload.debt_id)?;
     if debt.status == "closed" || debt.remaining_amount_minor <= 0 {
         return Ok(debt);
     }
-    drop(conn);
-    let close_payload = DebtPaymentRequestPayload {
-        debt_id: payload.debt_id,
-        wallet_id: payload.wallet_id,
-        amount: minor_to_money_value(debt.remaining_amount_minor).to_string(),
-        payment_date: payload.payment_date.clone(),
-        description: payload.description.clone(),
+    let wallet_id = payload
+        .wallet_id
+        .filter(|wallet_id| *wallet_id > 0)
+        .ok_or_else(|| "Wallet is required".to_owned())?;
+    let allow_negative = active_debt_wallet_in_tx(&tx, wallet_id)?;
+    if debt.kind == "debt" && !allow_negative {
+        let balance_minor = wallet_balance_minor_for_debt_in_tx(&tx, wallet_id)?;
+        if balance_minor - debt.remaining_amount_minor < 0 {
+            return Err("Insufficient funds in wallet".to_owned());
+        }
+    }
+    let amount_base = minor_to_money_value(debt.remaining_amount_minor);
+    let payment = DebtPaymentPayload {
+        id: 0,
+        debt_id: debt.id,
+        record_id: None,
+        operation_type: if debt.kind == "loan" {
+            "loan_collect".to_owned()
+        } else {
+            "debt_repay".to_owned()
+        },
+        principal_paid_minor: debt.remaining_amount_minor,
+        is_write_off: false,
+        payment_date: payment_date.to_owned(),
     };
-    debt_register_payment_validated(db_path, &close_payload)?;
+    let record = DebtRecordPayload {
+        record_type: if debt.kind == "loan" {
+            "income".to_owned()
+        } else {
+            "expense".to_owned()
+        },
+        date: payment_date.to_owned(),
+        wallet_id,
+        amount_original: amount_base,
+        amount_original_minor: debt.remaining_amount_minor,
+        currency: debt.currency.clone(),
+        rate_at_operation: 1.0,
+        rate_at_operation_text: "1".to_owned(),
+        amount_base,
+        amount_base_minor: debt.remaining_amount_minor,
+        category: if debt.kind == "loan" {
+            "Loan payment".to_owned()
+        } else {
+            "Debt payment".to_owned()
+        },
+        description: if payload.description.trim().is_empty() {
+            debt.contact_name
+        } else {
+            payload.description.trim().to_owned()
+        },
+        period: None,
+    };
+    debt_register_payment_in_tx(&tx, debt.id, &payment, Some(&record))?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
     let conn = open_write_connection(db_path)?;
     debt_from_conn(&conn, payload.debt_id)
 }
@@ -1966,8 +2023,30 @@ pub fn debt_register_payment(
     payment_record: Option<&DebtRecordPayload>,
 ) -> StorageResult<DebtPaymentPayload> {
     let mut conn = open_write_connection(db_path)?;
-    let debt = debt_from_conn(&conn, debt_id)?;
     let tx = conn.transaction().map_err(sqlite_err)?;
+    let payment_id = debt_register_payment_in_tx(&tx, debt_id, payment, payment_record)?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    let conn = open_write_connection(db_path)?;
+    debt_payment_from_conn(&conn, payment_id)
+}
+
+fn debt_register_payment_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    debt_id: i64,
+    payment: &DebtPaymentPayload,
+    payment_record: Option<&DebtRecordPayload>,
+) -> StorageResult<i64> {
+    if payment.debt_id != debt_id {
+        return Err("Payment debt id does not match target debt".to_owned());
+    }
+    let debt = debt_from_conn(tx, debt_id)?;
+    if debt.status == "closed" || debt.remaining_amount_minor <= 0 {
+        return Err("Debt is already closed".to_owned());
+    }
+    let payment_amount_minor =
+        debt_validate_payment_amount(debt.remaining_amount_minor, payment.principal_paid_minor)?;
+    validate_debt_date(payment.payment_date.as_str())?;
     let record_id = if let Some(record) = payment_record {
         Some(insert_debt_record_row(&tx, record, debt_id)?)
     } else {
@@ -1975,7 +2054,7 @@ pub fn debt_register_payment(
     };
     let payment_id = insert_debt_payment_row(&tx, payment, debt_id, record_id, false)?;
     let remaining_amount_minor =
-        (debt.remaining_amount_minor - payment.principal_paid_minor).max(0);
+        debt.remaining_amount_minor - payment_amount_minor;
     let is_closed = remaining_amount_minor == 0;
     tx.execute(
         "UPDATE debts
@@ -1993,10 +2072,7 @@ pub fn debt_register_payment(
         ],
     )
     .map_err(sqlite_err)?;
-    tx.commit().map_err(sqlite_err)?;
-    storage_clear_read_connection_cache();
-    let conn = open_write_connection(db_path)?;
-    debt_payment_from_conn(&conn, payment_id)
+    Ok(payment_id)
 }
 
 pub fn debt_delete_payment(
@@ -2922,6 +2998,16 @@ mod tests {
             debt_register_payment_validated(&db_path, &request("300.00", Some(1), "2026-03-05"))
                 .expect_err("too much")
                 .contains("exceeds")
+        );
+        assert!(
+            debt_register_payment(&db_path, debt.id, &test_payment(debt.id, 30_000, false), None)
+                .expect_err("raw too much")
+                .contains("exceeds")
+        );
+        assert!(
+            debt_register_payment(&db_path, debt.id, &test_payment(debt.id + 1, 1_000, false), None)
+                .expect_err("raw mismatch")
+                .contains("does not match")
         );
         assert!(
             debt_register_payment_validated(&db_path, &request("1.00", Some(1), "2999-01-01"))

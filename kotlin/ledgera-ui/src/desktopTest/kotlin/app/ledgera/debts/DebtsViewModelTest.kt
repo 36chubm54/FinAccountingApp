@@ -161,6 +161,20 @@ class DebtsViewModelTest {
         assertEquals("Debt closed (id=1)", viewModel.state.value.notice)
         assertEquals("closed", viewModel.state.value.debts.single().status)
     }
+
+    @Test
+    fun closeEngineErrorKeepsDialogOpen() {
+        val engine = FakeDebtsEngine(actionError = IllegalStateException("close failed"))
+        val viewModel = DebtsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.openDebtAction("close")
+        viewModel.submitDebtAction()
+
+        assertEquals("close failed", viewModel.state.value.error)
+        assertEquals("close", viewModel.state.value.actionDraft?.action)
+        assertNull(viewModel.state.value.notice)
+    }
 }
 
 private class FakeDebtsEngine(

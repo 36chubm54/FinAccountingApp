@@ -406,7 +406,7 @@ private fun DebtActionDialog(
                             onDraftChange(draft.copy(amount = it.lineSafe()))
                         }
                     },
-                    label = { Text("Amount") },
+                    label = { Text(if (draft.action == "close") "Remaining amount" else "Amount") },
                     singleLine = true,
                     readOnly = draft.action == "close",
                     modifier = Modifier.fillMaxWidth(),
