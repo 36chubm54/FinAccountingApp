@@ -1,5 +1,7 @@
 package app.ledgera.shell
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,7 +12,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
@@ -22,6 +26,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.ledgera.debts.DebtsScreen
@@ -33,6 +38,27 @@ import app.ledgera.operations.OperationsViewModel
 import app.ledgera.settings.SettingsScreen
 import app.ledgera.settings.SettingsViewModel
 import app.ledgera.ui.ToastHost
+import app.ledgera.resources.Res
+import app.ledgera.resources.ic_analytics
+import app.ledgera.resources.ic_analytics_selected
+import app.ledgera.resources.ic_budget
+import app.ledgera.resources.ic_budget_selected
+import app.ledgera.resources.ic_dashboard
+import app.ledgera.resources.ic_dashboard_selected
+import app.ledgera.resources.ic_debts
+import app.ledgera.resources.ic_debts_selected
+import app.ledgera.resources.ic_distribution
+import app.ledgera.resources.ic_distribution_selected
+import app.ledgera.resources.ic_mandatory
+import app.ledgera.resources.ic_mandatory_selected
+import app.ledgera.resources.ic_operations
+import app.ledgera.resources.ic_operations_selected
+import app.ledgera.resources.ic_reports
+import app.ledgera.resources.ic_reports_selected
+import app.ledgera.resources.ic_settings
+import app.ledgera.resources.ic_settings_selected
+import org.jetbrains.compose.resources.DrawableResource
+import org.jetbrains.compose.resources.painterResource
 
 @Composable
 fun AppShell(
@@ -70,19 +96,25 @@ fun AppShell(
     ) {
         Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             NavigationRail(
-                modifier = Modifier.fillMaxHeight().width(176.dp),
+                modifier = Modifier.fillMaxHeight().width(110.dp),
                 header = {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("Ledgera", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         Text("Beta.1", style = MaterialTheme.typography.labelMedium)
                     }
                 },
             ) {
                 state.sections.forEach { section ->
+                    val selected = state.selectedSection == section
                     NavigationRailItem(
-                        selected = state.selectedSection == section,
+                        selected = selected,
                         onClick = { viewModel.select(section) },
-                        icon = { Text(section.label.take(1), fontWeight = FontWeight.Bold) },
+                        icon = {
+                            NavigationIcon(
+                                icons = section.iconResources(),
+                                selected = selected,
+                            )
+                        },
                         label = { Text(section.label) },
                         alwaysShowLabel = true,
                     )
@@ -116,6 +148,44 @@ fun AppShell(
 
 private fun String.isMeaningfulStatus(): Boolean =
     trim().isNotEmpty() && !equals("ready", ignoreCase = true)
+
+private data class NavigationIconResources(
+    val outline: DrawableResource,
+    val solid: DrawableResource,
+)
+
+private fun DesktopSection.iconResources(): NavigationIconResources = when (this) {
+    DesktopSection.Operations -> NavigationIconResources(Res.drawable.ic_operations, Res.drawable.ic_operations_selected)
+    DesktopSection.Reports -> NavigationIconResources(Res.drawable.ic_reports, Res.drawable.ic_reports_selected)
+    DesktopSection.Analytics -> NavigationIconResources(Res.drawable.ic_analytics, Res.drawable.ic_analytics_selected)
+    DesktopSection.Dashboard -> NavigationIconResources(Res.drawable.ic_dashboard, Res.drawable.ic_dashboard_selected)
+    DesktopSection.Budget -> NavigationIconResources(Res.drawable.ic_budget, Res.drawable.ic_budget_selected)
+    DesktopSection.Debts -> NavigationIconResources(Res.drawable.ic_debts, Res.drawable.ic_debts_selected)
+    DesktopSection.Distribution -> NavigationIconResources(Res.drawable.ic_distribution, Res.drawable.ic_distribution_selected)
+    DesktopSection.Mandatory -> NavigationIconResources(Res.drawable.ic_mandatory, Res.drawable.ic_mandatory_selected)
+    DesktopSection.Settings -> NavigationIconResources(Res.drawable.ic_settings, Res.drawable.ic_settings_selected)
+}
+
+@Composable
+private fun NavigationIcon(icons: NavigationIconResources, selected: Boolean) {
+    val solidAlpha by animateFloatAsState(
+        targetValue = if (selected) 1f else 0f,
+        animationSpec = tween(durationMillis = 160),
+        label = "navigation-icon-solid-alpha",
+    )
+    Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
+        Icon(
+            painter = painterResource(icons.outline),
+            contentDescription = null,
+            modifier = Modifier.size(22.dp).alpha(1f - solidAlpha),
+        )
+        Icon(
+            painter = painterResource(icons.solid),
+            contentDescription = null,
+            modifier = Modifier.size(22.dp).alpha(solidAlpha),
+        )
+    }
+}
 
 @Composable
 private fun StatusBanner(message: String, error: String?) {

@@ -19,7 +19,9 @@ kotlin {
             dependencies {
                 implementation(compose.runtime)
                 implementation(compose.foundation)
+                implementation(compose.animation)
                 implementation(compose.material3)
+                implementation(compose.components.resources)
                 implementation(libs.kotlinx.coroutines.core)
             }
         }
@@ -139,6 +141,10 @@ tasks.withType<JavaExec>().configureEach {
     if (name == "desktopRun") {
         mainClass.set("app.ledgera.MainKt")
     }
+}
+
+compose.resources {
+    packageOfResClass = "app.ledgera.resources"
 }
 
 compose.desktop {
