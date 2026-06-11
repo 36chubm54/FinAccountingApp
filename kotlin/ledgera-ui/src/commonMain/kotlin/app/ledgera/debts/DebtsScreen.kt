@@ -1,5 +1,10 @@
 package app.ledgera.debts
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +35,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -77,25 +85,11 @@ fun DebtsScreen(viewModel: DebtsViewModel, modifier: Modifier = Modifier) {
             }
         }
 
-        Column(
+        DebtCreateFab(
             modifier = Modifier.align(Alignment.BottomEnd).padding(32.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            FloatingActionButton(
-                onClick = { viewModel.openCreateDialog("loan") },
-                containerColor = MaterialTheme.colorScheme.secondary,
-                contentColor = MaterialTheme.colorScheme.onSecondary,
-            ) {
-                Text("Loan", fontWeight = FontWeight.Bold)
-            }
-            FloatingActionButton(
-                onClick = { viewModel.openCreateDialog("debt") },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ) {
-                Text("Debt", fontWeight = FontWeight.Bold)
-            }
-        }
+            onCreateDebt = { viewModel.openCreateDialog("debt") },
+            onCreateLoan = { viewModel.openCreateDialog("loan") },
+        )
 
         state.createDraft?.let { draft ->
             CreateDebtDialog(
@@ -121,6 +115,59 @@ fun DebtsScreen(viewModel: DebtsViewModel, modifier: Modifier = Modifier) {
                 onSubmit = viewModel::submitDebtAction,
                 onCancel = viewModel::closeActionDialog,
             )
+        }
+    }
+}
+
+@Composable
+private fun DebtCreateFab(
+    onCreateDebt: () -> Unit,
+    onCreateLoan: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        AnimatedVisibility(
+            visible = expanded,
+            enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
+            exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 }),
+        ) {
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                FloatingActionButton(
+                    onClick = {
+                        expanded = false
+                        onCreateLoan()
+                    },
+                    containerColor = MaterialTheme.colorScheme.tertiary,
+                    contentColor = MaterialTheme.colorScheme.onTertiary,
+                ) {
+                    Text("Loan", fontWeight = FontWeight.Bold)
+                }
+                FloatingActionButton(
+                    onClick = {
+                        expanded = false
+                        onCreateDebt()
+                    },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ) {
+                    Text("Debt", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        FloatingActionButton(
+            onClick = { expanded = !expanded },
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+        ) {
+            Text(if (expanded) "×" else "+", style = MaterialTheme.typography.headlineMedium)
         }
     }
 }
