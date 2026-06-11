@@ -953,6 +953,7 @@ pub fn create_transfer(
         .get(&transfer_id)
         .copied()
         .unwrap_or(transfer_id);
+    normalize_record_ids_in_tx(&tx)?;
 
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
@@ -1176,6 +1177,7 @@ pub fn delete_transfer(db_path: &str, transfer_id: i64) -> StorageResult<bool> {
         return Err(format!("Transfer not found: {transfer_id}"));
     }
     delete_operations_in_tx(&tx, &[], &[], &[transfer_id], 0)?;
+    normalize_record_ids_in_tx(&tx)?;
 
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
@@ -1199,6 +1201,7 @@ pub fn delete_all_operations(db_path: &str) -> StorageResult<OperationDeleteResu
         &transfer_ids,
         skipped_records,
     )?;
+    normalize_record_ids_in_tx(&tx)?;
 
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
@@ -1234,6 +1237,7 @@ pub fn delete_operations_selection(
         &selected_transfer_ids,
         0,
     )?;
+    normalize_record_ids_in_tx(&tx)?;
 
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
@@ -1267,6 +1271,7 @@ const MAX_OPERATION_CSV_ROWS: usize = 200_000;
 struct ParsedOperationCsvRecord {
     source_record_id: Option<i64>,
     related_debt_id: Option<i64>,
+    debt_link_kind: Option<DebtLinkImportKind>,
     record_type: String,
     date: String,
     wallet_id: i64,
@@ -1302,6 +1307,7 @@ struct OperationCsvPlan {
     imported: i64,
     skipped: i64,
     errors: Vec<String>,
+    has_blocking_errors: bool,
 }
 
 pub fn preview_import_records_csv(
@@ -1353,12 +1359,32 @@ fn import_operation_plan(
     plan: OperationCsvPlan,
 ) -> StorageResult<OperationImportResult> {
     if plan.imported == 0 {
+        if plan.has_blocking_errors {
+            let message = plan
+                .errors
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "Import contains debt-linked integrity errors".to_owned());
+            return Err(format!(
+                "Import contains debt-linked integrity errors: {message}"
+            ));
+        }
         return Ok(OperationImportResult {
             imported: 0,
             skipped: plan.skipped,
             errors: plan.errors,
             dry_run: false,
         });
+    }
+    if plan.has_blocking_errors {
+        let message = plan
+            .errors
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "Import contains debt-linked integrity errors".to_owned());
+        return Err(format!(
+            "Import contains debt-linked integrity errors: {message}"
+        ));
     }
 
     let tx = conn.transaction().map_err(sqlite_err)?;
@@ -1446,18 +1472,20 @@ fn import_operation_plan(
                 imported_records.push((record_id, record.description.clone()));
                 if let Some(debt_id) = record.related_debt_id
                     && let Some(source_record_id) = record.source_record_id
+                    && record.debt_link_kind.is_some()
                 {
                     debt_record_remaps.push(DebtRecordRemap {
                         old_record_id: source_record_id,
                         new_record_id: record_id,
                         debt_id,
+                        remap_payment: record.debt_link_kind == Some(DebtLinkImportKind::Payment),
                     });
                 }
             }
         }
     }
 
-    remap_debt_payment_records_in_tx(&tx, &debt_record_remaps)?;
+    replace_debt_linked_records_in_tx(&tx, &debt_record_remaps)?;
 
     if !transfer_id_map.is_empty() {
         let normalized_ids = normalize_transfer_ids_in_tx(&tx)?;
@@ -1478,8 +1506,10 @@ fn import_operation_plan(
             }
         }
     }
+    normalize_record_ids_in_tx(&tx)?;
     refresh_tag_metrics_in_tx(&tx)?;
     prune_orphan_tags_in_tx(&tx)?;
+    normalize_record_ids_in_tx(&tx)?;
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
 
@@ -1683,6 +1713,7 @@ fn parse_operation_tabular_import(
             continue;
         }
         let row = parse_operation_csv_row(
+            conn,
             &values,
             &row_label,
             &base_currency,
@@ -1702,12 +1733,16 @@ fn parse_operation_tabular_import(
                     plan.errors.push(format!(
                         "{row_label}: duplicate debt-linked record_id {source_record_id}"
                     ));
+                    plan.has_blocking_errors = true;
                     continue;
                 }
                 plan.rows.push(row);
                 plan.imported += 1;
             }
             Err(error) => {
+                if is_blocking_debt_linked_import_error(&error) {
+                    plan.has_blocking_errors = true;
+                }
                 plan.skipped += 1;
                 plan.errors.push(error);
             }
@@ -1722,13 +1757,21 @@ enum ParsedOperationCsvRow {
     Transfer(ParsedOperationCsvTransfer),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DebtLinkImportKind {
+    Opening,
+    Payment,
+}
+
 struct DebtRecordRemap {
     old_record_id: i64,
     new_record_id: i64,
     debt_id: i64,
+    remap_payment: bool,
 }
 
 fn parse_operation_csv_row(
+    conn: &Connection,
     values: &HashMap<String, String>,
     row_label: &str,
     base_currency: &str,
@@ -1803,9 +1846,22 @@ fn parse_operation_csv_row(
     let (_amount_base_text, amount_base, amount_base_minor) =
         parse_positive_money(values, "amount_base", row_label)?;
     let (rate_text, rate) = parse_positive_rate(values, "rate_at_operation", row_label)?;
+    let debt_link_kind = match (related_debt_id, source_record_id) {
+        (Some(debt_id), Some(record_id)) => Some(validate_debt_linked_import_source_in_conn(
+            conn,
+            row_label,
+            record_id,
+            debt_id,
+            &row_type,
+            &date,
+            amount_base_minor,
+        )?),
+        _ => None,
+    };
     Ok(ParsedOperationCsvRow::Record(ParsedOperationCsvRecord {
         source_record_id,
         related_debt_id,
+        debt_link_kind,
         record_type: row_type,
         date,
         wallet_id,
@@ -1820,6 +1876,143 @@ fn parse_operation_csv_row(
         description,
         tags: parse_csv_tags(&csv_value(values, "tags")),
     }))
+}
+
+fn is_blocking_debt_linked_import_error(error: &str) -> bool {
+    error.contains("debt not found")
+        || error.contains("debt-linked")
+        || error.contains("Debt-linked")
+        || error.contains("Debt payment")
+}
+
+fn validate_debt_linked_import_source_in_conn(
+    conn: &Connection,
+    row_label: &str,
+    source_record_id: i64,
+    debt_id: i64,
+    imported_record_type: &str,
+    imported_date: &str,
+    imported_amount_base_minor: i64,
+) -> StorageResult<DebtLinkImportKind> {
+    let debt = conn
+        .query_row(
+            "SELECT kind, total_amount_minor, created_at
+             FROM debts
+             WHERE id = ?1",
+            [debt_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(sqlite_err)?
+        .ok_or_else(|| format!("{row_label}: debt not found ({debt_id})"))?;
+    let old_record = conn
+        .query_row(
+            "SELECT type, transfer_id, related_debt_id
+             FROM records
+             WHERE id = ?1",
+            [source_record_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<i64>>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(sqlite_err)?;
+    let Some((source_record_type, transfer_id, related_debt_id)) = old_record else {
+        return Err(format!(
+            "{row_label}: debt-linked source record not found ({source_record_id})"
+        ));
+    };
+    if transfer_id.is_some()
+        || related_debt_id != Some(debt_id)
+        || (source_record_type != "income" && source_record_type != "expense")
+    {
+        return Err(format!(
+            "{row_label}: debt-linked source record {source_record_id} does not belong to debt {debt_id}"
+        ));
+    }
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT operation_type, principal_paid_minor, is_write_off, payment_date
+             FROM debt_payments
+             WHERE debt_id = ?1 AND record_id = ?2
+             ORDER BY id",
+        )
+        .map_err(sqlite_err)?;
+    let payments = stmt
+        .query_map((debt_id, source_record_id), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .map_err(sqlite_err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sqlite_err)?;
+    match payments.as_slice() {
+        [] => {
+            let (kind, total_amount_minor, created_at) = debt;
+            let expected_type = debt_opening_record_type(&kind)?;
+            if imported_record_type != expected_type
+                || imported_date != created_at
+                || imported_amount_base_minor != total_amount_minor
+            {
+                return Err(format!(
+                    "{row_label}: debt-linked opening record does not match debt {debt_id}"
+                ));
+            }
+            Ok(DebtLinkImportKind::Opening)
+        }
+        [(operation_type, principal_paid_minor, is_write_off, payment_date)] => {
+            if *is_write_off != 0 {
+                return Err(format!(
+                    "{row_label}: write-off payments cannot be imported as debt-linked operation rows"
+                ));
+            }
+            let expected_type =
+                debt_payment_record_type(operation_type).unwrap_or(source_record_type.as_str());
+            if imported_record_type != expected_type
+                || imported_date != payment_date
+                || imported_amount_base_minor != *principal_paid_minor
+            {
+                return Err(format!(
+                    "{row_label}: debt-linked payment record does not match payment history for debt {debt_id}"
+                ));
+            }
+            Ok(DebtLinkImportKind::Payment)
+        }
+        _ => Err(format!(
+            "{row_label}: debt-linked source record {source_record_id} has multiple matching debt payments"
+        )),
+    }
+}
+
+fn debt_opening_record_type(kind: &str) -> StorageResult<&'static str> {
+    match kind {
+        "debt" => Ok("income"),
+        "loan" => Ok("expense"),
+        _ => Err(format!("Unsupported debt kind: {kind}")),
+    }
+}
+
+fn debt_payment_record_type(operation_type: &str) -> Option<&'static str> {
+    match operation_type {
+        "debt_repay" => Some("expense"),
+        "loan_collect" => Some("income"),
+        _ => None,
+    }
 }
 
 fn parse_operation_csv_transfer(
@@ -2063,7 +2256,7 @@ fn remap_transfer_marker_description(
     }
 }
 
-fn remap_debt_payment_records_in_tx(
+fn replace_debt_linked_records_in_tx(
     tx: &rusqlite::Transaction<'_>,
     record_id_map: &[DebtRecordRemap],
 ) -> StorageResult<()> {
@@ -2102,34 +2295,36 @@ fn remap_debt_payment_records_in_tx(
                 remap.old_record_id, remap.debt_id
             ));
         }
-        let payment_count: i64 = tx
-            .query_row(
-                "SELECT COUNT(*)
-                 FROM debt_payments
-                 WHERE debt_id = ?1 AND record_id = ?2",
-                (remap.debt_id, remap.old_record_id),
-                |row| row.get(0),
-            )
-            .map_err(sqlite_err)?;
-        if payment_count != 1 {
-            return Err(format!(
-                "Debt-linked source record {} must have exactly one payment for debt {}",
-                remap.old_record_id, remap.debt_id
-            ));
-        }
-        let updated = tx
-            .execute(
-                "UPDATE debt_payments
-                 SET record_id = ?1
-                 WHERE debt_id = ?2 AND record_id = ?3",
-                (remap.new_record_id, remap.debt_id, remap.old_record_id),
-            )
-            .map_err(sqlite_err)?;
-        if updated != 1 {
-            return Err(format!(
-                "Debt payment remap failed for record {}",
-                remap.old_record_id
-            ));
+        if remap.remap_payment {
+            let payment_count: i64 = tx
+                .query_row(
+                    "SELECT COUNT(*)
+                     FROM debt_payments
+                     WHERE debt_id = ?1 AND record_id = ?2",
+                    (remap.debt_id, remap.old_record_id),
+                    |row| row.get(0),
+                )
+                .map_err(sqlite_err)?;
+            if payment_count != 1 {
+                return Err(format!(
+                    "Debt-linked source record {} must have exactly one payment for debt {}",
+                    remap.old_record_id, remap.debt_id
+                ));
+            }
+            let updated = tx
+                .execute(
+                    "UPDATE debt_payments
+                     SET record_id = ?1
+                     WHERE debt_id = ?2 AND record_id = ?3",
+                    (remap.new_record_id, remap.debt_id, remap.old_record_id),
+                )
+                .map_err(sqlite_err)?;
+            if updated != 1 {
+                return Err(format!(
+                    "Debt payment remap failed for record {}",
+                    remap.old_record_id
+                ));
+            }
         }
         tx.execute(
             "DELETE FROM record_tags WHERE record_id = ?1",
@@ -2651,9 +2846,12 @@ pub fn create_standalone_record(
     }
     let record_id = tx.last_insert_rowid();
     replace_record_tags_in_tx(&tx, record_id, &payload.tags)?;
+    let record_id_map = normalize_record_ids_in_tx(&tx)?;
+    let normalized_record_id = record_id_map.get(&record_id).copied().unwrap_or(record_id);
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
-    record_get_row(db_path, record_id)?.ok_or_else(|| format!("Record not found: {record_id}"))
+    record_get_row(db_path, normalized_record_id)?
+        .ok_or_else(|| format!("Record not found: {normalized_record_id}"))
 }
 
 pub fn update_standalone_record(
@@ -3026,6 +3224,70 @@ fn normalize_transfer_ids_in_tx(
         .map_err(sqlite_err)?;
     }
     Ok(transfer_id_map)
+}
+
+pub(crate) fn normalize_record_ids_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+) -> StorageResult<HashMap<i64, i64>> {
+    let mut stmt = tx
+        .prepare("SELECT id FROM records ORDER BY date, id")
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, i64>(0))
+        .map_err(sqlite_err)?;
+    let ordered_ids = rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_err)?;
+    let record_id_map: HashMap<i64, i64> = ordered_ids
+        .iter()
+        .enumerate()
+        .map(|(index, old_id)| (*old_id, i64::try_from(index + 1).unwrap_or(i64::MAX)))
+        .collect();
+    if record_id_map
+        .iter()
+        .all(|(old_id, new_id)| old_id == new_id)
+    {
+        return Ok(record_id_map);
+    }
+
+    for (old_id, new_id) in &record_id_map {
+        let temp_id = -*new_id;
+        tx.execute(
+            "UPDATE records SET id = ?1 WHERE id = ?2",
+            (temp_id, old_id),
+        )
+        .map_err(sqlite_err)?;
+        tx.execute(
+            "UPDATE record_tags SET record_id = ?1 WHERE record_id = ?2",
+            (temp_id, old_id),
+        )
+        .map_err(sqlite_err)?;
+        tx.execute(
+            "UPDATE debt_payments SET record_id = ?1 WHERE record_id = ?2",
+            (temp_id, old_id),
+        )
+        .map_err(sqlite_err)?;
+    }
+
+    for new_id in record_id_map.values() {
+        let temp_id = -*new_id;
+        tx.execute(
+            "UPDATE records SET id = ?1 WHERE id = ?2",
+            (new_id, temp_id),
+        )
+        .map_err(sqlite_err)?;
+        tx.execute(
+            "UPDATE record_tags SET record_id = ?1 WHERE record_id = ?2",
+            (new_id, temp_id),
+        )
+        .map_err(sqlite_err)?;
+        tx.execute(
+            "UPDATE debt_payments SET record_id = ?1 WHERE record_id = ?2",
+            (new_id, temp_id),
+        )
+        .map_err(sqlite_err)?;
+    }
+
+    reset_sqlite_sequence_to_max_id_in_tx(tx, "records")?;
+    Ok(record_id_map)
 }
 
 fn deletable_standalone_record_ids_in_tx(
@@ -4253,6 +4515,29 @@ mod tests {
              )
              VALUES (?1, ?2, ?3, 'create', 10000, 0, '2026-01-05')",
             (payment_id, debt_id, record_id),
+        )
+        .unwrap();
+    }
+
+    fn insert_test_debt_opening_record(
+        conn: &Connection,
+        debt_id: i64,
+        record_id: i64,
+        description: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO records (
+                id, type, date, wallet_id, related_debt_id,
+                amount_original, amount_original_minor, currency,
+                rate_at_operation, rate_at_operation_text,
+                amount_base, amount_base_minor, category, description
+             )
+             VALUES (
+                ?1, 'income', '2026-01-05', 1, ?2,
+                100.0, 10000, 'KZT', 1.0, '1.000000',
+                100.0, 10000, 'Debt', ?3
+             )",
+            (record_id, debt_id, description),
         )
         .unwrap();
     }
@@ -5732,10 +6017,10 @@ mod tests {
         assert!(delete_transfer(&db_path, created.id).unwrap());
 
         let rows = filtered_record_list_rows(&db_path, &RecordFilterPayload::default()).unwrap();
-        assert!(
-            rows.iter()
-                .any(|record| record.id == 99 && record.description == marker)
-        );
+        let protected_record_id = rows
+            .iter()
+            .find_map(|record| (record.description == marker).then_some(record.id))
+            .expect("protected marker record");
         let conn = Connection::open(&db_path).unwrap();
         let record_tags: Vec<(i64, i64)> = {
             let mut stmt = conn
@@ -5746,7 +6031,7 @@ mod tests {
                 .collect::<Result<Vec<_>, _>>()
                 .unwrap()
         };
-        assert!(record_tags.contains(&(99, 11)));
+        assert!(record_tags.contains(&(protected_record_id, 11)));
         assert!(
             !record_tags
                 .iter()
@@ -5872,7 +6157,24 @@ mod tests {
         let rows = filtered_record_list_rows(&db_path, &RecordFilterPayload::default()).unwrap();
         let mut ids: Vec<i64> = rows.iter().map(|record| record.id).collect();
         ids.sort_unstable();
-        assert_eq!(ids, vec![1, 3]);
+        assert_eq!(ids, vec![1, 2]);
+        let created = create_standalone_record(
+            &db_path,
+            &StandaloneRecordCreatePayload {
+                record_type: "income".to_owned(),
+                date: "2026-02-10".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Next".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            },
+        )
+        .unwrap();
+        assert_eq!(created.id, 3);
         assert!(transfer_get_row(&db_path, 1).unwrap().is_none());
         remove_test_db(&db_path);
     }
@@ -5990,7 +6292,41 @@ mod tests {
             )
             .unwrap();
         assert_eq!(payment_record_id, debt_records[0].id);
-        assert_ne!(payment_record_id, 6);
+
+        let _ = fs::remove_file(path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn import_export_records_csv_round_trips_debt_opening_rows_without_history() {
+        let db_path = create_balance_test_db();
+        let conn = Connection::open(&db_path).unwrap();
+        insert_test_debt(&conn, 1, "Alex");
+        insert_test_debt_opening_record(&conn, 1, 6, "Debt opening");
+        drop(conn);
+
+        let path = temp_test_path("ledgera_ops_export_debt_opening", "csv");
+        export_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+        let contents = fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("Debt opening"));
+        assert!(contents.contains(",6,1,,,"));
+
+        let result = import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+
+        assert_eq!(result.imported, 4);
+        assert_eq!(result.skipped, 0);
+        let records = record_list_rows(&db_path).unwrap();
+        let debt_records: Vec<_> = records
+            .iter()
+            .filter(|record| record.related_debt_id == Some(1))
+            .collect();
+        assert_eq!(debt_records.len(), 1);
+        assert_eq!(debt_records[0].description, "Debt opening");
+        let payment_count: i64 = Connection::open(&db_path)
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM debt_payments", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(payment_count, 0);
 
         let _ = fs::remove_file(path);
         remove_test_db(&db_path);
@@ -6001,6 +6337,7 @@ mod tests {
         let db_path = create_balance_test_db();
         let conn = Connection::open(&db_path).unwrap();
         insert_test_debt(&conn, 1, "Alex");
+        insert_test_debt_opening_record(&conn, 1, 6, "Debt opening");
         drop(conn);
         let path = temp_test_path("ledgera_ops_import_debt_missing_record", "csv");
         write_csv_rows(
@@ -6043,10 +6380,56 @@ mod tests {
     }
 
     #[test]
+    fn import_records_csv_rejects_debt_linked_row_for_missing_debt() {
+        let db_path = create_balance_test_db();
+        let path = temp_test_path("ledgera_ops_import_debt_missing_debt", "csv");
+        write_csv_rows(
+            path.to_str().unwrap(),
+            &OPERATION_TABULAR_HEADERS,
+            &[vec![
+                "2026-01-05".to_owned(),
+                "income".to_owned(),
+                "1".to_owned(),
+                "Debt".to_owned(),
+                "100.00".to_owned(),
+                "KZT".to_owned(),
+                "1".to_owned(),
+                "100.00".to_owned(),
+                "Missing debt".to_owned(),
+                String::new(),
+                String::new(),
+                "6".to_owned(),
+                "99".to_owned(),
+                String::new(),
+                String::new(),
+                String::new(),
+            ]],
+        )
+        .unwrap();
+
+        let preview = preview_import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+
+        assert_eq!(preview.imported, 0);
+        assert_eq!(preview.skipped, 1);
+        assert!(
+            preview
+                .errors
+                .iter()
+                .any(|error| error.contains("debt not found"))
+        );
+        let error = import_records_csv(&db_path, path.to_str().unwrap()).unwrap_err();
+        assert!(error.contains("debt-linked integrity errors"));
+
+        let _ = fs::remove_file(path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
     fn import_records_csv_rejects_duplicate_debt_linked_record_id() {
         let db_path = create_balance_test_db();
         let conn = Connection::open(&db_path).unwrap();
         insert_test_debt(&conn, 1, "Alex");
+        insert_test_debt_opening_record(&conn, 1, 6, "Debt opening");
         drop(conn);
         let path = temp_test_path("ledgera_ops_import_debt_duplicate_record", "csv");
         let row = vec![
@@ -6148,6 +6531,120 @@ mod tests {
     }
 
     #[test]
+    fn import_records_csv_rejects_debt_payment_history_mismatch() {
+        let db_path = create_balance_test_db();
+        let conn = Connection::open(&db_path).unwrap();
+        insert_test_debt(&conn, 1, "Alex");
+        insert_test_debt_record_payment(&conn, 1, 6, 1, "Debt payment");
+        drop(conn);
+        let path = temp_test_path("ledgera_ops_import_debt_history_mismatch", "csv");
+        write_csv_rows(
+            path.to_str().unwrap(),
+            &OPERATION_TABULAR_HEADERS,
+            &[vec![
+                "2026-01-05".to_owned(),
+                "income".to_owned(),
+                "1".to_owned(),
+                "Debt".to_owned(),
+                "101.00".to_owned(),
+                "KZT".to_owned(),
+                "1".to_owned(),
+                "101.00".to_owned(),
+                "Changed payment".to_owned(),
+                String::new(),
+                String::new(),
+                "6".to_owned(),
+                "1".to_owned(),
+                String::new(),
+                String::new(),
+                String::new(),
+            ]],
+        )
+        .unwrap();
+
+        let preview = preview_import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+
+        assert_eq!(preview.imported, 0);
+        assert_eq!(preview.skipped, 1);
+        assert!(
+            preview
+                .errors
+                .iter()
+                .any(|error| error.contains("does not match payment history"))
+        );
+        let error = import_records_csv(&db_path, path.to_str().unwrap()).unwrap_err();
+        assert!(error.contains("debt-linked integrity errors"));
+        let unchanged_count: i64 = Connection::open(&db_path)
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM records WHERE description = 'Debt payment'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(unchanged_count, 1);
+
+        let _ = fs::remove_file(path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn import_records_csv_rejects_multiple_debt_payment_backlinks() {
+        let db_path = create_balance_test_db();
+        let conn = Connection::open(&db_path).unwrap();
+        insert_test_debt(&conn, 1, "Alex");
+        insert_test_debt_record_payment(&conn, 1, 6, 1, "Debt payment");
+        conn.execute(
+            "INSERT INTO debt_payments (
+                id, debt_id, record_id, operation_type,
+                principal_paid_minor, is_write_off, payment_date
+             )
+             VALUES (2, 1, 6, 'debt_repay', 10000, 0, '2026-01-05')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let path = temp_test_path("ledgera_ops_import_debt_duplicate_payment", "csv");
+        write_csv_rows(
+            path.to_str().unwrap(),
+            &OPERATION_TABULAR_HEADERS,
+            &[vec![
+                "2026-01-05".to_owned(),
+                "income".to_owned(),
+                "1".to_owned(),
+                "Debt".to_owned(),
+                "100.00".to_owned(),
+                "KZT".to_owned(),
+                "1".to_owned(),
+                "100.00".to_owned(),
+                "Debt payment".to_owned(),
+                String::new(),
+                String::new(),
+                "6".to_owned(),
+                "1".to_owned(),
+                String::new(),
+                String::new(),
+                String::new(),
+            ]],
+        )
+        .unwrap();
+
+        let preview = preview_import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+
+        assert_eq!(preview.imported, 0);
+        assert_eq!(preview.skipped, 1);
+        assert!(
+            preview
+                .errors
+                .iter()
+                .any(|error| error.contains("multiple matching debt payments"))
+        );
+
+        let _ = fs::remove_file(path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
     fn import_export_records_xlsx_round_trips_debt_linked_rows() {
         let db_path = create_balance_test_db();
         let conn = Connection::open(&db_path).unwrap();
@@ -6196,7 +6693,49 @@ mod tests {
             )
             .unwrap();
         assert_eq!(payment_record_id, debt_records[0].id);
-        assert_ne!(payment_record_id, 6);
+
+        let _ = fs::remove_file(path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn import_records_xlsx_rejects_debt_linked_row_for_missing_debt() {
+        let db_path = create_balance_test_db();
+        let path = temp_test_path("ledgera_ops_import_debt_missing_debt", "xlsx");
+        write_operation_xlsx_fixture(
+            &path,
+            &[vec![
+                "2026-01-05",
+                "income",
+                "1",
+                "Debt",
+                "100.00",
+                "KZT",
+                "1",
+                "100.00",
+                "Missing debt",
+                "",
+                "",
+                "6",
+                "99",
+                "",
+                "",
+                "",
+            ]],
+        );
+
+        let preview = preview_import_records_xlsx(&db_path, path.to_str().unwrap()).unwrap();
+
+        assert_eq!(preview.imported, 0);
+        assert_eq!(preview.skipped, 1);
+        assert!(
+            preview
+                .errors
+                .iter()
+                .any(|error| error.contains("debt not found"))
+        );
+        let error = import_records_xlsx(&db_path, path.to_str().unwrap()).unwrap_err();
+        assert!(error.contains("debt-linked integrity errors"));
 
         let _ = fs::remove_file(path);
         remove_test_db(&db_path);

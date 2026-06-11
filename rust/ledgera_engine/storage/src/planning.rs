@@ -1,6 +1,6 @@
 use crate::{
-    StorageResult, minor_amount_expr, signed_minor_amount_expr, sqlite_err,
-    storage_clear_read_connection_cache, with_cached_read_connection,
+    StorageResult, minor_amount_expr, normalize_record_ids_in_tx, signed_minor_amount_expr,
+    sqlite_err, storage_clear_read_connection_cache, with_cached_read_connection,
 };
 use ledgera_engine_core::{minor_to_money_value, normalize_currency_code, to_minor_units};
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
@@ -1729,10 +1729,13 @@ pub fn debt_create_obligation(
     let tx = conn.transaction().map_err(sqlite_err)?;
     let debt_id = insert_debt_row(&tx, debt, false)?;
     insert_debt_record_row(&tx, open_record, debt_id)?;
+    let debt_id_map = normalize_debt_ids_in_tx(&tx)?;
+    let normalized_debt_id = debt_id_map.get(&debt_id).copied().unwrap_or(debt_id);
+    normalize_record_ids_in_tx(&tx)?;
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
     let conn = open_write_connection(db_path)?;
-    debt_from_conn(&conn, debt_id)
+    debt_from_conn(&conn, normalized_debt_id)
 }
 
 pub fn debt_create(db_path: &str, payload: &DebtCreatePayload) -> StorageResult<DebtPayload> {
@@ -1814,10 +1817,13 @@ pub fn debt_create(db_path: &str, payload: &DebtCreatePayload) -> StorageResult<
         period: None,
     };
     insert_debt_record_row(&tx, &record, debt_id)?;
+    let debt_id_map = normalize_debt_ids_in_tx(&tx)?;
+    let normalized_debt_id = debt_id_map.get(&debt_id).copied().unwrap_or(debt_id);
+    normalize_record_ids_in_tx(&tx)?;
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
     let conn = open_write_connection(db_path)?;
-    debt_from_conn(&conn, debt_id)
+    debt_from_conn(&conn, normalized_debt_id)
 }
 
 pub fn debt_register_payment_validated(
@@ -1890,6 +1896,7 @@ pub fn debt_register_payment_validated(
         period: None,
     };
     let payment_id = debt_register_payment_in_tx(&tx, debt.id, &payment, Some(&record))?;
+    normalize_record_ids_in_tx(&tx)?;
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
     let conn = open_write_connection(db_path)?;
@@ -1992,6 +1999,7 @@ pub fn debt_close_validated(
         period: None,
     };
     debt_register_payment_in_tx(&tx, debt.id, &payment, Some(&record))?;
+    normalize_record_ids_in_tx(&tx)?;
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
     let conn = open_write_connection(db_path)?;
@@ -2011,6 +2019,7 @@ pub fn debt_delete(db_path: &str, debt_id: i64) -> StorageResult<()> {
         .map_err(sqlite_err)?;
     tx.execute("DELETE FROM debts WHERE id = ?", [debt_id])
         .map_err(sqlite_err)?;
+    normalize_debt_ids_in_tx(&tx)?;
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
     Ok(())
@@ -2025,6 +2034,9 @@ pub fn debt_register_payment(
     let mut conn = open_write_connection(db_path)?;
     let tx = conn.transaction().map_err(sqlite_err)?;
     let payment_id = debt_register_payment_in_tx(&tx, debt_id, payment, payment_record)?;
+    if payment_record.is_some() {
+        normalize_record_ids_in_tx(&tx)?;
+    }
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
     let conn = open_write_connection(db_path)?;
@@ -2053,8 +2065,7 @@ fn debt_register_payment_in_tx(
         None
     };
     let payment_id = insert_debt_payment_row(&tx, payment, debt_id, record_id, false)?;
-    let remaining_amount_minor =
-        debt.remaining_amount_minor - payment_amount_minor;
+    let remaining_amount_minor = debt.remaining_amount_minor - payment_amount_minor;
     let is_closed = remaining_amount_minor == 0;
     tx.execute(
         "UPDATE debts
@@ -2092,6 +2103,7 @@ pub fn debt_delete_payment(
                 .map_err(sqlite_err)?;
             refresh_tag_metrics_in_tx(&tx)?;
             prune_orphan_tags_in_tx(&tx)?;
+            normalize_record_ids_in_tx(&tx)?;
         }
     }
     tx.execute("DELETE FROM debt_payments WHERE id = ?", [payment_id])
@@ -2122,6 +2134,93 @@ pub fn debt_delete_payment(
     storage_clear_read_connection_cache();
     let conn = open_write_connection(db_path)?;
     debt_from_conn(&conn, payment.debt_id)
+}
+
+fn normalize_debt_ids_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+) -> StorageResult<std::collections::HashMap<i64, i64>> {
+    let mut stmt = tx
+        .prepare("SELECT id FROM debts ORDER BY created_at, id")
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, i64>(0))
+        .map_err(sqlite_err)?;
+    let ordered_ids = rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_err)?;
+    let debt_id_map: std::collections::HashMap<i64, i64> = ordered_ids
+        .iter()
+        .enumerate()
+        .map(|(index, old_id)| (*old_id, i64::try_from(index + 1).unwrap_or(i64::MAX)))
+        .collect();
+    if debt_id_map.iter().all(|(old_id, new_id)| old_id == new_id) {
+        return Ok(debt_id_map);
+    }
+
+    for (old_id, new_id) in &debt_id_map {
+        let temp_id = -*new_id;
+        tx.execute("UPDATE debts SET id = ? WHERE id = ?", (temp_id, old_id))
+            .map_err(sqlite_err)?;
+        tx.execute(
+            "UPDATE records SET related_debt_id = ? WHERE related_debt_id = ?",
+            (temp_id, old_id),
+        )
+        .map_err(sqlite_err)?;
+        tx.execute(
+            "UPDATE debt_payments SET debt_id = ? WHERE debt_id = ?",
+            (temp_id, old_id),
+        )
+        .map_err(sqlite_err)?;
+    }
+
+    for new_id in debt_id_map.values() {
+        let temp_id = -*new_id;
+        tx.execute("UPDATE debts SET id = ? WHERE id = ?", (new_id, temp_id))
+            .map_err(sqlite_err)?;
+        tx.execute(
+            "UPDATE records SET related_debt_id = ? WHERE related_debt_id = ?",
+            (new_id, temp_id),
+        )
+        .map_err(sqlite_err)?;
+        tx.execute(
+            "UPDATE debt_payments SET debt_id = ? WHERE debt_id = ?",
+            (new_id, temp_id),
+        )
+        .map_err(sqlite_err)?;
+    }
+
+    reset_debt_sqlite_sequence_to_max_id_in_tx(tx, "debts")?;
+    Ok(debt_id_map)
+}
+
+fn reset_debt_sqlite_sequence_to_max_id_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    table: &str,
+) -> StorageResult<()> {
+    let has_sequence = tx
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'",
+            [],
+            |_row| Ok(()),
+        )
+        .optional()
+        .map_err(sqlite_err)?
+        .is_some();
+    if !has_sequence {
+        return Ok(());
+    }
+    let max_id_sql = format!("SELECT COALESCE(MAX(id), 0) FROM {table}");
+    let max_id = tx
+        .query_row(&max_id_sql, [], |row| row.get::<_, i64>(0))
+        .map_err(sqlite_err)?;
+    tx.execute("DELETE FROM sqlite_sequence WHERE name = ?", [table])
+        .map_err(sqlite_err)?;
+    if max_id > 0 {
+        tx.execute(
+            "INSERT INTO sqlite_sequence(name, seq) VALUES(?, ?)",
+            (table, max_id),
+        )
+        .map_err(sqlite_err)?;
+    }
+    Ok(())
 }
 
 fn refresh_tag_metrics_in_tx(tx: &rusqlite::Transaction<'_>) -> StorageResult<()> {
@@ -2790,7 +2889,17 @@ mod tests {
             &test_debt_record("income", 10_000),
         )
         .expect("create after replace");
-        assert_eq!(next.id, 8);
+        assert_eq!(next.id, 1);
+        let conn = Connection::open(&db_path).unwrap();
+        let debt_ids: Vec<i64> = {
+            let mut stmt = conn.prepare("SELECT id FROM debts ORDER BY id").unwrap();
+            stmt.query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(debt_ids, vec![1, 2]);
+        drop(conn);
         assert!(
             debt_delete(&db_path, 999)
                 .expect_err("missing delete")
@@ -2982,13 +3091,14 @@ mod tests {
             },
         )
         .expect("create debt");
-        let request = |amount: &str, wallet_id: Option<i64>, date: &str| DebtPaymentRequestPayload {
-            debt_id: debt.id,
-            wallet_id,
-            amount: amount.to_owned(),
-            payment_date: date.to_owned(),
-            description: "".to_owned(),
-        };
+        let request =
+            |amount: &str, wallet_id: Option<i64>, date: &str| DebtPaymentRequestPayload {
+                debt_id: debt.id,
+                wallet_id,
+                amount: amount.to_owned(),
+                payment_date: date.to_owned(),
+                description: "".to_owned(),
+            };
         assert!(
             debt_register_payment_validated(&db_path, &request("0", Some(1), "2026-03-05"))
                 .expect_err("zero")
@@ -3000,14 +3110,24 @@ mod tests {
                 .contains("exceeds")
         );
         assert!(
-            debt_register_payment(&db_path, debt.id, &test_payment(debt.id, 30_000, false), None)
-                .expect_err("raw too much")
-                .contains("exceeds")
+            debt_register_payment(
+                &db_path,
+                debt.id,
+                &test_payment(debt.id, 30_000, false),
+                None
+            )
+            .expect_err("raw too much")
+            .contains("exceeds")
         );
         assert!(
-            debt_register_payment(&db_path, debt.id, &test_payment(debt.id + 1, 1_000, false), None)
-                .expect_err("raw mismatch")
-                .contains("does not match")
+            debt_register_payment(
+                &db_path,
+                debt.id,
+                &test_payment(debt.id + 1, 1_000, false),
+                None
+            )
+            .expect_err("raw mismatch")
+            .contains("does not match")
         );
         assert!(
             debt_register_payment_validated(&db_path, &request("1.00", Some(1), "2999-01-01"))

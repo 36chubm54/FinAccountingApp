@@ -34,10 +34,15 @@ Current status:
   flows over Operations-owned standalone records/transfers and debt-linked
   cashflow rows; matching debt history rows are removed
   synchronously when present, while unsupported linked records are preserved and
-  reported as skipped.
+  reported as skipped. Rust storage normalizes `records.id` after Operations
+  write/delete flows and keeps record tags plus debt payment record links
+  remapped.
 - Operations CSV/XLSX import/export is wired for standalone records, aggregate
   transfer rows, and debt-linked operation rows while preserving debt payment
-  record links during same-database replace-import. Transfer list parity,
+  record links during same-database replace-import. Debt-linked import is
+  strict: rows whose existing debt card, source record, or matching payment
+  history cannot be verified are rejected instead of detached or recreated.
+  Transfer list parity,
   `.xls`/JSON/current-rate import, and commission editing remain later
   Operations slices.
 - Settings wallet listing and active base-currency wallet creation are wired,
@@ -46,7 +51,9 @@ Current status:
   show selected debt payment history, create base-currency debts/loans, register
   payments, register write-offs, close debts/loans, delete debt cards, and
   delete payments through Rust/Kotlin UniFFI while debt-card editing and
-  import/export stay pending follow-up slices.
+  import/export stay pending follow-up slices. Rust storage normalizes
+  `debts.id` after debt create/delete flows and remaps debt-linked operation
+  rows plus payment history links in the same transaction.
 - Remaining beta.1 work is capability wiring and screen parity for the other
   Operations flows and the other sections through Rust/Kotlin UniFFI, not a
   Kotlin-to-Python runtime bridge.

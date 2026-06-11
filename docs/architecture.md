@@ -116,11 +116,16 @@ Current Kotlin/Rust contract:
   unsupported linked rows are preserved and reported as skipped; CSV/XLSX import
   uses a previewed replace flow over Operations-owned standalone
   records/transfers/debt-linked rows, remaps `debt_payments.record_id` for
-  same-database debt-linked round-trips, and exports transfers as aggregate
-  `type=transfer` rows; XLSX export mirrors the Python/Tkinter records `Data`
+  same-database debt-linked round-trips, rejects debt-linked rows whose debt
+  card/source record/history contract cannot be verified, and exports transfers
+  as aggregate `type=transfer` rows; XLSX export mirrors the Python/Tkinter records `Data`
   sheet contract and shares reusable Rust CSV and Excel tabular utilities for
   later tabs; transfer list parity, `.xls`/JSON import/export, current-rate
   import, and full inline editor keyboard parity remain separate beta.1 slices
+- Rust storage normalizes `records.id`, `transfers.id`, and `debts.id` after
+  Kotlin-facing write/delete paths that can create gaps, remapping dependent
+  rows such as record tags, transfer links, debt payment links, and debt-linked
+  operation rows inside the same transaction
 - transfer commissions are represented as standalone expense records adjacent
   to the transfer, so commission amount/category edits use standalone
   operation editing rather than a separate transfer-level commission contract;
