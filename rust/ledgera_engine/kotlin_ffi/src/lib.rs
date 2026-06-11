@@ -1,17 +1,18 @@
 use ledgera_engine_storage::{
-    AuditFindingRow, DebtCreatePayload, DebtPayload, DebtPaymentPayload,
-    DebtPaymentRequestPayload, OperationDeleteResult, OperationExportResult, OperationImportResult,
-    RecordFilterPayload, RecordRow, StandaloneRecordCreatePayload, StandaloneRecordUpdatePayload,
-    TransferCreatePayload, TransferRow, TransferUpdatePayload, WalletBalanceRow,
-    WalletCreatePayload, WalletRow, audit_run_for_date, base_currency_code,
-    create_standalone_record, create_transfer, create_wallet, current_local_date,
-    debt_close_validated, debt_create, debt_payment_rows, debt_register_payment_validated,
-    debt_register_write_off_validated, debt_rows, delete_all_operations, delete_operations_selection,
-    delete_standalone_record, delete_transfer, delete_wallet, distinct_record_categories,
-    export_records_csv, export_records_xlsx, filtered_record_list_rows, import_records_csv,
-    import_records_xlsx, preview_import_records_csv, preview_import_records_xlsx,
-    standalone_record_get_row, tag_names, transfer_get_row, update_standalone_record,
-    update_transfer, wallet_balance_row, wallet_balance_rows, wallet_list_rows,
+    AuditFindingRow, DebtCreatePayload, DebtPayload, DebtPaymentPayload, DebtPaymentRequestPayload,
+    OperationDeleteResult, OperationExportResult, OperationImportResult, RecordFilterPayload,
+    RecordRow, StandaloneRecordCreatePayload, StandaloneRecordUpdatePayload, TransferCreatePayload,
+    TransferRow, TransferUpdatePayload, WalletBalanceRow, WalletCreatePayload, WalletRow,
+    audit_run_for_date, base_currency_code, create_standalone_record, create_transfer,
+    create_wallet, current_local_date, debt_close_validated, debt_create, debt_delete,
+    debt_delete_payment, debt_payment_rows, debt_register_payment_validated,
+    debt_register_write_off_validated, debt_rows, delete_all_operations,
+    delete_operations_selection, delete_standalone_record, delete_transfer, delete_wallet,
+    distinct_record_categories, export_records_csv, export_records_xlsx, filtered_record_list_rows,
+    import_records_csv, import_records_xlsx, preview_import_records_csv,
+    preview_import_records_xlsx, standalone_record_get_row, tag_names, transfer_get_row,
+    update_standalone_record, update_transfer, wallet_balance_row, wallet_balance_rows,
+    wallet_list_rows,
 };
 use std::fmt;
 use std::path::Path;
@@ -566,6 +567,22 @@ impl LedgeraEngine {
         request: RegisterDebtPaymentRequest,
     ) -> Result<DebtDto, LedgeraEngineError> {
         debt_close_validated(&self.db_path, &debt_payment_request_payload(request))
+            .map(debt_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn delete_debt(&self, debt_id: i64) -> Result<bool, LedgeraEngineError> {
+        debt_delete(&self.db_path, debt_id)
+            .map(|_| true)
+            .map_err(storage_error)
+    }
+
+    pub fn delete_debt_payment(
+        &self,
+        payment_id: i64,
+        delete_linked_record: bool,
+    ) -> Result<DebtDto, LedgeraEngineError> {
+        debt_delete_payment(&self.db_path, payment_id, delete_linked_record)
             .map(debt_to_dto)
             .map_err(storage_error)
     }
@@ -1918,6 +1935,68 @@ mod tests {
                 .operation_type,
             "loan_collect"
         );
+
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_deletes_debt_and_debt_payments() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+        let debt = engine
+            .create_debt(CreateDebtRequest {
+                kind: "debt".to_owned(),
+                contact_name: "Alice".to_owned(),
+                wallet_id: 1,
+                amount: "50.00".to_owned(),
+                currency: "KZT".to_owned(),
+                created_at: "2026-03-01".to_owned(),
+                description: "".to_owned(),
+            })
+            .expect("create debt");
+        let payment = engine
+            .register_debt_payment(RegisterDebtPaymentRequest {
+                debt_id: debt.id,
+                wallet_id: Some(1),
+                amount: "20.00".to_owned(),
+                payment_date: "2026-03-05".to_owned(),
+                description: "cash".to_owned(),
+            })
+            .expect("payment");
+        let record_id = payment.record_id.expect("linked payment record");
+
+        let reopened = engine
+            .delete_debt_payment(payment.id, true)
+            .expect("delete payment");
+        assert_eq!(reopened.id, debt.id);
+        assert_eq!(reopened.status, "open");
+        assert_eq!(reopened.remaining_amount, "50.00");
+        let conn = Connection::open(&db_path).expect("open");
+        let linked_record_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM records WHERE id = ?",
+                [record_id],
+                |row| row.get(0),
+            )
+            .expect("record count");
+        assert_eq!(linked_record_count, 0);
+        drop(conn);
+
+        assert!(engine.delete_debt(debt.id).expect("delete debt"));
+        assert!(engine.list_debts().expect("debts").is_empty());
+        let conn = Connection::open(&db_path).expect("open");
+        let preserved_records: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM records WHERE related_debt_id IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .expect("preserved records");
+        assert!(preserved_records > 0);
+        let missing = engine
+            .delete_debt(999)
+            .expect_err("missing debt should fail");
+        assert!(missing.to_string().contains("Debt not found: 999"));
 
         fs::remove_file(db_path).ok();
     }

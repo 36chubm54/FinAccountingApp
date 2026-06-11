@@ -259,6 +259,10 @@ interface LedgeraEngine {
     [Throws=LedgeraEngineError]
     DebtDto close_debt(RegisterDebtPaymentRequest request);
     [Throws=LedgeraEngineError]
+    boolean delete_debt(i64 debt_id);
+    [Throws=LedgeraEngineError]
+    DebtDto delete_debt_payment(i64 payment_id, boolean delete_linked_record);
+    [Throws=LedgeraEngineError]
     sequence<AuditFindingDto> audit_run();
     [Throws=LedgeraEngineError]
     sequence<WalletBalanceDto> wallet_balances();

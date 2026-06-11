@@ -69,6 +69,8 @@ interface DebtsEngine {
     suspend fun registerDebtPayment(request: RegisterDebtPaymentRequest): DebtPaymentItem
     suspend fun registerDebtWriteOff(request: RegisterDebtPaymentRequest): DebtPaymentItem
     suspend fun closeDebt(request: RegisterDebtPaymentRequest): DebtItem
+    suspend fun deleteDebt(debtId: Long): Boolean
+    suspend fun deleteDebtPayment(paymentId: Long, deleteLinkedRecord: Boolean): DebtItem
 }
 
 interface EngineAdapter : RuntimeEngine, OperationsEngine, SettingsEngine, DebtsEngine

@@ -24,6 +24,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
@@ -80,6 +81,8 @@ fun DebtsScreen(viewModel: DebtsViewModel, modifier: Modifier = Modifier) {
                     onPay = { viewModel.openDebtAction("payment") },
                     onWriteOff = { viewModel.openDebtAction("write_off") },
                     onClose = { viewModel.openDebtAction("close") },
+                    onDeleteDebt = viewModel::requestDeleteSelectedDebt,
+                    onDeletePayment = viewModel::requestDeletePayment,
                     modifier = Modifier.weight(0.42f),
                 )
             }
@@ -114,6 +117,30 @@ fun DebtsScreen(viewModel: DebtsViewModel, modifier: Modifier = Modifier) {
                 onDraftChange = viewModel::updateActionDraft,
                 onSubmit = viewModel::submitDebtAction,
                 onCancel = viewModel::closeActionDialog,
+            )
+        }
+
+        state.deleteDebtId?.let { debtId ->
+            state.debts.firstOrNull { it.id == debtId }?.let { debt ->
+                DeleteDebtConfirmDialog(
+                    debt = debt,
+                    engineError = state.error,
+                    submitting = state.deleteInProgress,
+                    onConfirm = viewModel::deleteSelectedDebt,
+                    onCancel = viewModel::closeDeleteDebtDialog,
+                )
+            }
+        }
+
+        state.deletePayment?.let { payment ->
+            DeletePaymentConfirmDialog(
+                payment = payment,
+                deleteLinkedRecord = state.deleteLinkedRecord,
+                engineError = state.error,
+                submitting = state.deleteInProgress,
+                onDeleteLinkedRecordChange = viewModel::updateDeleteLinkedRecord,
+                onConfirm = viewModel::deleteSelectedPayment,
+                onCancel = viewModel::closeDeletePaymentDialog,
             )
         }
     }
@@ -237,6 +264,8 @@ private fun DebtHistoryCard(
     onPay: () -> Unit,
     onWriteOff: () -> Unit,
     onClose: () -> Unit,
+    onDeleteDebt: () -> Unit,
+    onDeletePayment: (DebtPaymentItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Card(modifier.fillMaxWidth()) {
@@ -252,6 +281,7 @@ private fun DebtHistoryCard(
                     OutlinedButton(onClick = onPay, enabled = actionsEnabled) { Text("Pay") }
                     OutlinedButton(onClick = onWriteOff, enabled = actionsEnabled) { Text("Write off") }
                     Button(onClick = onClose, enabled = actionsEnabled) { Text("Close") }
+                    OutlinedButton(onClick = onDeleteDebt, enabled = selectedDebt != null) { Text("Delete debt") }
                 }
             }
             if (selectedDebt == null) {
@@ -264,7 +294,7 @@ private fun DebtHistoryCard(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(history, key = { it.id }) { payment ->
-                        PaymentRow(payment)
+                        PaymentRow(payment, onDelete = { onDeletePayment(payment) })
                     }
                 }
             }
@@ -273,7 +303,7 @@ private fun DebtHistoryCard(
 }
 
 @Composable
-private fun PaymentRow(payment: DebtPaymentItem) {
+private fun PaymentRow(payment: DebtPaymentItem, onDelete: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -290,9 +320,90 @@ private fun PaymentRow(payment: DebtPaymentItem) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Text(payment.principalPaid)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(payment.principalPaid)
+                TextButton(onClick = onDelete) {
+                    Text("Delete")
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun DeleteDebtConfirmDialog(
+    debt: DebtItem,
+    engineError: String?,
+    submitting: Boolean,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (!submitting) onCancel() },
+        title = { Text(if (debt.kind == "loan") "Delete loan" else "Delete debt") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Delete selected debt or loan? Linked operation rows will be kept as standalone records. Payment history will be removed.")
+                Text("${debt.contactName} · ${debt.remainingAmount} / ${debt.totalAmount} ${debt.currency}")
+                engineError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm, enabled = !submitting) {
+                Text(if (submitting) "Deleting..." else "Delete")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel, enabled = !submitting) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+private fun DeletePaymentConfirmDialog(
+    payment: DebtPaymentItem,
+    deleteLinkedRecord: Boolean,
+    engineError: String?,
+    submitting: Boolean,
+    onDeleteLinkedRecordChange: (Boolean) -> Unit,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (!submitting) onCancel() },
+        title = { Text("Delete payment") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Delete selected payment? The debt or loan remaining amount will be recalculated.")
+                Text("${payment.paymentDate} · ${payment.principalPaid}")
+                if (payment.recordId != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = deleteLinkedRecord,
+                            onCheckedChange = onDeleteLinkedRecordChange,
+                            enabled = !submitting,
+                        )
+                        Text("Delete linked operation row too")
+                    }
+                } else {
+                    Text("This payment has no linked operation row.")
+                }
+                engineError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm, enabled = !submitting) {
+                Text(if (submitting) "Deleting..." else "Delete")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel, enabled = !submitting) {
+                Text("Cancel")
+            }
+        },
+    )
 }
 
 @Composable

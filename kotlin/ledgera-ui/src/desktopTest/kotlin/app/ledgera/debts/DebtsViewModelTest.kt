@@ -175,6 +175,69 @@ class DebtsViewModelTest {
         assertEquals("close", viewModel.state.value.actionDraft?.action)
         assertNull(viewModel.state.value.notice)
     }
+
+    @Test
+    fun deleteDebtSuccessRefreshesAndShowsNotice() {
+        val engine = FakeDebtsEngine()
+        val viewModel = DebtsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.requestDeleteSelectedDebt()
+        viewModel.deleteSelectedDebt()
+
+        assertEquals(1, engine.deleteDebtCalls)
+        assertNull(viewModel.state.value.deleteDebtId)
+        assertEquals("Debt deleted (id=1)", viewModel.state.value.notice)
+        assertEquals(emptyList(), viewModel.state.value.debts)
+    }
+
+    @Test
+    fun deleteDebtEngineErrorKeepsConfirmationOpen() {
+        val engine = FakeDebtsEngine(deleteError = IllegalStateException("delete failed"))
+        val viewModel = DebtsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.requestDeleteSelectedDebt()
+        viewModel.deleteSelectedDebt()
+
+        assertEquals("delete failed", viewModel.state.value.error)
+        assertEquals(1, viewModel.state.value.deleteDebtId)
+        assertNull(viewModel.state.value.notice)
+    }
+
+    @Test
+    fun deletePaymentSuccessRefreshesHistoryAndPassesLinkedRecordFlag() {
+        val engine = FakeDebtsEngine()
+        val viewModel = DebtsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        val payment = viewModel.state.value.selectedHistory.single()
+        viewModel.requestDeletePayment(payment)
+        viewModel.updateDeleteLinkedRecord(true)
+        viewModel.deleteSelectedPayment()
+
+        assertEquals(1, engine.deletePaymentCalls)
+        assertEquals(true, engine.lastDeleteLinkedRecord)
+        assertNull(viewModel.state.value.deletePayment)
+        assertEquals("Payment deleted (id=1)", viewModel.state.value.notice)
+        assertEquals(emptyList(), viewModel.state.value.selectedHistory)
+    }
+
+    @Test
+    fun deleteWriteOffDoesNotPassLinkedRecordFlag() {
+        val writeOff = paymentItem(recordId = null, isWriteOff = true, operationType = "debt_forgive")
+        val engine = FakeDebtsEngine(historyByDebt = mapOf(1L to listOf(writeOff)))
+        val viewModel = DebtsViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.requestDeletePayment(writeOff)
+        viewModel.updateDeleteLinkedRecord(true)
+        viewModel.deleteSelectedPayment()
+
+        assertEquals(1, engine.deletePaymentCalls)
+        assertEquals(false, engine.lastDeleteLinkedRecord)
+        assertEquals("Payment deleted (id=1)", viewModel.state.value.notice)
+    }
 }
 
 private class FakeDebtsEngine(
@@ -182,6 +245,7 @@ private class FakeDebtsEngine(
     private val historyByDebt: Map<Long, List<DebtPaymentItem>> = mapOf(1L to listOf(paymentItem())),
     private val createError: Throwable? = null,
     private val actionError: Throwable? = null,
+    private val deleteError: Throwable? = null,
 ) : DebtsEngine {
     private val mutableDebts = debts.toMutableList()
     private val mutableHistory = historyByDebt.mapValues { it.value.toMutableList() }.toMutableMap()
@@ -189,6 +253,9 @@ private class FakeDebtsEngine(
     var paymentCalls = 0
     var writeOffCalls = 0
     var closeCalls = 0
+    var deleteDebtCalls = 0
+    var deletePaymentCalls = 0
+    var lastDeleteLinkedRecord: Boolean? = null
 
     override suspend fun baseCurrency(): String = "KZT"
 
@@ -249,6 +316,25 @@ private class FakeDebtsEngine(
         return closed
     }
 
+    override suspend fun deleteDebt(debtId: Long): Boolean {
+        deleteError?.let { throw it }
+        deleteDebtCalls += 1
+        mutableDebts.removeAll { it.id == debtId }
+        mutableHistory.remove(debtId)
+        return true
+    }
+
+    override suspend fun deleteDebtPayment(paymentId: Long, deleteLinkedRecord: Boolean): DebtItem {
+        deleteError?.let { throw it }
+        deletePaymentCalls += 1
+        lastDeleteLinkedRecord = deleteLinkedRecord
+        val debtId = mutableHistory.entries.firstNotNullOf { (id, payments) ->
+            id.takeIf { payments.any { payment -> payment.id == paymentId } }
+        }
+        mutableHistory[debtId]?.removeAll { it.id == paymentId }
+        return mutableDebts.first { it.id == debtId }.copy(status = "open", remainingAmount = "50.00", closedAt = null)
+    }
+
     private fun nextPaymentId(debtId: Long): Long =
         (mutableHistory[debtId].orEmpty().maxOfOrNull { it.id } ?: 0) + 1
 }
@@ -278,10 +364,12 @@ private fun paymentItem(
     debtId: Long = 1,
     operationType: String = "debt_repay",
     isWriteOff: Boolean = false,
+    recordId: Long? = 1,
 ): DebtPaymentItem =
     DebtPaymentItem(
         id = id,
         debtId = debtId,
+        recordId = recordId,
         operationType = operationType,
         principalPaid = "20.00",
         isWriteOff = isWriteOff,

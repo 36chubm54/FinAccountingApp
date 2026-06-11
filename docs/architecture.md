@@ -96,12 +96,17 @@ Current Kotlin/Rust contract:
   audit repair actions, and migrations remain separate beta.1 slices
 - Kotlin Debts uses Rust/Kotlin UniFFI for debt/loan listing, selected payment
   history, base-currency debt/loan creation with Rust-owned linked cashflow
-  rows, payment registration, write-offs, and close-by-payment flows; delete,
-  debt import/export, and debt-card editing remain separate beta.1 slices
+  rows, payment registration, write-offs, close-by-payment flows, debt-card
+  deletion, and payment deletion; debt import/export and debt-card editing
+  remain separate beta.1 slices
 - Debts payment, write-off, and close actions keep remaining-balance validation,
   linked cashflow row writes, debt payment inserts, and debt status updates in a
   single Rust storage transaction; closing an already closed debt remains
   idempotent to match the Python legacy contract
+- Debts deletion preserves the Python legacy contract: deleting a debt card
+  removes the card and payment history while preserving linked operation rows as
+  standalone records, and deleting a payment can optionally remove its linked
+  cashflow row
 - Kotlin Operations rejects transfer-linked and debt-linked record edits at the
   Rust storage boundary; transfer-linked mirror rows are grouped into one
   transfer journal row with source/target wallet direction and transfer-level

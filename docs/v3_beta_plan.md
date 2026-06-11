@@ -42,9 +42,9 @@ Current status:
   which unlocks manual transfer-creator smoke testing on copied ledger DBs.
 - Debts wiring is moving in phased slices: Kotlin Desktop can list debts/loans,
   show selected debt payment history, create base-currency debts/loans, register
-  payments, register write-offs, and close debts/loans through Rust/Kotlin
-  UniFFI while delete, debt-card editing, and import/export stay pending
-  follow-up slices.
+  payments, register write-offs, close debts/loans, delete debt cards, and
+  delete payments through Rust/Kotlin UniFFI while debt-card editing and
+  import/export stay pending follow-up slices.
 - Remaining beta.1 work is capability wiring and screen parity for the other
   Operations flows and the other sections through Rust/Kotlin UniFFI, not a
   Kotlin-to-Python runtime bridge.

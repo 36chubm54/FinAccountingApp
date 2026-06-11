@@ -319,6 +319,15 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
         engine.closeDebt(request.toNative()).let(::toDebtItem)
     }
 
+    override suspend fun deleteDebt(debtId: Long): Boolean = withContext(Dispatchers.IO) {
+        engine.deleteDebt(debtId)
+    }
+
+    override suspend fun deleteDebtPayment(paymentId: Long, deleteLinkedRecord: Boolean): DebtItem =
+        withContext(Dispatchers.IO) {
+            engine.deleteDebtPayment(paymentId, deleteLinkedRecord).let(::toDebtItem)
+        }
+
     override suspend fun runAudit(): List<AuditFinding> = withContext(Dispatchers.IO) {
         engine.auditRun().map {
             AuditFinding(

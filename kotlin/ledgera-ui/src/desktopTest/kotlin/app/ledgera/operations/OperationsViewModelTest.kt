@@ -1200,6 +1200,21 @@ private class FakeEngineAdapter(
             closedAt = request.paymentDate,
         )
 
+    override suspend fun deleteDebt(debtId: Long): Boolean = true
+
+    override suspend fun deleteDebtPayment(paymentId: Long, deleteLinkedRecord: Boolean): DebtItem =
+        DebtItem(
+            id = 1,
+            contactName = "Alice",
+            kind = "debt",
+            totalAmount = "10.00",
+            remainingAmount = "10.00",
+            currency = "KZT",
+            interestRate = "0.000000",
+            status = "open",
+            createdAt = "2026-01-01",
+        )
+
     override suspend fun runAudit(): List<AuditFinding> = emptyList()
 
     private fun replaceWalletBalance(walletId: Long, update: (Double) -> Double) {

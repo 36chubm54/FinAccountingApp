@@ -28,6 +28,10 @@ data class DebtsUiState(
     val createInProgress: Boolean = false,
     val actionDraft: DebtActionDraft? = null,
     val actionInProgress: Boolean = false,
+    val deleteDebtId: Long? = null,
+    val deletePayment: DebtPaymentItem? = null,
+    val deleteLinkedRecord: Boolean = false,
+    val deleteInProgress: Boolean = false,
     val error: String? = null,
     val notice: String? = null,
 )
@@ -65,6 +69,14 @@ class DebtsViewModel(
                     createDraft = previous.createDraft,
                     actionDraft = previous.actionDraft,
                     actionInProgress = previous.actionInProgress,
+                    deleteDebtId = previous.deleteDebtId?.takeIf { deleteId ->
+                        debts.any { it.id == deleteId }
+                    },
+                    deletePayment = previous.deletePayment?.takeIf { payment ->
+                        history.any { it.id == payment.id }
+                    },
+                    deleteLinkedRecord = previous.deleteLinkedRecord,
+                    deleteInProgress = previous.deleteInProgress,
                     notice = notice,
                 )
             }.onFailure { error ->
@@ -248,6 +260,108 @@ class DebtsViewModel(
             }.onFailure { error ->
                 mutableState.value = mutableState.value.copy(
                     actionInProgress = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
+    fun requestDeleteSelectedDebt() {
+        val state = mutableState.value
+        val debt = selectedDebt(state)
+        if (debt == null) {
+            mutableState.value = state.copy(error = "Select a debt or loan first", notice = null)
+            return
+        }
+        mutableState.value = state.copy(
+            deleteDebtId = debt.id,
+            deletePayment = null,
+            deleteInProgress = false,
+            error = null,
+            notice = null,
+        )
+    }
+
+    fun closeDeleteDebtDialog() {
+        mutableState.value = mutableState.value.copy(deleteDebtId = null, deleteInProgress = false, error = null)
+    }
+
+    fun deleteSelectedDebt() {
+        val state = mutableState.value
+        val debtId = state.deleteDebtId ?: return
+        val debt = state.debts.firstOrNull { it.id == debtId }
+        if (debt == null) {
+            mutableState.value = state.copy(error = "Debt not found", notice = null)
+            return
+        }
+        mutableState.value = state.copy(deleteInProgress = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                engine.deleteDebt(debtId)
+                val notice = if (debt.kind == "loan") {
+                    "Loan deleted (id=$debtId)"
+                } else {
+                    "Debt deleted (id=$debtId)"
+                }
+                mutableState.value = mutableState.value.copy(
+                    deleteDebtId = null,
+                    deleteInProgress = false,
+                    selectedDebtId = null,
+                    selectedHistory = emptyList(),
+                )
+                refresh(notice = notice)
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    deleteInProgress = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
+    fun requestDeletePayment(payment: DebtPaymentItem) {
+        mutableState.value = mutableState.value.copy(
+            deleteDebtId = null,
+            deletePayment = payment,
+            deleteLinkedRecord = false,
+            deleteInProgress = false,
+            error = null,
+            notice = null,
+        )
+    }
+
+    fun updateDeleteLinkedRecord(deleteLinkedRecord: Boolean) {
+        mutableState.value = mutableState.value.copy(deleteLinkedRecord = deleteLinkedRecord, error = null)
+    }
+
+    fun closeDeletePaymentDialog() {
+        mutableState.value = mutableState.value.copy(
+            deletePayment = null,
+            deleteLinkedRecord = false,
+            deleteInProgress = false,
+            error = null,
+        )
+    }
+
+    fun deleteSelectedPayment() {
+        val state = mutableState.value
+        val payment = state.deletePayment ?: return
+        mutableState.value = state.copy(deleteInProgress = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                val updated = engine.deleteDebtPayment(payment.id, state.deleteLinkedRecord && payment.recordId != null)
+                mutableState.value = mutableState.value.copy(
+                    deletePayment = null,
+                    deleteLinkedRecord = false,
+                    deleteInProgress = false,
+                    selectedDebtId = updated.id,
+                )
+                refresh(notice = "Payment deleted (id=${payment.id})")
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    deleteInProgress = false,
                     error = error.message ?: error::class.simpleName ?: "Unknown error",
                     notice = null,
                 )
