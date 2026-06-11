@@ -73,13 +73,24 @@ fun DebtsScreen(viewModel: DebtsViewModel, modifier: Modifier = Modifier) {
             }
         }
 
-        FloatingActionButton(
-            onClick = { viewModel.openCreateDialog("debt") },
+        Column(
             modifier = Modifier.align(Alignment.BottomEnd).padding(32.dp),
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("+", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            FloatingActionButton(
+                onClick = { viewModel.openCreateDialog("loan") },
+                containerColor = MaterialTheme.colorScheme.secondary,
+                contentColor = MaterialTheme.colorScheme.onSecondary,
+            ) {
+                Text("Loan", fontWeight = FontWeight.Bold)
+            }
+            FloatingActionButton(
+                onClick = { viewModel.openCreateDialog("debt") },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            ) {
+                Text("Debt", fontWeight = FontWeight.Bold)
+            }
         }
 
         state.createDraft?.let { draft ->
