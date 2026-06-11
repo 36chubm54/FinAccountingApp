@@ -45,6 +45,7 @@ pub struct WalletDeleteResult {
 pub struct OperationDeleteResult {
     pub deleted_records: i64,
     pub deleted_transfers: i64,
+    pub deleted_debt_linked_records: i64,
     pub skipped_records: i64,
 }
 
@@ -1174,7 +1175,7 @@ pub fn delete_transfer(db_path: &str, transfer_id: i64) -> StorageResult<bool> {
     if existing.is_none() {
         return Err(format!("Transfer not found: {transfer_id}"));
     }
-    delete_operations_in_tx(&tx, &[], &[transfer_id], 0)?;
+    delete_operations_in_tx(&tx, &[], &[], &[transfer_id], 0)?;
 
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
@@ -1189,9 +1190,15 @@ pub fn delete_all_operations(db_path: &str) -> StorageResult<OperationDeleteResu
 
     let transfer_ids = all_transfer_ids_in_tx(&tx)?;
     let standalone_record_ids = deletable_standalone_record_ids_in_tx(&tx, &transfer_ids)?;
+    let debt_linked_record_ids = deletable_debt_linked_record_ids_in_tx(&tx)?;
     let skipped_records = skipped_operation_record_count_in_tx(&tx, &transfer_ids)?;
-    let result =
-        delete_operations_in_tx(&tx, &standalone_record_ids, &transfer_ids, skipped_records)?;
+    let result = delete_operations_in_tx(
+        &tx,
+        &standalone_record_ids,
+        &debt_linked_record_ids,
+        &transfer_ids,
+        skipped_records,
+    )?;
 
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
@@ -1218,7 +1225,15 @@ pub fn delete_operations_selection(
     }
     let selected_record_ids =
         validate_selected_operation_record_ids_in_tx(&tx, record_ids, &selected_transfer_ids)?;
-    let result = delete_operations_in_tx(&tx, &selected_record_ids, &selected_transfer_ids, 0)?;
+    let (standalone_record_ids, debt_linked_record_ids) =
+        partition_operation_record_ids_in_tx(&tx, &selected_record_ids)?;
+    let result = delete_operations_in_tx(
+        &tx,
+        &standalone_record_ids,
+        &debt_linked_record_ids,
+        &selected_transfer_ids,
+        0,
+    )?;
 
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
@@ -1353,6 +1368,7 @@ fn import_operation_plan(
     delete_operations_in_tx(
         &tx,
         &existing_record_ids,
+        &[],
         &existing_transfer_ids,
         skipped_existing,
     )?;
@@ -2754,21 +2770,7 @@ pub fn delete_standalone_record(db_path: &str, record_id: i64) -> StorageResult<
     conn.pragma_update(None, "foreign_keys", "ON")
         .map_err(sqlite_err)?;
     let tx = conn.transaction().map_err(sqlite_err)?;
-    ensure_standalone_record_exists_in_tx(&tx, record_id)?;
-    if transfer_commission_marker_in_tx(&tx, record_id)?.is_some() {
-        return Err("Transfer commission must be deleted with its transfer".to_owned());
-    }
-    tx.execute("DELETE FROM record_tags WHERE record_id = ?1", [record_id])
-        .map_err(sqlite_err)?;
-    let deleted = tx
-        .execute(
-            "DELETE FROM records
-             WHERE id = ?1
-               AND transfer_id IS NULL
-               AND related_debt_id IS NULL",
-            [record_id],
-        )
-        .map_err(sqlite_err)?;
+    let deleted = delete_operation_record_in_tx(&tx, record_id)?;
     refresh_tag_metrics_in_tx(&tx)?;
     prune_orphan_tags_in_tx(&tx)?;
     tx.commit().map_err(sqlite_err)?;
@@ -3062,6 +3064,25 @@ fn deletable_standalone_record_ids_in_tx(
     Ok(ids)
 }
 
+fn deletable_debt_linked_record_ids_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+) -> StorageResult<Vec<i64>> {
+    let mut stmt = tx
+        .prepare(
+            "SELECT id
+             FROM records
+             WHERE transfer_id IS NULL
+               AND related_debt_id IS NOT NULL
+               AND type IN ('income', 'expense')
+             ORDER BY id",
+        )
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, i64>(0))
+        .map_err(sqlite_err)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_err)
+}
+
 fn skipped_operation_record_count_in_tx(
     tx: &rusqlite::Transaction<'_>,
     transfer_ids: &[i64],
@@ -3135,13 +3156,13 @@ fn validate_selected_operation_record_ids_in_tx(
                 "Select transfer #{transfer_id} instead of linked record #{record_id}"
             ));
         }
-        if related_debt_id.is_some() {
-            return Err("Debt-linked records cannot be deleted from Kotlin Operations".to_owned());
-        }
         if record_type != "income" && record_type != "expense" {
             return Err(
-                "Only standalone income and expense records can be bulk deleted".to_owned(),
+                "Only income and expense records can be bulk deleted from Operations".to_owned(),
             );
+        }
+        if let Some(debt_id) = related_debt_id {
+            debt_payment_for_record_in_tx(tx, debt_id, record_id)?;
         }
         if let Some(marker_transfer_id) = transfer_marker_id(&description) {
             if selected_transfers.contains(&marker_transfer_id) {
@@ -3154,9 +3175,35 @@ fn validate_selected_operation_record_ids_in_tx(
     Ok(selected_records)
 }
 
+fn partition_operation_record_ids_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    record_ids: &[i64],
+) -> StorageResult<(Vec<i64>, Vec<i64>)> {
+    let mut standalone_record_ids = Vec::new();
+    let mut debt_linked_record_ids = Vec::new();
+    for record_id in record_ids {
+        let related_debt_id = tx
+            .query_row(
+                "SELECT related_debt_id FROM records WHERE id = ?1",
+                [record_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()
+            .map_err(sqlite_err)?
+            .ok_or_else(|| format!("Record not found: {record_id}"))?;
+        if related_debt_id.is_some() {
+            debt_linked_record_ids.push(*record_id);
+        } else {
+            standalone_record_ids.push(*record_id);
+        }
+    }
+    Ok((standalone_record_ids, debt_linked_record_ids))
+}
+
 fn delete_operations_in_tx(
     tx: &rusqlite::Transaction<'_>,
     record_ids: &[i64],
+    debt_linked_record_ids: &[i64],
     transfer_ids: &[i64],
     skipped_records: i64,
 ) -> StorageResult<OperationDeleteResult> {
@@ -3167,18 +3214,12 @@ fn delete_operations_in_tx(
 
     let mut deleted_records = 0_i64;
     for record_id in record_ids {
-        tx.execute("DELETE FROM record_tags WHERE record_id = ?1", [record_id])
-            .map_err(sqlite_err)?;
-        deleted_records += tx
-            .execute(
-                "DELETE FROM records
-                 WHERE id = ?1
-                   AND transfer_id IS NULL
-                   AND related_debt_id IS NULL
-                   AND type IN ('income', 'expense')",
-                [record_id],
-            )
-            .map_err(sqlite_err)? as i64;
+        deleted_records += delete_operation_record_in_tx(tx, *record_id)? as i64;
+    }
+
+    let mut deleted_debt_linked_records = 0_i64;
+    for record_id in debt_linked_record_ids {
+        deleted_debt_linked_records += delete_operation_record_in_tx(tx, *record_id)? as i64;
     }
 
     let mut deleted_transfers = 0_i64;
@@ -3220,8 +3261,164 @@ fn delete_operations_in_tx(
     Ok(OperationDeleteResult {
         deleted_records,
         deleted_transfers,
+        deleted_debt_linked_records,
         skipped_records,
     })
+}
+
+fn delete_operation_record_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    record_id: i64,
+) -> StorageResult<usize> {
+    let row = tx
+        .query_row(
+            "SELECT type, transfer_id, related_debt_id, description
+             FROM records
+             WHERE id = ?1",
+            [record_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<i64>>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(sqlite_err)?;
+    let Some((record_type, transfer_id, related_debt_id, description)) = row else {
+        return Err(format!("Record not found: {record_id}"));
+    };
+    if let Some(transfer_id) = transfer_id {
+        return Err(format!(
+            "Select transfer #{transfer_id} instead of linked record #{record_id}"
+        ));
+    }
+    if record_type != "income" && record_type != "expense" {
+        return Err("Only income and expense records can be deleted from Operations".to_owned());
+    }
+    if related_debt_id.is_none() && transfer_marker_id(&description).is_some() {
+        return Err("Transfer commission must be deleted with its transfer".to_owned());
+    }
+
+    match related_debt_id {
+        Some(debt_id) => delete_debt_linked_operation_record_in_tx(tx, record_id, debt_id),
+        None => {
+            tx.execute("DELETE FROM record_tags WHERE record_id = ?1", [record_id])
+                .map_err(sqlite_err)?;
+            tx.execute("DELETE FROM records WHERE id = ?1", [record_id])
+                .map_err(sqlite_err)
+        }
+    }
+}
+
+fn debt_payment_for_record_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    debt_id: i64,
+    record_id: i64,
+) -> StorageResult<Option<i64>> {
+    let mut stmt = tx
+        .prepare(
+            "SELECT id
+             FROM debt_payments
+             WHERE debt_id = ?1
+               AND record_id = ?2
+             ORDER BY id",
+        )
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map((debt_id, record_id), |row| row.get::<_, i64>(0))
+        .map_err(sqlite_err)?;
+    let mut payment_ids = Vec::new();
+    for row in rows {
+        payment_ids.push(row.map_err(sqlite_err)?);
+    }
+    match payment_ids.as_slice() {
+        [payment_id] => Ok(Some(*payment_id)),
+        [] => Ok(None),
+        _ => Err(format!(
+            "Debt-linked record #{record_id} has multiple matching debt payments"
+        )),
+    }
+}
+
+fn delete_debt_linked_operation_record_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    record_id: i64,
+    debt_id: i64,
+) -> StorageResult<usize> {
+    let Some(payment_id) = debt_payment_for_record_in_tx(tx, debt_id, record_id)? else {
+        tx.execute("DELETE FROM record_tags WHERE record_id = ?1", [record_id])
+            .map_err(sqlite_err)?;
+        return tx
+            .execute("DELETE FROM records WHERE id = ?1", [record_id])
+            .map_err(sqlite_err);
+    };
+    let principal_paid_minor: i64 = tx
+        .query_row(
+            "SELECT principal_paid_minor
+             FROM debt_payments
+             WHERE id = ?1",
+            [payment_id],
+            |row| row.get(0),
+        )
+        .map_err(sqlite_err)?;
+    let debt_row = tx
+        .query_row(
+            "SELECT total_amount_minor, remaining_amount_minor, status, closed_at
+             FROM debts
+             WHERE id = ?1",
+            [debt_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(sqlite_err)?;
+    let Some((total_amount_minor, remaining_amount_minor, status, closed_at)) = debt_row else {
+        return Err(format!("Debt not found: {debt_id}"));
+    };
+
+    tx.execute("DELETE FROM record_tags WHERE record_id = ?1", [record_id])
+        .map_err(sqlite_err)?;
+    let deleted = tx
+        .execute("DELETE FROM records WHERE id = ?1", [record_id])
+        .map_err(sqlite_err)?;
+    tx.execute("DELETE FROM debt_payments WHERE id = ?1", [payment_id])
+        .map_err(sqlite_err)?;
+    let restored_remaining =
+        (remaining_amount_minor + principal_paid_minor).min(total_amount_minor);
+    let next_status = if restored_remaining > 0 {
+        "open".to_owned()
+    } else {
+        status
+    };
+    let next_closed_at = if restored_remaining > 0 {
+        None
+    } else {
+        closed_at
+    };
+    tx.execute(
+        "UPDATE debts
+         SET remaining_amount_minor = ?1,
+             status = ?2,
+             closed_at = ?3
+         WHERE id = ?4",
+        (
+            restored_remaining,
+            next_status.as_str(),
+            next_closed_at.as_deref(),
+            debt_id,
+        ),
+    )
+    .map_err(sqlite_err)?;
+    Ok(deleted)
 }
 
 struct TransferCommissionMarker {
@@ -4828,15 +5025,45 @@ mod tests {
             .unwrap_err()
             .contains("Only standalone records")
         );
-        assert!(
-            delete_standalone_record(&db_path, 6)
-                .unwrap_err()
-                .contains("Only standalone records")
-        );
-
         assert!(delete_standalone_record(&db_path, 2).unwrap());
         assert!(standalone_record_get_row(&db_path, 2).unwrap().is_none());
         assert!(tag_names(&db_path).unwrap().is_empty());
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn delete_debt_linked_record_removes_payment_and_restores_debt() {
+        let db_path = create_balance_test_db();
+        let conn = Connection::open(&db_path).unwrap();
+        insert_test_debt(&conn, 1, "Alex");
+        insert_test_debt_record_payment(&conn, 1, 6, 1, "Debt payment");
+        drop(conn);
+
+        assert!(delete_standalone_record(&db_path, 6).unwrap());
+
+        let conn = Connection::open(&db_path).unwrap();
+        let record_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM records WHERE id = 6", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let payment_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM debt_payments WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let debt_state: (i64, String, Option<String>) = conn
+            .query_row(
+                "SELECT remaining_amount_minor, status, closed_at FROM debts WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(record_count, 0);
+        assert_eq!(payment_count, 0);
+        assert_eq!(debt_state, (10000, "open".to_owned(), None));
         remove_test_db(&db_path);
     }
 
@@ -5579,6 +5806,18 @@ mod tests {
             },
         )
         .unwrap();
+        let conn = Connection::open(&db_path).unwrap();
+        insert_test_debt(&conn, 1, "Alex");
+        insert_test_debt_record_payment(&conn, 1, 60, 1, "Debt payment");
+        conn.execute(
+            "INSERT INTO records (
+                id, type, date, wallet_id, related_debt_id,
+                amount_original, amount_original_minor, amount_base, amount_base_minor, category
+             ) VALUES (61, 'expense', '2026-01-06', 1, 1, 10.0, 1000, 10.0, 1000, 'Detached debt row')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
 
         let result = delete_all_operations(&db_path).unwrap();
 
@@ -5587,6 +5826,7 @@ mod tests {
             OperationDeleteResult {
                 deleted_records: 2,
                 deleted_transfers: 2,
+                deleted_debt_linked_records: 2,
                 skipped_records: 1,
             }
         );
@@ -5595,9 +5835,21 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].record_type, "mandatory_expense");
         let conn = Connection::open(&db_path).unwrap();
+        let payment_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM debt_payments", [], |row| row.get(0))
+            .unwrap();
+        let remaining: i64 = conn
+            .query_row(
+                "SELECT remaining_amount_minor FROM debts WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         let tag_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM tags", [], |row| row.get(0))
             .unwrap();
+        assert_eq!(payment_count, 0);
+        assert_eq!(remaining, 10000);
         assert_eq!(tag_count, 0);
         remove_test_db(&db_path);
     }
@@ -5613,6 +5865,7 @@ mod tests {
             OperationDeleteResult {
                 deleted_records: 1,
                 deleted_transfers: 1,
+                deleted_debt_linked_records: 0,
                 skipped_records: 0,
             }
         );
@@ -5621,6 +5874,41 @@ mod tests {
         ids.sort_unstable();
         assert_eq!(ids, vec![1, 3]);
         assert!(transfer_get_row(&db_path, 1).unwrap().is_none());
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn delete_operations_selection_removes_debt_linked_record_and_payment() {
+        let db_path = create_balance_test_db();
+        let conn = Connection::open(&db_path).unwrap();
+        insert_test_debt(&conn, 1, "Alex");
+        insert_test_debt_record_payment(&conn, 1, 6, 1, "Debt payment");
+        drop(conn);
+
+        let result = delete_operations_selection(&db_path, &[6], &[]).unwrap();
+
+        assert_eq!(
+            result,
+            OperationDeleteResult {
+                deleted_records: 0,
+                deleted_transfers: 0,
+                deleted_debt_linked_records: 1,
+                skipped_records: 0,
+            }
+        );
+        let conn = Connection::open(&db_path).unwrap();
+        let payment_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM debt_payments", [], |row| row.get(0))
+            .unwrap();
+        let remaining: i64 = conn
+            .query_row(
+                "SELECT remaining_amount_minor FROM debts WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(payment_count, 0);
+        assert_eq!(remaining, 10000);
         remove_test_db(&db_path);
     }
 
@@ -5743,10 +6031,12 @@ mod tests {
 
         assert_eq!(preview.imported, 0);
         assert_eq!(preview.skipped, 1);
-        assert!(preview
-            .errors
-            .iter()
-            .any(|error| error.contains("debt-linked rows require record_id")));
+        assert!(
+            preview
+                .errors
+                .iter()
+                .any(|error| error.contains("debt-linked rows require record_id"))
+        );
 
         let _ = fs::remove_file(path);
         remove_test_db(&db_path);
@@ -5788,10 +6078,12 @@ mod tests {
 
         assert_eq!(preview.imported, 1);
         assert_eq!(preview.skipped, 1);
-        assert!(preview
-            .errors
-            .iter()
-            .any(|error| error.contains("duplicate debt-linked record_id 6")));
+        assert!(
+            preview
+                .errors
+                .iter()
+                .any(|error| error.contains("duplicate debt-linked record_id 6"))
+        );
 
         let _ = fs::remove_file(path);
         remove_test_db(&db_path);

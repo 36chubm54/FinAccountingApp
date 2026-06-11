@@ -118,6 +118,7 @@ data class UpdateTransferResult(
 data class OperationDeleteResult(
     val deletedRecords: Long,
     val deletedTransfers: Long,
+    val deletedDebtLinkedRecords: Long,
     val skippedRecords: Long,
 )
 

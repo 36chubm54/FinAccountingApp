@@ -154,6 +154,7 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
             OperationDeleteResult(
                 deletedRecords = it.deletedRecords,
                 deletedTransfers = it.deletedTransfers,
+                deletedDebtLinkedRecords = it.deletedDebtLinkedRecords,
                 skippedRecords = it.skippedRecords,
             )
         }
@@ -167,6 +168,7 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
             OperationDeleteResult(
                 deletedRecords = it.deletedRecords,
                 deletedTransfers = it.deletedTransfers,
+                deletedDebtLinkedRecords = it.deletedDebtLinkedRecords,
                 skippedRecords = it.skippedRecords,
             )
         }

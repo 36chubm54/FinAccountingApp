@@ -100,6 +100,7 @@ dictionary WalletDeleteResultDto {
 dictionary OperationDeleteResultDto {
     i64 deleted_records;
     i64 deleted_transfers;
+    i64 deleted_debt_linked_records;
     i64 skipped_records;
 };
 

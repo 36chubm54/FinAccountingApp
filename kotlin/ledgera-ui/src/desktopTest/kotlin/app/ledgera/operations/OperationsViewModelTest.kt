@@ -383,6 +383,7 @@ class OperationsViewModelTest {
                 operationRecord(id = 2, type = "expense", transferId = 42, category = "Transfer"),
                 operationRecord(id = 3, type = "income", transferId = 42, category = "Transfer"),
                 operationRecord(id = 4, type = "mandatory_expense", category = "Mandatory"),
+                operationRecord(id = 5, type = "expense", relatedDebtId = 1, category = "Debt"),
             )
         )
         val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
@@ -392,7 +393,7 @@ class OperationsViewModelTest {
 
         assertEquals(1, adapter.deleteAllOperationsCalls)
         assertEquals(
-            "Deleted 1 records and 1 transfers. Skipped 1 unsupported linked records",
+            "Deleted 1 records, 1 transfers, and 1 debt-linked records. Skipped 1 unsupported linked records",
             viewModel.state.value.notice,
         )
         assertEquals(listOf(4L), viewModel.state.value.records.map { it.id })
@@ -404,7 +405,6 @@ class OperationsViewModelTest {
         val adapter = FakeEngineAdapter(
             records = mutableListOf(
                 operationRecord(id = 4, type = "mandatory_expense", category = "Mandatory"),
-                operationRecord(id = 5, type = "expense", relatedDebtId = 1, category = "Debt"),
             )
         )
         val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
@@ -415,7 +415,7 @@ class OperationsViewModelTest {
         viewModel.deleteAllOperations()
 
         assertEquals(0, adapter.deleteAllOperationsCalls)
-        assertEquals("No standalone operations or transfers to delete", viewModel.state.value.notice)
+        assertEquals("No operations, transfers, or debt-linked rows to delete", viewModel.state.value.notice)
         assertEquals(null, viewModel.state.value.error)
     }
 
@@ -439,11 +439,29 @@ class OperationsViewModelTest {
         assertEquals(1, adapter.deleteSelectionCalls)
         assertEquals(listOf(1L), adapter.lastDeletedRecordIds)
         assertEquals(listOf(42L), adapter.lastDeletedTransferIds)
-        assertEquals("Deleted 1 records and 1 transfers", viewModel.state.value.notice)
+        assertEquals("Deleted 1 records, 1 transfers, and 0 debt-linked records", viewModel.state.value.notice)
         assertEquals(emptyList(), viewModel.state.value.records)
         assertEquals(false, viewModel.state.value.selectiveDeleteMode)
         assertEquals(emptySet(), viewModel.state.value.selectedBulkRecordIds)
         assertEquals(emptySet(), viewModel.state.value.selectedBulkTransferIds)
+    }
+
+    @Test
+    fun selectiveDeleteCanSelectDebtLinkedRecords() {
+        val adapter = FakeEngineAdapter(
+            records = mutableListOf(operationRecord(id = 5, type = "expense", relatedDebtId = 1, category = "Debt"))
+        )
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.startSelectiveDelete()
+        viewModel.toggleBulkRecord(5)
+        viewModel.deleteSelectedOperations()
+
+        assertEquals(1, adapter.deleteSelectionCalls)
+        assertEquals(listOf(5L), adapter.lastDeletedRecordIds)
+        assertEquals("Deleted 0 records, 0 transfers, and 1 debt-linked records", viewModel.state.value.notice)
+        assertEquals(emptyList(), viewModel.state.value.records)
     }
 
     @Test
@@ -560,6 +578,24 @@ class OperationsViewModelTest {
         viewModel.select(7)
 
         assertEquals("Transfer-linked rows are read-only in this beta.1 slice", viewModel.state.value.notice)
+        assertEquals(null, viewModel.state.value.editDraft)
+        assertEquals(null, viewModel.state.value.selectedRecordId)
+    }
+
+    @Test
+    fun selectDebtLinkedRecordShowsSelectiveDeleteNotice() {
+        val adapter = FakeEngineAdapter(
+            records = mutableListOf(operationRecord(id = 8, relatedDebtId = 1, category = "Debt"))
+        )
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.select(8)
+
+        assertEquals(
+            "Debt-linked rows are read-only. Use Selective delete to remove them from Operations and debt history.",
+            viewModel.state.value.notice,
+        )
         assertEquals(null, viewModel.state.value.editDraft)
         assertEquals(null, viewModel.state.value.selectedRecordId)
     }
@@ -1064,15 +1100,18 @@ private class FakeEngineAdapter(
                 (it.type == "income" || it.type == "expense") &&
                 !it.description.matches(Regex("""^\[transfer:\d+]$"""))
         }.toLong()
+        val deletedDebtLinkedRecords = records.count {
+            it.transferId == null &&
+                it.relatedDebtId != null &&
+                (it.type == "income" || it.type == "expense")
+        }.toLong()
         val skippedRecords = records.count {
-            it.relatedDebtId != null ||
-                (it.transferId == null && it.type != "income" && it.type != "expense")
+            it.transferId == null && it.type != "income" && it.type != "expense"
         }.toLong()
         records.removeIf {
             it.transferId in transferIds ||
                 (
                     it.transferId == null &&
-                        it.relatedDebtId == null &&
                         (it.type == "income" || it.type == "expense") &&
                         !it.description.matches(Regex("""^\[transfer:\d+]$"""))
                     )
@@ -1080,6 +1119,7 @@ private class FakeEngineAdapter(
         return OperationDeleteResult(
             deletedRecords = deletedRecords,
             deletedTransfers = transferIds.size.toLong(),
+            deletedDebtLinkedRecords = deletedDebtLinkedRecords,
             skippedRecords = skippedRecords,
         )
     }
@@ -1092,12 +1132,17 @@ private class FakeEngineAdapter(
         deleteSelectionCalls += 1
         lastDeletedRecordIds = recordIds
         lastDeletedTransferIds = transferIds
+        val deletedDebtLinkedRecords = records.count { record ->
+            record.id in recordIds && record.relatedDebtId != null
+        }.toLong()
+        val deletedRecords = recordIds.size.toLong() - deletedDebtLinkedRecords
         records.removeIf { record ->
             record.id in recordIds || record.transferId in transferIds || transferIds.any { record.description == "[transfer:$it]" }
         }
         return OperationDeleteResult(
-            deletedRecords = recordIds.size.toLong(),
+            deletedRecords = deletedRecords,
             deletedTransfers = transferIds.size.toLong(),
+            deletedDebtLinkedRecords = deletedDebtLinkedRecords,
             skippedRecords = 0,
         )
     }

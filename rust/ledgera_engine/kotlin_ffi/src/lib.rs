@@ -125,6 +125,7 @@ pub struct WalletDeleteResultDto {
 pub struct OperationDeleteResultDto {
     pub deleted_records: i64,
     pub deleted_transfers: i64,
+    pub deleted_debt_linked_records: i64,
     pub skipped_records: i64,
 }
 
@@ -286,11 +287,7 @@ impl LedgeraEngine {
             record_type: filter.record_type,
         };
         filtered_record_list_rows(&self.db_path, &payload)
-            .map(|rows| {
-                rows.into_iter()
-                    .map(record_to_dto)
-                    .collect()
-            })
+            .map(|rows| rows.into_iter().map(record_to_dto).collect())
             .map_err(storage_error)
     }
 
@@ -765,6 +762,7 @@ fn operation_delete_to_dto(result: OperationDeleteResult) -> OperationDeleteResu
     OperationDeleteResultDto {
         deleted_records: result.deleted_records,
         deleted_transfers: result.deleted_transfers,
+        deleted_debt_linked_records: result.deleted_debt_linked_records,
         skipped_records: result.skipped_records,
     }
 }
@@ -1559,6 +1557,7 @@ mod tests {
             OperationDeleteResultDto {
                 deleted_records: 1,
                 deleted_transfers: 1,
+                deleted_debt_linked_records: 0,
                 skipped_records: 0,
             }
         );
@@ -1589,6 +1588,7 @@ mod tests {
             OperationDeleteResultDto {
                 deleted_records: 1,
                 deleted_transfers: 0,
+                deleted_debt_linked_records: 0,
                 skipped_records: 0,
             }
         );
@@ -1778,6 +1778,7 @@ mod tests {
             .expect("debt-linked record is visible to Operations");
         assert_eq!(linked_record.record_type, "income");
         assert_eq!(linked_record.category, "Debt");
+        let linked_record_id = linked_record.id;
         let conn = Connection::open(&db_path).expect("open");
         let linked_type: String = conn
             .query_row(
@@ -1787,6 +1788,20 @@ mod tests {
             )
             .expect("linked debt record");
         assert_eq!(linked_type, "income");
+        drop(conn);
+
+        assert!(
+            engine
+                .delete_record(linked_record_id)
+                .expect("delete debt-linked record")
+        );
+        assert!(engine.get_record(linked_record_id).unwrap().is_none());
+        assert!(
+            engine
+                .list_debt_payments(debt.id)
+                .expect("list debt payments")
+                .is_empty()
+        );
         fs::remove_file(db_path).ok();
     }
 

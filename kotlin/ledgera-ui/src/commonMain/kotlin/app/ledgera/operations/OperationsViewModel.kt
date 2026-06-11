@@ -45,8 +45,7 @@ data class OperationsUiState(
             if (record.transferId != null) {
                 true
             } else {
-                record.relatedDebtId == null &&
-                    (record.type == "income" || record.type == "expense") &&
+                (record.type == "income" || record.type == "expense") &&
                     !isTransferCommissionMarker(record.description)
             }
         }
@@ -130,7 +129,7 @@ class OperationsViewModel(
                 editDraft = null,
                 transferDraft = null,
                 error = null,
-                notice = "Debt-linked rows are read-only in this beta.1 slice",
+                notice = "Debt-linked rows are read-only. Use Selective delete to remove them from Operations and debt history.",
             )
             return
         }
@@ -353,12 +352,11 @@ class OperationsViewModel(
         }
         if (
             record.transferId != null ||
-            record.relatedDebtId != null ||
             (record.type != "income" && record.type != "expense") ||
             isTransferCommissionMarker(record.description)
         ) {
             mutableState.value = mutableState.value.copy(
-                error = "This linked record cannot be selected for bulk delete",
+                error = "This record cannot be selected for bulk delete",
                 notice = null,
             )
             return
@@ -571,7 +569,7 @@ class OperationsViewModel(
         if (!mutableState.value.hasBulkDeleteCandidates) {
             mutableState.value = mutableState.value.copy(
                 error = null,
-                notice = "No standalone operations or transfers to delete",
+                notice = "No operations, transfers, or debt-linked rows to delete",
             )
             return
         }
@@ -708,7 +706,8 @@ class OperationsViewModel(
     }
 
     private fun deleteNotice(result: OperationDeleteResult): String {
-        val base = "Deleted ${result.deletedRecords} records and ${result.deletedTransfers} transfers"
+        val base =
+            "Deleted ${result.deletedRecords} records, ${result.deletedTransfers} transfers, and ${result.deletedDebtLinkedRecords} debt-linked records"
         return if (result.skippedRecords > 0) {
             "$base. Skipped ${result.skippedRecords} unsupported linked records"
         } else {

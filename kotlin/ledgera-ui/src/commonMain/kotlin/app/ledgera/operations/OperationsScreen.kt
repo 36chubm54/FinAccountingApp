@@ -1068,7 +1068,11 @@ private fun DeleteAllConfirmDialog(onConfirm: () -> Unit, onCancel: () -> Unit) 
     AlertDialog(
         onDismissRequest = onCancel,
         title = { Text("Delete all operations") },
-        text = { Text("Delete all standalone operations and transfers? Linked debt records will be kept.") },
+        text = {
+            Text(
+                "Delete all standalone operations, transfers, and debt-linked operation rows? Matching debt payment history rows will be removed too. Unsupported rows will be kept."
+            )
+        },
         confirmButton = {
             Button(onClick = onConfirm) { Text("Delete all") }
         },

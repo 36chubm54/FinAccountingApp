@@ -26,13 +26,15 @@ Current status:
   state, and Operations is the active functional workflow.
 - Operations standalone record CRUD is wired for income/expense rows, including
   create/list/update/delete, tag replacement, and Rust-side rejection for
-  transfer/debt-linked rows.
+  transfer/debt-linked edits.
 - Operations transfer creation is wired for base-currency source/target wallet
   transfers with optional base-currency commission marker records; transfer
   editing/deletion is wired for base-currency transfers.
 - Operations safe bulk deletion is wired for delete-all and selective-delete
-  flows over Operations-owned standalone records/transfers; unsupported linked
-  records are preserved and reported as skipped.
+  flows over Operations-owned standalone records/transfers and debt-linked
+  cashflow rows; matching debt history rows are removed
+  synchronously when present, while unsupported linked records are preserved and
+  reported as skipped.
 - Operations CSV/XLSX import/export is wired for standalone records, aggregate
   transfer rows, and debt-linked operation rows while preserving debt payment
   record links during same-database replace-import. Transfer list parity,

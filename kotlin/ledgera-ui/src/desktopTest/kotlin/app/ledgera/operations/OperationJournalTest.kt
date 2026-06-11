@@ -36,7 +36,7 @@ class OperationJournalTest {
     }
 
     @Test
-    fun debtLinkedRowsRemainVisibleButNotBulkSelectable() {
+    fun debtLinkedRowsRemainVisibleAndBulkSelectable() {
         val rows = listOf(operationRecord(id = 4, category = "Debt", relatedDebtId = 9))
 
         val items = operationJournalItems(rows, selectedRecordId = null)
@@ -45,7 +45,7 @@ class OperationJournalTest {
         assertEquals("record:4", items.single().key)
         assertEquals("Debt-linked", items.single().linkedLabel)
         assertEquals(4, items.single().selectableRecordId)
-        assertEquals(false, items.single().bulkSelectable)
+        assertEquals(true, items.single().bulkSelectable)
     }
 }
 

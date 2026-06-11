@@ -49,6 +49,7 @@ This project adheres to Semantic Versioning.
 - Fixed XLSX replace-import to use the same ordered tabular import pipeline as CSV, preserving source row order and transfer id remapping.
 - Fixed Rust-backed Kotlin Operations CSV/XLSX migration so debt-linked operation rows are exported/imported with `related_debt_id`, while same-database replace-import remaps `debt_payments.record_id` to the newly inserted record.
 - Fixed Rust-backed Kotlin Debts payment/write-off/close actions so remaining-balance validation and linked cashflow writes happen inside one storage transaction, with raw debt payment writes rejecting overpayments as well.
+- Fixed Rust-backed Kotlin Operations deletion so debt-linked cashflow rows can be deleted from selective and delete-all Operations flows; matching debt payment history rows are removed synchronously and debt remaining/status is restored, while debt-linked rows without payment history are deleted as operation rows only.
 
 ### Docs
 
