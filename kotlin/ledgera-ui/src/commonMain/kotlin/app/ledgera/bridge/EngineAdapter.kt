@@ -6,16 +6,21 @@ import app.ledgera.model.CreateTransferRequest
 import app.ledgera.model.CreateTransferResult
 import app.ledgera.model.CreateWalletRequest
 import app.ledgera.model.AuditFinding
+import app.ledgera.model.AddMandatoryToRecordsRequest
 import app.ledgera.model.DebtItem
 import app.ledgera.model.DebtPaymentItem
 import app.ledgera.model.EngineStatus
+import app.ledgera.model.CreateMandatoryTemplateRequest
 import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationDeleteResult
 import app.ledgera.model.OperationExportResult
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
+import app.ledgera.model.MandatoryAutoPayResult
+import app.ledgera.model.MandatoryTemplateItem
 import app.ledgera.model.RegisterDebtPaymentRequest
 import app.ledgera.model.TransferDetails
+import app.ledgera.model.UpdateMandatoryTemplateRequest
 import app.ledgera.model.UpdateOperationRequest
 import app.ledgera.model.UpdateTransferRequest
 import app.ledgera.model.UpdateTransferResult
@@ -73,4 +78,17 @@ interface DebtsEngine {
     suspend fun deleteDebtPayment(paymentId: Long, deleteLinkedRecord: Boolean): DebtItem
 }
 
-interface EngineAdapter : RuntimeEngine, OperationsEngine, SettingsEngine, DebtsEngine
+interface MandatoryEngine {
+    suspend fun baseCurrency(): String
+    suspend fun listWallets(): List<WalletOption>
+    suspend fun listMandatoryTemplates(): List<MandatoryTemplateItem>
+    suspend fun getMandatoryTemplate(templateId: Long): MandatoryTemplateItem?
+    suspend fun createMandatoryTemplate(request: CreateMandatoryTemplateRequest): MandatoryTemplateItem
+    suspend fun updateMandatoryTemplate(templateId: Long, request: UpdateMandatoryTemplateRequest): MandatoryTemplateItem
+    suspend fun deleteMandatoryTemplate(templateId: Long): Boolean
+    suspend fun deleteAllMandatoryTemplates(): Long
+    suspend fun addMandatoryToRecords(request: AddMandatoryToRecordsRequest): OperationRecord
+    suspend fun applyMandatoryAutoPayments(today: String): MandatoryAutoPayResult
+}
+
+interface EngineAdapter : RuntimeEngine, OperationsEngine, SettingsEngine, DebtsEngine, MandatoryEngine

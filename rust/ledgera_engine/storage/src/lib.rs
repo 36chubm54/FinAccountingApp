@@ -93,6 +93,39 @@ pub struct MandatoryExpenseRow {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct MandatoryTemplateCreatePayload {
+    pub wallet_id: i64,
+    pub amount_original: String,
+    pub currency: String,
+    pub rate_at_operation: String,
+    pub amount_base: String,
+    pub category: String,
+    pub description: String,
+    pub period: String,
+    pub date: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MandatoryTemplateUpdatePayload {
+    pub wallet_id: i64,
+    pub amount_base: String,
+    pub period: String,
+    pub date: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MandatoryAddToRecordsPayload {
+    pub template_id: i64,
+    pub date: String,
+    pub wallet_id: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MandatoryAutoPayResult {
+    pub created_records: Vec<RecordRow>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct RecordRow {
     pub id: i64,
     pub record_type: String,
@@ -2574,6 +2607,259 @@ pub fn mandatory_expense_row(
     Ok(rows.pop())
 }
 
+pub fn mandatory_template_create(
+    db_path: &str,
+    payload: &MandatoryTemplateCreatePayload,
+) -> StorageResult<MandatoryExpenseRow> {
+    let mut conn = open_sqlite_connection(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(sqlite_err)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+
+    validate_mandatory_template_create_payload_in_tx(&tx, payload)?;
+    let currency = payload.currency.trim().to_uppercase();
+    let amount_original_minor = to_minor_units(&payload.amount_original)?;
+    let amount_base_minor = to_minor_units(&payload.amount_base)?;
+    let amount_original = quantize_money_text(&payload.amount_original)?
+        .parse::<f64>()
+        .map_err(|_| "invalid mandatory amount_original".to_owned())?;
+    let amount_base = quantize_money_text(&payload.amount_base)?
+        .parse::<f64>()
+        .map_err(|_| "invalid mandatory amount_base".to_owned())?;
+    let rate_text = quantize_rate_text(&payload.rate_at_operation)?;
+    let rate_value = rate_text
+        .parse::<f64>()
+        .map_err(|_| "invalid mandatory rate_at_operation".to_owned())?;
+    let normalized_date = payload.date.trim();
+    let auto_pay = !normalized_date.is_empty();
+    let category = payload.category.trim();
+    let description = payload.description.trim();
+    let period = payload.period.trim().to_lowercase();
+
+    tx.execute(
+        "INSERT INTO mandatory_expenses (
+            wallet_id,
+            amount_original,
+            amount_original_minor,
+            currency,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_base,
+            amount_base_minor,
+            category,
+            description,
+            period,
+            date,
+            auto_pay
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        (
+            payload.wallet_id,
+            amount_original,
+            amount_original_minor,
+            currency.as_str(),
+            rate_value,
+            rate_text.as_str(),
+            amount_base,
+            amount_base_minor,
+            category,
+            description,
+            period.as_str(),
+            normalized_date,
+            i64::from(auto_pay),
+        ),
+    )
+    .map_err(sqlite_err)?;
+    let template_id = tx.last_insert_rowid();
+    reset_sqlite_sequence_to_max_id_in_tx(&tx, "mandatory_expenses")?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    mandatory_expense_row(db_path, template_id)?
+        .ok_or_else(|| format!("Mandatory template not found: {template_id}"))
+}
+
+pub fn mandatory_template_update(
+    db_path: &str,
+    template_id: i64,
+    payload: &MandatoryTemplateUpdatePayload,
+) -> StorageResult<MandatoryExpenseRow> {
+    if template_id <= 0 {
+        return Err("Mandatory template id is required".to_owned());
+    }
+    let mut conn = open_sqlite_connection(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(sqlite_err)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+
+    ensure_mandatory_template_exists_in_tx(&tx, template_id)?;
+    validate_mandatory_template_update_payload_in_tx(&tx, payload)?;
+    let amount_base_minor = to_minor_units(&payload.amount_base)?;
+    let amount_base = quantize_money_text(&payload.amount_base)?
+        .parse::<f64>()
+        .map_err(|_| "invalid mandatory amount_base".to_owned())?;
+    let normalized_date = payload.date.trim();
+    let auto_pay = !normalized_date.is_empty();
+    let period = payload.period.trim().to_lowercase();
+
+    tx.execute(
+        "UPDATE mandatory_expenses
+         SET wallet_id = ?1,
+             amount_base = ?2,
+             amount_base_minor = ?3,
+             period = ?4,
+             date = ?5,
+             auto_pay = ?6
+         WHERE id = ?7",
+        (
+            payload.wallet_id,
+            amount_base,
+            amount_base_minor,
+            period.as_str(),
+            normalized_date,
+            i64::from(auto_pay),
+            template_id,
+        ),
+    )
+    .map_err(sqlite_err)?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    mandatory_expense_row(db_path, template_id)?
+        .ok_or_else(|| format!("Mandatory template not found: {template_id}"))
+}
+
+pub fn mandatory_template_delete(db_path: &str, template_id: i64) -> StorageResult<bool> {
+    if template_id <= 0 {
+        return Err("Mandatory template id is required".to_owned());
+    }
+    let mut conn = open_sqlite_connection(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(sqlite_err)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    ensure_mandatory_template_exists_in_tx(&tx, template_id)?;
+    let deleted = tx
+        .execute(
+            "DELETE FROM mandatory_expenses WHERE id = ?1",
+            [template_id],
+        )
+        .map_err(sqlite_err)?;
+    if deleted != 1 {
+        return Err(format!(
+            "Failed to delete mandatory template: {template_id}"
+        ));
+    }
+    normalize_mandatory_template_ids_in_tx(&tx)?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    Ok(true)
+}
+
+pub fn mandatory_template_delete_all(db_path: &str) -> StorageResult<i64> {
+    let mut conn = open_sqlite_connection(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(sqlite_err)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    let deleted = tx
+        .execute("DELETE FROM mandatory_expenses", [])
+        .map_err(sqlite_err)?;
+    reset_sqlite_sequence_to_max_id_in_tx(&tx, "mandatory_expenses")?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    Ok(i64::try_from(deleted).unwrap_or(i64::MAX))
+}
+
+pub fn mandatory_add_to_records(
+    db_path: &str,
+    payload: &MandatoryAddToRecordsPayload,
+) -> StorageResult<RecordRow> {
+    let mut conn = open_sqlite_connection(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(sqlite_err)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+
+    if payload.template_id <= 0 {
+        return Err("Mandatory template id is required".to_owned());
+    }
+    let template = mandatory_template_in_tx(&tx, payload.template_id)?;
+    insert_mandatory_record_from_template_in_tx(
+        &tx,
+        &template,
+        payload.date.trim(),
+        payload.wallet_id,
+        true,
+    )?;
+    let record_id = tx.last_insert_rowid();
+    let record_id_map = normalize_record_ids_in_tx(&tx)?;
+    let normalized_record_id = record_id_map.get(&record_id).copied().unwrap_or(record_id);
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    record_get_row(db_path, normalized_record_id)?
+        .ok_or_else(|| format!("Record not found: {normalized_record_id}"))
+}
+
+pub fn mandatory_apply_auto_payments(
+    db_path: &str,
+    today: &str,
+) -> StorageResult<MandatoryAutoPayResult> {
+    validate_ymd_date(today)?;
+    let mut conn = open_sqlite_connection(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(sqlite_err)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    let today_parts = parse_ymd_parts(today)?;
+    let templates = mandatory_templates_in_tx(&tx)?;
+    let mut inserted_record_ids = Vec::new();
+
+    for template in templates {
+        if !template.auto_pay {
+            continue;
+        }
+        let anchor_raw = template.date.trim();
+        if anchor_raw.is_empty() {
+            continue;
+        }
+        let anchor = parse_ymd_parts(anchor_raw)?;
+        if today_parts < anchor {
+            continue;
+        }
+        let Some(target_date) =
+            mandatory_auto_pay_target_date(&template.period, anchor, today_parts)
+        else {
+            continue;
+        };
+        if target_date < anchor {
+            continue;
+        }
+        let target_date_text = ymd_text(target_date);
+        if mandatory_generated_record_exists_in_tx(&tx, &template, &target_date_text)? {
+            continue;
+        }
+        insert_mandatory_record_from_template_in_tx(
+            &tx,
+            &template,
+            &target_date_text,
+            template.wallet_id,
+            true,
+        )?;
+        inserted_record_ids.push(tx.last_insert_rowid());
+    }
+
+    let record_id_map = normalize_record_ids_in_tx(&tx)?;
+    let normalized_ids: Vec<i64> = inserted_record_ids
+        .into_iter()
+        .map(|id| record_id_map.get(&id).copied().unwrap_or(id))
+        .collect();
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+
+    let mut created_records = Vec::new();
+    for record_id in normalized_ids {
+        if let Some(row) = record_get_row(db_path, record_id)? {
+            created_records.push(row);
+        }
+    }
+    Ok(MandatoryAutoPayResult { created_records })
+}
+
 fn record_row_dicts(
     conn: &Connection,
     sql: &str,
@@ -3744,6 +4030,324 @@ fn validate_transfer_commission_update(
     Ok(())
 }
 
+fn validate_mandatory_template_create_payload_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    payload: &MandatoryTemplateCreatePayload,
+) -> StorageResult<()> {
+    validate_active_wallet_for_mandatory_in_tx(tx, payload.wallet_id)?;
+    let category = payload.category.trim();
+    if category.is_empty() {
+        return Err("Mandatory category is required".to_owned());
+    }
+    let description = payload.description.trim();
+    if description.is_empty() {
+        return Err("Mandatory description is required".to_owned());
+    }
+    validate_mandatory_period(&payload.period)?;
+    let date = payload.date.trim();
+    if !date.is_empty() {
+        validate_ymd_syntax(date)?;
+    }
+    let currency = payload.currency.trim().to_uppercase();
+    validate_currency_code(&currency)?;
+    let base_currency = base_currency_code_in_tx(tx)?;
+    validate_mandatory_base_currency_only(&currency, &base_currency)?;
+    let amount_original_minor = to_minor_units(&payload.amount_original)?;
+    let amount_base_minor = to_minor_units(&payload.amount_base)?;
+    if amount_original_minor <= 0 || amount_base_minor <= 0 {
+        return Err("Mandatory amount must be positive".to_owned());
+    }
+    let rate_text = quantize_rate_text(&payload.rate_at_operation)?;
+    let rate = rate_text
+        .parse::<f64>()
+        .map_err(|_| "invalid mandatory rate_at_operation".to_owned())?;
+    if rate <= 0.0 {
+        return Err("Mandatory rate_at_operation must be positive".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_mandatory_template_update_payload_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    payload: &MandatoryTemplateUpdatePayload,
+) -> StorageResult<()> {
+    validate_active_wallet_for_mandatory_in_tx(tx, payload.wallet_id)?;
+    validate_mandatory_period(&payload.period)?;
+    let date = payload.date.trim();
+    if !date.is_empty() {
+        validate_ymd_syntax(date)?;
+    }
+    let amount_base_minor = to_minor_units(&payload.amount_base)?;
+    if amount_base_minor <= 0 {
+        return Err("Mandatory amount must be positive".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_active_wallet_for_mandatory_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    wallet_id: i64,
+) -> StorageResult<TransferWallet> {
+    if wallet_id <= 0 {
+        return Err("Mandatory wallet is required".to_owned());
+    }
+    let wallet = tx
+        .query_row(
+            "SELECT id, allow_negative, is_active FROM wallets WHERE id = ?1",
+            [wallet_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)? != 0,
+                    row.get::<_, i64>(2)? != 0,
+                ))
+            },
+        )
+        .optional()
+        .map_err(sqlite_err)?;
+    let Some((id, allow_negative, is_active)) = wallet else {
+        return Err(format!("Mandatory wallet not found: {wallet_id}"));
+    };
+    if !is_active {
+        return Err("Mandatory wallet is inactive".to_owned());
+    }
+    Ok(TransferWallet { id, allow_negative })
+}
+
+fn validate_mandatory_period(value: &str) -> StorageResult<()> {
+    match value.trim().to_lowercase().as_str() {
+        "daily" | "weekly" | "monthly" | "yearly" => Ok(()),
+        _ => Err("Invalid mandatory period".to_owned()),
+    }
+}
+
+fn mandatory_template_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    template_id: i64,
+) -> StorageResult<MandatoryExpenseRow> {
+    tx.query_row(
+        "SELECT
+            id,
+            wallet_id,
+            amount_original,
+            amount_original_minor,
+            currency,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_base,
+            amount_base_minor,
+            category,
+            description,
+            period,
+            COALESCE(date, ''),
+            auto_pay
+         FROM mandatory_expenses
+         WHERE id = ?1",
+        [template_id],
+        |row| {
+            Ok(MandatoryExpenseRow {
+                id: row.get(0)?,
+                wallet_id: row.get(1)?,
+                amount_original: money_value_from_sql_row(row, 2, 3)?,
+                currency: row.get(4)?,
+                rate_at_operation: rate_value_from_sql_row(row, 5, 6)?,
+                amount_base: money_value_from_sql_row(row, 7, 8)?,
+                category: row.get(9)?,
+                description: row.get(10)?,
+                period: row.get(11)?,
+                date: row.get::<_, Option<String>>(12)?.unwrap_or_default(),
+                auto_pay: row.get::<_, i64>(13)? != 0,
+            })
+        },
+    )
+    .optional()
+    .map_err(sqlite_err)?
+    .ok_or_else(|| format!("Mandatory template not found: {template_id}"))
+}
+
+fn mandatory_templates_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+) -> StorageResult<Vec<MandatoryExpenseRow>> {
+    let mut stmt = tx
+        .prepare(
+            "SELECT
+                id,
+                wallet_id,
+                amount_original,
+                amount_original_minor,
+                currency,
+                rate_at_operation,
+                rate_at_operation_text,
+                amount_base,
+                amount_base_minor,
+                category,
+                description,
+                period,
+                COALESCE(date, ''),
+                auto_pay
+             FROM mandatory_expenses
+             ORDER BY id",
+        )
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(MandatoryExpenseRow {
+                id: row.get(0)?,
+                wallet_id: row.get(1)?,
+                amount_original: money_value_from_sql_row(row, 2, 3)?,
+                currency: row.get(4)?,
+                rate_at_operation: rate_value_from_sql_row(row, 5, 6)?,
+                amount_base: money_value_from_sql_row(row, 7, 8)?,
+                category: row.get(9)?,
+                description: row.get(10)?,
+                period: row.get(11)?,
+                date: row.get::<_, Option<String>>(12)?.unwrap_or_default(),
+                auto_pay: row.get::<_, i64>(13)? != 0,
+            })
+        })
+        .map_err(sqlite_err)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_err)
+}
+
+fn ensure_mandatory_template_exists_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    template_id: i64,
+) -> StorageResult<()> {
+    mandatory_template_in_tx(tx, template_id).map(|_| ())
+}
+
+fn insert_mandatory_record_from_template_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    template: &MandatoryExpenseRow,
+    date: &str,
+    wallet_id: i64,
+    enforce_balance: bool,
+) -> StorageResult<()> {
+    let date = date.trim();
+    if date.is_empty() {
+        return Err("Mandatory record date is required".to_owned());
+    }
+    validate_ymd_date(date)?;
+    let wallet = validate_active_wallet_for_mandatory_in_tx(tx, wallet_id)?;
+    let amount_minor = to_minor_units(&template.amount_base.to_string())?;
+    if amount_minor <= 0 {
+        return Err("Mandatory amount must be positive".to_owned());
+    }
+    if enforce_balance && !wallet.allow_negative {
+        let balance_minor = wallet_balance_minor_in_tx(tx, wallet.id)?;
+        if balance_minor - amount_minor < 0 {
+            return Err("Insufficient funds in wallet".to_owned());
+        }
+    }
+    let amount_original_minor = to_minor_units(&template.amount_original.to_string())?;
+    let rate_text = quantize_rate_text(&template.rate_at_operation.to_string())?;
+    let rate_value = rate_text
+        .parse::<f64>()
+        .map_err(|_| "invalid mandatory rate_at_operation".to_owned())?;
+    tx.execute(
+        "INSERT INTO records (
+            type,
+            date,
+            wallet_id,
+            transfer_id,
+            related_debt_id,
+            amount_original,
+            amount_original_minor,
+            currency,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_base,
+            amount_base_minor,
+            category,
+            description,
+            period
+        )
+        VALUES ('mandatory_expense', ?1, ?2, NULL, NULL, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        (
+            date,
+            wallet_id,
+            template.amount_original,
+            amount_original_minor,
+            template.currency.as_str(),
+            rate_value,
+            rate_text.as_str(),
+            template.amount_base,
+            amount_minor,
+            template.category.as_str(),
+            template.description.as_str(),
+            template.period.as_str(),
+        ),
+    )
+    .map_err(sqlite_err)?;
+    Ok(())
+}
+
+fn mandatory_generated_record_exists_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    template: &MandatoryExpenseRow,
+    date: &str,
+) -> StorageResult<bool> {
+    tx.query_row(
+        "SELECT 1
+         FROM records
+         WHERE type = 'mandatory_expense'
+           AND wallet_id = ?1
+           AND category = ?2
+           AND description = ?3
+           AND period = ?4
+           AND date = ?5
+         LIMIT 1",
+        (
+            template.wallet_id,
+            template.category.as_str(),
+            template.description.as_str(),
+            template.period.as_str(),
+            date,
+        ),
+        |_| Ok(()),
+    )
+    .optional()
+    .map(|row| row.is_some())
+    .map_err(sqlite_err)
+}
+
+fn normalize_mandatory_template_ids_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+) -> StorageResult<HashMap<i64, i64>> {
+    let mut stmt = tx
+        .prepare("SELECT id FROM mandatory_expenses ORDER BY id")
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, i64>(0))
+        .map_err(sqlite_err)?;
+    let ordered_ids = rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_err)?;
+    let id_map: HashMap<i64, i64> = ordered_ids
+        .iter()
+        .enumerate()
+        .map(|(index, old_id)| (*old_id, i64::try_from(index + 1).unwrap_or(i64::MAX)))
+        .collect();
+    if id_map.iter().all(|(old_id, new_id)| old_id == new_id) {
+        reset_sqlite_sequence_to_max_id_in_tx(tx, "mandatory_expenses")?;
+        return Ok(id_map);
+    }
+    for (old_id, new_id) in &id_map {
+        tx.execute(
+            "UPDATE mandatory_expenses SET id = ?1 WHERE id = ?2",
+            (-*new_id, old_id),
+        )
+        .map_err(sqlite_err)?;
+    }
+    for new_id in id_map.values() {
+        tx.execute(
+            "UPDATE mandatory_expenses SET id = ?1 WHERE id = ?2",
+            (new_id, -*new_id),
+        )
+        .map_err(sqlite_err)?;
+    }
+    reset_sqlite_sequence_to_max_id_in_tx(tx, "mandatory_expenses")?;
+    Ok(id_map)
+}
+
 fn active_wallet_in_tx(
     tx: &rusqlite::Transaction<'_>,
     wallet_id: i64,
@@ -4017,6 +4621,16 @@ fn validate_transfer_base_currency_only(currency: &str, base_currency: &str) -> 
     }
 }
 
+fn validate_mandatory_base_currency_only(currency: &str, base_currency: &str) -> StorageResult<()> {
+    if currency.eq_ignore_ascii_case(base_currency) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Kotlin Mandatory currently supports base-currency templates only ({base_currency})"
+        ))
+    }
+}
+
 fn validate_wallet_base_currency_only(currency: &str, base_currency: &str) -> StorageResult<()> {
     if currency.eq_ignore_ascii_case(base_currency) {
         Ok(())
@@ -4028,6 +4642,18 @@ fn validate_wallet_base_currency_only(currency: &str, base_currency: &str) -> St
 }
 
 fn validate_ymd_date(value: &str) -> StorageResult<()> {
+    let (year, month, day) = parse_ymd_parts(value)?;
+    if (year, month, day) > current_local_date() {
+        return Err("Date cannot be in the future".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_ymd_syntax(value: &str) -> StorageResult<()> {
+    parse_ymd_parts(value).map(|_| ())
+}
+
+fn parse_ymd_parts(value: &str) -> StorageResult<(i32, i32, i32)> {
     let bytes = value.as_bytes();
     if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
         return Err("Date must use YYYY-MM-DD format".to_owned());
@@ -4042,10 +4668,7 @@ fn validate_ymd_date(value: &str) -> StorageResult<()> {
     if day < 1 || day > max_day {
         return Err(format!("Date day must be between 01 and {max_day:02}"));
     }
-    if (year, month, day) > current_local_date() {
-        return Err("Date cannot be in the future".to_owned());
-    }
-    Ok(())
+    Ok((year, month, day))
 }
 
 fn parse_date_part(value: &str, start: usize, end: usize, name: &str) -> StorageResult<i32> {
@@ -4065,6 +4688,70 @@ fn days_in_month(year: i32, month: i32) -> i32 {
         2 => 28,
         _ => 0,
     }
+}
+
+fn ymd_text(date: (i32, i32, i32)) -> String {
+    format!("{:04}-{:02}-{:02}", date.0, date.1, date.2)
+}
+
+fn mandatory_auto_pay_target_date(
+    period: &str,
+    anchor: (i32, i32, i32),
+    today: (i32, i32, i32),
+) -> Option<(i32, i32, i32)> {
+    match period.trim().to_lowercase().as_str() {
+        "daily" => Some(today),
+        "weekly" => {
+            let anchor_weekday = weekday_index(anchor)?;
+            let today_weekday = weekday_index(today)?;
+            let delta_days = (today_weekday - anchor_weekday).rem_euclid(7);
+            add_days(today, -delta_days)
+        }
+        "monthly" => {
+            let day = anchor.2.min(days_in_month(today.0, today.1));
+            Some((today.0, today.1, day))
+        }
+        "yearly" => {
+            let day = anchor.2.min(days_in_month(today.0, anchor.1));
+            Some((today.0, anchor.1, day))
+        }
+        _ => None,
+    }
+}
+
+fn weekday_index(date: (i32, i32, i32)) -> Option<i32> {
+    let (mut year, mut month, day) = date;
+    if month < 3 {
+        month += 12;
+        year -= 1;
+    }
+    let k = year % 100;
+    let j = year / 100;
+    let h = (day + ((13 * (month + 1)) / 5) + k + (k / 4) + (j / 4) + (5 * j)) % 7;
+    Some((h + 5) % 7)
+}
+
+fn add_days(date: (i32, i32, i32), delta: i32) -> Option<(i32, i32, i32)> {
+    let mut year = date.0;
+    let mut month = date.1;
+    let mut day = date.2 + delta;
+    while day < 1 {
+        month -= 1;
+        if month < 1 {
+            month = 12;
+            year -= 1;
+        }
+        day += days_in_month(year, month);
+    }
+    while day > days_in_month(year, month) {
+        day -= days_in_month(year, month);
+        month += 1;
+        if month > 12 {
+            month = 1;
+            year += 1;
+        }
+    }
+    Some((year, month, day))
 }
 
 fn is_leap_year(year: i32) -> bool {
@@ -4959,6 +5646,276 @@ mod tests {
         assert_eq!(
             delete_wallet(&db_path, mandatory_wallet.id).unwrap().action,
             "soft_deleted"
+        );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn mandatory_template_crud_add_to_records_and_id_normalization() {
+        let db_path = create_balance_test_db();
+        let created = mandatory_template_create(
+            &db_path,
+            &MandatoryTemplateCreatePayload {
+                wallet_id: 1,
+                amount_original: "25.255".to_owned(),
+                currency: "kzt".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "25.255".to_owned(),
+                category: "Utilities".to_owned(),
+                description: "Internet".to_owned(),
+                period: "monthly".to_owned(),
+                date: "2026-02-01".to_owned(),
+            },
+        )
+        .unwrap();
+        assert_eq!(created.id, 2);
+        assert_eq!(created.amount_base, 25.26);
+        assert_eq!(created.currency, "KZT");
+        assert!(created.auto_pay);
+
+        let updated = mandatory_template_update(
+            &db_path,
+            created.id,
+            &MandatoryTemplateUpdatePayload {
+                wallet_id: 2,
+                amount_base: "30".to_owned(),
+                period: "weekly".to_owned(),
+                date: "".to_owned(),
+            },
+        )
+        .unwrap();
+        assert_eq!(updated.wallet_id, 2);
+        assert_eq!(updated.amount_base, 30.0);
+        assert_eq!(updated.period, "weekly");
+        assert!(!updated.auto_pay);
+
+        let record = mandatory_add_to_records(
+            &db_path,
+            &MandatoryAddToRecordsPayload {
+                template_id: updated.id,
+                date: "2026-02-10".to_owned(),
+                wallet_id: 2,
+            },
+        )
+        .unwrap();
+        assert_eq!(record.record_type, "mandatory_expense");
+        assert_eq!(record.category, "Utilities");
+        assert_eq!(record.wallet_id, 2);
+
+        assert!(mandatory_template_delete(&db_path, 1).unwrap());
+        let templates = mandatory_expense_rows(&db_path).unwrap();
+        assert_eq!(templates.len(), 1);
+        assert_eq!(templates[0].id, 1);
+
+        let recreated = mandatory_template_create(
+            &db_path,
+            &MandatoryTemplateCreatePayload {
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Mandatory".to_owned(),
+                description: "Recreated".to_owned(),
+                period: "daily".to_owned(),
+                date: "".to_owned(),
+            },
+        )
+        .unwrap();
+        assert_eq!(recreated.id, 2);
+        assert_eq!(mandatory_template_delete_all(&db_path).unwrap(), 2);
+        assert!(mandatory_expense_rows(&db_path).unwrap().is_empty());
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn mandatory_template_rejects_invalid_inputs() {
+        let db_path = create_balance_test_db();
+        let request = MandatoryTemplateCreatePayload {
+            wallet_id: 1,
+            amount_original: "25".to_owned(),
+            currency: "KZT".to_owned(),
+            rate_at_operation: "1".to_owned(),
+            amount_base: "25".to_owned(),
+            category: "Mandatory".to_owned(),
+            description: "Template".to_owned(),
+            period: "monthly".to_owned(),
+            date: "".to_owned(),
+        };
+        assert!(
+            mandatory_template_create(
+                &db_path,
+                &MandatoryTemplateCreatePayload {
+                    wallet_id: 3,
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("inactive")
+        );
+        assert!(
+            mandatory_template_create(
+                &db_path,
+                &MandatoryTemplateCreatePayload {
+                    amount_original: "0".to_owned(),
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("positive")
+        );
+        assert!(
+            mandatory_template_create(
+                &db_path,
+                &MandatoryTemplateCreatePayload {
+                    currency: "USD".to_owned(),
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("base-currency")
+        );
+        assert!(
+            mandatory_template_create(
+                &db_path,
+                &MandatoryTemplateCreatePayload {
+                    period: "quarterly".to_owned(),
+                    ..request.clone()
+                }
+            )
+            .unwrap_err()
+            .contains("period")
+        );
+        assert!(
+            mandatory_template_create(
+                &db_path,
+                &MandatoryTemplateCreatePayload {
+                    date: "2026-02-30".to_owned(),
+                    ..request
+                }
+            )
+            .unwrap_err()
+            .contains("Date day")
+        );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn mandatory_add_to_records_rejects_future_date_and_insufficient_funds() {
+        let db_path = create_balance_test_db();
+        let template = mandatory_template_create(
+            &db_path,
+            &MandatoryTemplateCreatePayload {
+                wallet_id: 1,
+                amount_original: "2000".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "2000".to_owned(),
+                category: "Rent".to_owned(),
+                description: "Too much".to_owned(),
+                period: "monthly".to_owned(),
+                date: "".to_owned(),
+            },
+        )
+        .unwrap();
+        assert!(
+            mandatory_add_to_records(
+                &db_path,
+                &MandatoryAddToRecordsPayload {
+                    template_id: template.id,
+                    date: "2999-01-01".to_owned(),
+                    wallet_id: 1,
+                }
+            )
+            .unwrap_err()
+            .contains("future")
+        );
+        assert!(
+            mandatory_add_to_records(
+                &db_path,
+                &MandatoryAddToRecordsPayload {
+                    template_id: template.id,
+                    date: "2026-02-01".to_owned(),
+                    wallet_id: 1,
+                }
+            )
+            .unwrap_err()
+            .contains("Insufficient funds")
+        );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn mandatory_auto_pay_creates_due_records_and_skips_duplicates() {
+        let db_path = create_balance_test_db();
+        let daily = mandatory_template_create(
+            &db_path,
+            &MandatoryTemplateCreatePayload {
+                wallet_id: 2,
+                amount_original: "5".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "5".to_owned(),
+                category: "Daily".to_owned(),
+                description: "Coffee".to_owned(),
+                period: "daily".to_owned(),
+                date: "2026-02-01".to_owned(),
+            },
+        )
+        .unwrap();
+        let monthly = mandatory_template_create(
+            &db_path,
+            &MandatoryTemplateCreatePayload {
+                wallet_id: 2,
+                amount_original: "7".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "7".to_owned(),
+                category: "Monthly".to_owned(),
+                description: "Month end".to_owned(),
+                period: "monthly".to_owned(),
+                date: "2026-01-31".to_owned(),
+            },
+        )
+        .unwrap();
+        let result = mandatory_apply_auto_payments(&db_path, "2026-02-28").unwrap();
+        assert_eq!(result.created_records.len(), 3);
+        assert!(
+            result
+                .created_records
+                .iter()
+                .any(|record| record.category == daily.category && record.date == "2026-02-28")
+        );
+        assert!(
+            result.created_records.iter().any(|record| {
+                record.category == monthly.category && record.date == "2026-02-28"
+            })
+        );
+
+        let duplicate = mandatory_apply_auto_payments(&db_path, "2026-02-28").unwrap();
+        assert!(duplicate.created_records.is_empty());
+
+        let future = mandatory_template_create(
+            &db_path,
+            &MandatoryTemplateCreatePayload {
+                wallet_id: 2,
+                amount_original: "9".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "9".to_owned(),
+                category: "Future".to_owned(),
+                description: "Not yet".to_owned(),
+                period: "daily".to_owned(),
+                date: "2026-03-01".to_owned(),
+            },
+        )
+        .unwrap();
+        let skipped = mandatory_apply_auto_payments(&db_path, "2026-02-28").unwrap();
+        assert!(
+            skipped
+                .created_records
+                .iter()
+                .all(|record| record.category != future.category)
         );
         remove_test_db(&db_path);
     }

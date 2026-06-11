@@ -10,6 +10,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import app.ledgera.bridge.RustEngineAdapter
 import app.ledgera.debts.DebtsViewModel
+import app.ledgera.mandatory.MandatoryViewModel
 import app.ledgera.operations.ImportFileSnapshotProvider
 import app.ledgera.operations.OperationsViewModel
 import app.ledgera.operations.OperationsFileActions
@@ -61,6 +62,7 @@ private fun runApplication(args: Array<String>) = application {
                             importFileSnapshotProvider = DesktopImportFileSnapshotProvider,
                         ),
                         debtsViewModel = DebtsViewModel(engine),
+                        mandatoryViewModel = MandatoryViewModel(engine),
                         settingsViewModel = SettingsViewModel(engine),
                         operationsFileActions = DesktopOperationsFileActions(window),
                     )

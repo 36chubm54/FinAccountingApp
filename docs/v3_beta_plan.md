@@ -54,6 +54,11 @@ Current status:
   import/export stay pending follow-up slices. Rust storage normalizes
   `debts.id` after debt create/delete flows and remaps debt-linked operation
   rows plus payment history links in the same transaction.
+- Mandatory wiring has started: Kotlin Desktop can list/create/update/delete
+  mandatory templates, add a template to Operations records, and apply due
+  auto-payments through Rust/Kotlin UniFFI. Mandatory CSV/XLSX import/export is
+  intentionally deferred to a separate migration slice because it needs
+  previewed replace-import and Python-style workbook parity.
 - Remaining beta.1 work is capability wiring and screen parity for the other
   Operations flows and the other sections through Rust/Kotlin UniFFI, not a
   Kotlin-to-Python runtime bridge.

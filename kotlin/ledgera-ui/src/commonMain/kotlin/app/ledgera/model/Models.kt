@@ -225,6 +225,68 @@ data class RegisterDebtPaymentRequest(
     val description: String,
 )
 
+data class MandatoryTemplateItem(
+    val id: Long,
+    val walletId: Long,
+    val amountOriginal: String,
+    val currency: String,
+    val rateAtOperation: String,
+    val amountBase: String,
+    val category: String,
+    val description: String,
+    val period: String,
+    val date: String,
+    val autoPay: Boolean,
+)
+
+data class MandatoryTemplateDraft(
+    val id: Long? = null,
+    val walletId: Long = 0,
+    val amountOriginal: String = "",
+    val currency: String = "KZT",
+    val rateAtOperation: String = "1",
+    val amountBase: String = "",
+    val category: String = "Mandatory",
+    val description: String = "",
+    val period: String = "monthly",
+    val date: String = "",
+)
+
+data class MandatoryAddToRecordsDraft(
+    val templateId: Long = 0,
+    val walletId: Long = 0,
+    val date: String = "",
+)
+
+data class CreateMandatoryTemplateRequest(
+    val walletId: Long,
+    val amountOriginal: String,
+    val currency: String,
+    val rateAtOperation: String,
+    val amountBase: String,
+    val category: String,
+    val description: String,
+    val period: String,
+    val date: String,
+)
+
+data class UpdateMandatoryTemplateRequest(
+    val walletId: Long,
+    val amountBase: String,
+    val period: String,
+    val date: String,
+)
+
+data class AddMandatoryToRecordsRequest(
+    val templateId: Long,
+    val date: String,
+    val walletId: Long,
+)
+
+data class MandatoryAutoPayResult(
+    val createdRecords: List<OperationRecord>,
+)
+
 data class AuditFinding(
     val check: String,
     val severity: String,

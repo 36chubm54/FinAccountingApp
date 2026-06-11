@@ -31,6 +31,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.ledgera.debts.DebtsScreen
 import app.ledgera.debts.DebtsViewModel
+import app.ledgera.mandatory.MandatoryScreen
+import app.ledgera.mandatory.MandatoryViewModel
 import app.ledgera.operations.OperationsScreen
 import app.ledgera.operations.OperationsFileActions
 import app.ledgera.operations.NoOperationsFileActions
@@ -65,6 +67,7 @@ fun AppShell(
     viewModel: AppShellViewModel,
     operationsViewModel: OperationsViewModel,
     debtsViewModel: DebtsViewModel,
+    mandatoryViewModel: MandatoryViewModel,
     settingsViewModel: SettingsViewModel,
     modifier: Modifier = Modifier,
     operationsFileActions: OperationsFileActions = NoOperationsFileActions,
@@ -72,6 +75,7 @@ fun AppShell(
     val state by viewModel.state.collectAsState()
     val operationsState by operationsViewModel.state.collectAsState()
     val debtsState by debtsViewModel.state.collectAsState()
+    val mandatoryState by mandatoryViewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     LaunchedEffect(Unit) {
         viewModel.refreshStatus()
@@ -81,6 +85,7 @@ fun AppShell(
         message = when (state.selectedSection) {
             DesktopSection.Operations -> operationsState.notice
             DesktopSection.Debts -> debtsState.notice
+            DesktopSection.Mandatory -> mandatoryState.notice
             DesktopSection.Settings -> settingsState.notice
             else -> null
         },
@@ -89,6 +94,7 @@ fun AppShell(
             when (state.selectedSection) {
                 DesktopSection.Operations -> operationsViewModel.clearNotice()
                 DesktopSection.Debts -> debtsViewModel.clearNotice()
+                DesktopSection.Mandatory -> mandatoryViewModel.clearNotice()
                 DesktopSection.Settings -> settingsViewModel.clearNotice()
                 else -> Unit
             }
@@ -137,7 +143,7 @@ fun AppShell(
                         DesktopSection.Budget -> PendingSection(state.selectedSection)
                         DesktopSection.Debts -> DebtsScreen(debtsViewModel)
                         DesktopSection.Distribution -> PendingSection(state.selectedSection)
-                        DesktopSection.Mandatory -> PendingSection(state.selectedSection)
+                        DesktopSection.Mandatory -> MandatoryScreen(mandatoryViewModel)
                         DesktopSection.Settings -> SettingsScreen(settingsViewModel)
                     }
                 }

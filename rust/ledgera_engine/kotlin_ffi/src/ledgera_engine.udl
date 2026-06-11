@@ -92,6 +92,31 @@ dictionary RegisterDebtPaymentRequest {
     string description;
 };
 
+dictionary CreateMandatoryTemplateRequest {
+    i64 wallet_id;
+    string amount_original;
+    string currency;
+    string rate_at_operation;
+    string amount_base;
+    string category;
+    string description;
+    string period;
+    string date;
+};
+
+dictionary UpdateMandatoryTemplateRequest {
+    i64 wallet_id;
+    string amount_base;
+    string period;
+    string date;
+};
+
+dictionary AddMandatoryToRecordsRequest {
+    i64 template_id;
+    string date;
+    i64 wallet_id;
+};
+
 dictionary WalletDeleteResultDto {
     i64 wallet_id;
     string action;
@@ -185,6 +210,24 @@ dictionary DebtPaymentDto {
     string payment_date;
 };
 
+dictionary MandatoryTemplateDto {
+    i64 id;
+    i64 wallet_id;
+    string amount_original;
+    string currency;
+    string rate_at_operation;
+    string amount_base;
+    string category;
+    string description;
+    string period;
+    string date;
+    boolean auto_pay;
+};
+
+dictionary MandatoryAutoPayResultDto {
+    sequence<RecordDto> created_records;
+};
+
 dictionary WalletBalanceDto {
     i64 wallet_id;
     string name;
@@ -264,6 +307,22 @@ interface LedgeraEngine {
     boolean delete_debt(i64 debt_id);
     [Throws=LedgeraEngineError]
     DebtDto delete_debt_payment(i64 payment_id, boolean delete_linked_record);
+    [Throws=LedgeraEngineError]
+    sequence<MandatoryTemplateDto> list_mandatory_templates();
+    [Throws=LedgeraEngineError]
+    MandatoryTemplateDto? get_mandatory_template(i64 template_id);
+    [Throws=LedgeraEngineError]
+    MandatoryTemplateDto create_mandatory_template(CreateMandatoryTemplateRequest request);
+    [Throws=LedgeraEngineError]
+    MandatoryTemplateDto update_mandatory_template(i64 template_id, UpdateMandatoryTemplateRequest request);
+    [Throws=LedgeraEngineError]
+    boolean delete_mandatory_template(i64 template_id);
+    [Throws=LedgeraEngineError]
+    i64 delete_all_mandatory_templates();
+    [Throws=LedgeraEngineError]
+    RecordDto add_mandatory_to_records(AddMandatoryToRecordsRequest request);
+    [Throws=LedgeraEngineError]
+    MandatoryAutoPayResultDto apply_mandatory_auto_payments(string today);
     [Throws=LedgeraEngineError]
     sequence<AuditFindingDto> audit_run();
     [Throws=LedgeraEngineError]

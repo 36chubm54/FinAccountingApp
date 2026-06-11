@@ -1,8 +1,10 @@
 package app.ledgera.operations
 
 import app.ledgera.bridge.EngineAdapter
+import app.ledgera.model.AddMandatoryToRecordsRequest
 import app.ledgera.model.AuditFinding
 import app.ledgera.model.CreateDebtRequest
+import app.ledgera.model.CreateMandatoryTemplateRequest
 import app.ledgera.model.CreateOperationRequest
 import app.ledgera.model.CreateTransferRequest
 import app.ledgera.model.CreateTransferResult
@@ -15,8 +17,11 @@ import app.ledgera.model.OperationDeleteResult
 import app.ledgera.model.OperationExportResult
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
+import app.ledgera.model.MandatoryAutoPayResult
+import app.ledgera.model.MandatoryTemplateItem
 import app.ledgera.model.RegisterDebtPaymentRequest
 import app.ledgera.model.TransferDetails
+import app.ledgera.model.UpdateMandatoryTemplateRequest
 import app.ledgera.model.UpdateOperationRequest
 import app.ledgera.model.UpdateTransferRequest
 import app.ledgera.model.UpdateTransferResult
@@ -1319,6 +1324,44 @@ private class FakeEngineAdapter(
 
     override suspend fun runAudit(): List<AuditFinding> = emptyList()
 
+    override suspend fun listMandatoryTemplates(): List<MandatoryTemplateItem> = emptyList()
+
+    override suspend fun getMandatoryTemplate(templateId: Long): MandatoryTemplateItem? = null
+
+    override suspend fun createMandatoryTemplate(request: CreateMandatoryTemplateRequest): MandatoryTemplateItem =
+        mandatoryTemplateItem(
+            id = 1,
+            walletId = request.walletId,
+            amountOriginal = request.amountOriginal,
+            amountBase = request.amountBase,
+            category = request.category,
+            description = request.description,
+            period = request.period,
+            date = request.date,
+        )
+
+    override suspend fun updateMandatoryTemplate(
+        templateId: Long,
+        request: UpdateMandatoryTemplateRequest,
+    ): MandatoryTemplateItem =
+        mandatoryTemplateItem(
+            id = templateId,
+            walletId = request.walletId,
+            amountBase = request.amountBase,
+            period = request.period,
+            date = request.date,
+        )
+
+    override suspend fun deleteMandatoryTemplate(templateId: Long): Boolean = true
+
+    override suspend fun deleteAllMandatoryTemplates(): Long = 0
+
+    override suspend fun addMandatoryToRecords(request: AddMandatoryToRecordsRequest): OperationRecord =
+        operationRecord(id = 1, type = "mandatory_expense", walletId = request.walletId, date = request.date)
+
+    override suspend fun applyMandatoryAutoPayments(today: String): MandatoryAutoPayResult =
+        MandatoryAutoPayResult(createdRecords = emptyList())
+
     private fun replaceWalletBalance(walletId: Long, update: (Double) -> Double) {
         val index = wallets.indexOfFirst { it.id == walletId }
         if (index < 0) {
@@ -1392,3 +1435,26 @@ private fun debtPaymentItem(debtId: Long): DebtPaymentItem =
         isWriteOff = false,
         paymentDate = "2026-01-01",
     )
+
+private fun mandatoryTemplateItem(
+    id: Long,
+    walletId: Long = 1,
+    amountOriginal: String = "10.00",
+    amountBase: String = "10.00",
+    category: String = "Mandatory",
+    description: String = "Template",
+    period: String = "monthly",
+    date: String = "",
+) = MandatoryTemplateItem(
+    id = id,
+    walletId = walletId,
+    amountOriginal = amountOriginal,
+    currency = "KZT",
+    rateAtOperation = "1.000000",
+    amountBase = amountBase,
+    category = category,
+    description = description,
+    period = period,
+    date = date,
+    autoPay = date.isNotBlank(),
+)

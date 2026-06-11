@@ -99,6 +99,11 @@ Current Kotlin/Rust contract:
   rows, payment registration, write-offs, close-by-payment flows, debt-card
   deletion, and payment deletion; debt import/export and debt-card editing
   remain separate beta.1 slices
+- Kotlin Mandatory uses Rust/Kotlin UniFFI for template listing, creation,
+  update, deletion, delete-all, add-to-records, and auto-pay application.
+  Template import/export remains a separate migration slice because it needs
+  previewed replace-import and CSV/XLSX styling parity rather than live UI
+  action wiring.
 - Debts payment, write-off, and close actions keep remaining-balance validation,
   linked cashflow row writes, debt payment inserts, and debt status updates in a
   single Rust storage transaction; closing an already closed debt remains
@@ -140,9 +145,9 @@ Current Kotlin/Rust contract:
 Deferred Kotlin scope:
 
 - all 9-tab Desktop feature parity is the beta.1 target
-- reports, analytics, dashboard, budget, debts, distribution, mandatory,
-  wallet edit/delete, runtime settings, audit, sync, updater, transfer list
-  parity, import/export, and broader operations workflows
+- reports, analytics, dashboard, budget, distribution, wallet edit, runtime
+  settings, sync, updater, transfer list parity, remaining import/export
+  slices, and broader operations workflows
   still need Rust UniFFI capability wiring before beta.1 parity can be claimed
 - Android, iOS, CRDT sync, and Tkinter deprecation remain later beta/RC
   milestones
@@ -483,6 +488,15 @@ Core modules:
 - `gui/tabs/mandatory/`
 
 This subsystem owns reusable mandatory-payment templates, add-to-records flows, startup auto-application, and the dedicated `Mandatory` desktop tab introduced during the final `2.0.0` GUI cleanup wave.
+
+The beta.1 Kotlin Mandatory track exposes the live template CRUD,
+add-to-records, and auto-pay flows through Rust/Kotlin UniFFI without a
+Kotlin-to-Python runtime bridge. Rust storage owns validation, wallet checks,
+generated `mandatory_expense` records, duplicate prevention for auto-pay, and
+cache invalidation. Kotlin owns only screen state, fast form validation, modal
+confirmation, and Toast feedback. Mandatory CSV/XLSX import/export remains a
+separate migration slice so it can share the Rust tabular import/export utility
+contract and preserve Python workbook styling parity.
 
 ### 4.5 Distribution
 

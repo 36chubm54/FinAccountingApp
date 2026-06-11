@@ -1,0 +1,349 @@
+package app.ledgera.mandatory
+
+import app.ledgera.bridge.MandatoryEngine
+import app.ledgera.model.AddMandatoryToRecordsRequest
+import app.ledgera.model.CreateMandatoryTemplateRequest
+import app.ledgera.model.MandatoryAddToRecordsDraft
+import app.ledgera.model.MandatoryTemplateDraft
+import app.ledgera.model.MandatoryTemplateItem
+import app.ledgera.model.UpdateMandatoryTemplateRequest
+import app.ledgera.model.WalletOption
+import app.ledgera.validation.currentLedgerDate
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+
+data class MandatoryUiState(
+    val loading: Boolean = false,
+    val templates: List<MandatoryTemplateItem> = emptyList(),
+    val selectedTemplateId: Long? = null,
+    val wallets: List<WalletOption> = emptyList(),
+    val baseCurrency: String = "KZT",
+    val editDraft: MandatoryTemplateDraft? = null,
+    val addToRecordsDraft: MandatoryAddToRecordsDraft? = null,
+    val deleteTemplateId: Long? = null,
+    val confirmDeleteAll: Boolean = false,
+    val inProgress: Boolean = false,
+    val error: String? = null,
+    val notice: String? = null,
+)
+
+class MandatoryViewModel(
+    private val engine: MandatoryEngine,
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main),
+) {
+    private val mutableState = MutableStateFlow(MandatoryUiState(loading = true))
+    val state: StateFlow<MandatoryUiState> = mutableState.asStateFlow()
+
+    fun refresh() {
+        refresh(null)
+    }
+
+    private fun refresh(notice: String?) {
+        val previous = mutableState.value
+        mutableState.value = previous.copy(loading = true, error = null, notice = notice)
+        launchSafely {
+            runCatching {
+                val baseCurrency = engine.baseCurrency()
+                val wallets = engine.listWallets()
+                val templates = engine.listMandatoryTemplates()
+                val selectedTemplateId = previous.selectedTemplateId?.takeIf { id ->
+                    templates.any { it.id == id }
+                } ?: templates.firstOrNull()?.id
+                mutableState.value = MandatoryUiState(
+                    loading = false,
+                    templates = templates,
+                    selectedTemplateId = selectedTemplateId,
+                    wallets = wallets,
+                    baseCurrency = baseCurrency,
+                    editDraft = previous.editDraft,
+                    addToRecordsDraft = previous.addToRecordsDraft,
+                    deleteTemplateId = previous.deleteTemplateId?.takeIf { id ->
+                        templates.any { it.id == id }
+                    },
+                    confirmDeleteAll = previous.confirmDeleteAll,
+                    inProgress = previous.inProgress,
+                    notice = notice,
+                )
+            }.onFailure { error ->
+                mutableState.value = previous.copy(
+                    loading = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
+    fun selectTemplate(templateId: Long) {
+        val template = mutableState.value.templates.firstOrNull { it.id == templateId }
+        if (template == null) {
+            mutableState.value = mutableState.value.copy(error = "Mandatory template not found", notice = null)
+            return
+        }
+        mutableState.value = mutableState.value.copy(
+            selectedTemplateId = templateId,
+            editDraft = template.toDraft(),
+            error = null,
+            notice = null,
+        )
+    }
+
+    fun openCreateDialog() {
+        val state = mutableState.value
+        mutableState.value = state.copy(
+            editDraft = MandatoryTemplateDraft(
+                walletId = state.wallets.firstOrNull()?.id ?: 0,
+                currency = state.baseCurrency,
+                rateAtOperation = "1",
+                category = "Mandatory",
+                period = "monthly",
+            ),
+            error = null,
+            notice = null,
+        )
+    }
+
+    fun closeEditDialog() {
+        mutableState.value = mutableState.value.copy(editDraft = null, inProgress = false, error = null)
+    }
+
+    fun updateDraft(draft: MandatoryTemplateDraft) {
+        mutableState.value = mutableState.value.copy(editDraft = draft, error = null, notice = null)
+    }
+
+    fun saveTemplate() {
+        val state = mutableState.value
+        val draft = state.editDraft ?: return
+        val validationError = if (draft.id == null) {
+            MandatoryValidation.validateCreateDraft(draft, state.baseCurrency)
+        } else {
+            MandatoryValidation.validateUpdateDraft(draft)
+        }
+        if (validationError != null) {
+            mutableState.value = state.copy(error = validationError, notice = null)
+            return
+        }
+        mutableState.value = state.copy(inProgress = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                val saved = if (draft.id == null) {
+                    engine.createMandatoryTemplate(
+                        CreateMandatoryTemplateRequest(
+                            walletId = draft.walletId,
+                            amountOriginal = draft.amountOriginal.trim(),
+                            currency = draft.currency.trim().uppercase(),
+                            rateAtOperation = draft.rateAtOperation.trim().ifBlank { "1" },
+                            amountBase = draft.amountBase.trim(),
+                            category = draft.category.trim(),
+                            description = draft.description.trim(),
+                            period = draft.period.trim().lowercase(),
+                            date = draft.date.trim(),
+                        )
+                    )
+                } else {
+                    engine.updateMandatoryTemplate(
+                        draft.id,
+                        UpdateMandatoryTemplateRequest(
+                            walletId = draft.walletId,
+                            amountBase = draft.amountBase.trim(),
+                            period = draft.period.trim().lowercase(),
+                            date = draft.date.trim(),
+                        )
+                    )
+                }
+                mutableState.value = mutableState.value.copy(
+                    selectedTemplateId = saved.id,
+                    editDraft = null,
+                    inProgress = false,
+                )
+                refresh(
+                    if (draft.id == null) {
+                        "Mandatory template created (id=${saved.id})"
+                    } else {
+                        "Mandatory template updated (id=${saved.id})"
+                    }
+                )
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    inProgress = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
+    fun openAddToRecordsDialog() {
+        val state = mutableState.value
+        val templateId = state.selectedTemplateId
+        if (templateId == null) {
+            mutableState.value = state.copy(error = "Select a mandatory template first", notice = null)
+            return
+        }
+        mutableState.value = state.copy(
+            addToRecordsDraft = MandatoryAddToRecordsDraft(
+                templateId = templateId,
+                walletId = state.wallets.firstOrNull()?.id ?: 0,
+                date = todayText(),
+            ),
+            error = null,
+            notice = null,
+        )
+    }
+
+    fun closeAddToRecordsDialog() {
+        mutableState.value = mutableState.value.copy(addToRecordsDraft = null, inProgress = false, error = null)
+    }
+
+    fun updateAddToRecordsDraft(draft: MandatoryAddToRecordsDraft) {
+        mutableState.value = mutableState.value.copy(addToRecordsDraft = draft, error = null, notice = null)
+    }
+
+    fun addToRecords() {
+        val state = mutableState.value
+        val draft = state.addToRecordsDraft ?: return
+        MandatoryValidation.validateAddToRecordsDraft(draft)?.let { validationError ->
+            mutableState.value = state.copy(error = validationError, notice = null)
+            return
+        }
+        mutableState.value = state.copy(inProgress = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                val record = engine.addMandatoryToRecords(
+                    AddMandatoryToRecordsRequest(
+                        templateId = draft.templateId,
+                        date = draft.date.trim(),
+                        walletId = draft.walletId,
+                    )
+                )
+                mutableState.value = mutableState.value.copy(
+                    addToRecordsDraft = null,
+                    inProgress = false,
+                    selectedTemplateId = draft.templateId,
+                )
+                refresh("Mandatory record added (id=${record.id})")
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    inProgress = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
+    fun applyAutoPayments() {
+        val state = mutableState.value
+        mutableState.value = state.copy(inProgress = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                val result = engine.applyMandatoryAutoPayments(todayText())
+                mutableState.value = mutableState.value.copy(inProgress = false)
+                refresh("Auto-pay applied: ${result.createdRecords.size} records")
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    inProgress = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
+    fun requestDeleteSelectedTemplate() {
+        val state = mutableState.value
+        val templateId = state.selectedTemplateId
+        if (templateId == null) {
+            mutableState.value = state.copy(error = "Select a mandatory template first", notice = null)
+            return
+        }
+        mutableState.value = state.copy(deleteTemplateId = templateId, error = null, notice = null)
+    }
+
+    fun closeDeleteTemplateDialog() {
+        mutableState.value = mutableState.value.copy(deleteTemplateId = null, inProgress = false, error = null)
+    }
+
+    fun deleteSelectedTemplate() {
+        val state = mutableState.value
+        val templateId = state.deleteTemplateId ?: return
+        mutableState.value = state.copy(inProgress = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                engine.deleteMandatoryTemplate(templateId)
+                mutableState.value = mutableState.value.copy(
+                    deleteTemplateId = null,
+                    selectedTemplateId = null,
+                    inProgress = false,
+                )
+                refresh("Mandatory template deleted (id=$templateId)")
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    inProgress = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
+    fun requestDeleteAllTemplates() {
+        mutableState.value = mutableState.value.copy(confirmDeleteAll = true, error = null, notice = null)
+    }
+
+    fun closeDeleteAllDialog() {
+        mutableState.value = mutableState.value.copy(confirmDeleteAll = false, inProgress = false, error = null)
+    }
+
+    fun deleteAllTemplates() {
+        val state = mutableState.value
+        mutableState.value = state.copy(inProgress = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                val deleted = engine.deleteAllMandatoryTemplates()
+                mutableState.value = mutableState.value.copy(
+                    confirmDeleteAll = false,
+                    selectedTemplateId = null,
+                    inProgress = false,
+                )
+                refresh("All mandatory templates deleted ($deleted)")
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    inProgress = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
+    fun clearNotice() {
+        mutableState.value = mutableState.value.copy(notice = null)
+    }
+
+    private fun launchSafely(block: suspend () -> Unit) {
+        scope.launch { block() }
+    }
+
+    private fun MandatoryTemplateItem.toDraft(): MandatoryTemplateDraft =
+        MandatoryTemplateDraft(
+            id = id,
+            walletId = walletId,
+            amountOriginal = amountOriginal,
+            currency = currency,
+            rateAtOperation = rateAtOperation,
+            amountBase = amountBase,
+            category = category,
+            description = description,
+            period = period,
+            date = date,
+        )
+
+    private fun todayText(): String =
+        currentLedgerDate().let { "%04d-%02d-%02d".format(it.year, it.month, it.day) }
+}

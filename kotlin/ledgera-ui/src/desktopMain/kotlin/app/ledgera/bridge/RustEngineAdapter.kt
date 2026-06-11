@@ -1,5 +1,7 @@
 package app.ledgera.bridge
 
+import app.ledgera.engine.AddMandatoryToRecordsRequest as NativeAddMandatoryToRecordsRequest
+import app.ledgera.engine.CreateMandatoryTemplateRequest as NativeCreateMandatoryTemplateRequest
 import app.ledgera.engine.CreateRecordRequest as NativeCreateRecordRequest
 import app.ledgera.engine.CreateDebtRequest as NativeCreateDebtRequest
 import app.ledgera.engine.CreateTransferRequest as NativeCreateTransferRequest
@@ -9,10 +11,13 @@ import app.ledgera.engine.OperationExportResultDto
 import app.ledgera.engine.OperationImportResultDto
 import app.ledgera.engine.RecordFilterDto
 import app.ledgera.engine.RegisterDebtPaymentRequest as NativeRegisterDebtPaymentRequest
+import app.ledgera.engine.UpdateMandatoryTemplateRequest as NativeUpdateMandatoryTemplateRequest
 import app.ledgera.engine.UpdateRecordRequest as NativeUpdateRecordRequest
 import app.ledgera.engine.UpdateTransferRequest as NativeUpdateTransferRequest
+import app.ledgera.model.AddMandatoryToRecordsRequest
 import app.ledgera.model.AuditFinding
 import app.ledgera.model.CreateDebtRequest
+import app.ledgera.model.CreateMandatoryTemplateRequest
 import app.ledgera.model.CreateOperationRequest
 import app.ledgera.model.CreateTransferRequest
 import app.ledgera.model.CreateTransferResult
@@ -25,8 +30,11 @@ import app.ledgera.model.OperationDeleteResult
 import app.ledgera.model.OperationExportResult
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
+import app.ledgera.model.MandatoryAutoPayResult
+import app.ledgera.model.MandatoryTemplateItem
 import app.ledgera.model.RegisterDebtPaymentRequest
 import app.ledgera.model.TransferDetails
+import app.ledgera.model.UpdateMandatoryTemplateRequest
 import app.ledgera.model.UpdateOperationRequest
 import app.ledgera.model.UpdateTransferRequest
 import app.ledgera.model.UpdateTransferResult
@@ -330,6 +338,76 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
             engine.deleteDebtPayment(paymentId, deleteLinkedRecord).let(::toDebtItem)
         }
 
+    override suspend fun listMandatoryTemplates(): List<MandatoryTemplateItem> = withContext(Dispatchers.IO) {
+        engine.listMandatoryTemplates().map(::toMandatoryTemplateItem)
+    }
+
+    override suspend fun getMandatoryTemplate(templateId: Long): MandatoryTemplateItem? = withContext(Dispatchers.IO) {
+        engine.getMandatoryTemplate(templateId)?.let(::toMandatoryTemplateItem)
+    }
+
+    override suspend fun createMandatoryTemplate(
+        request: CreateMandatoryTemplateRequest,
+    ): MandatoryTemplateItem = withContext(Dispatchers.IO) {
+        engine.createMandatoryTemplate(
+            NativeCreateMandatoryTemplateRequest(
+                walletId = request.walletId,
+                amountOriginal = request.amountOriginal,
+                currency = request.currency,
+                rateAtOperation = request.rateAtOperation,
+                amountBase = request.amountBase,
+                category = request.category,
+                description = request.description,
+                period = request.period,
+                date = request.date,
+            )
+        ).let(::toMandatoryTemplateItem)
+    }
+
+    override suspend fun updateMandatoryTemplate(
+        templateId: Long,
+        request: UpdateMandatoryTemplateRequest,
+    ): MandatoryTemplateItem = withContext(Dispatchers.IO) {
+        engine.updateMandatoryTemplate(
+            templateId,
+            NativeUpdateMandatoryTemplateRequest(
+                walletId = request.walletId,
+                amountBase = request.amountBase,
+                period = request.period,
+                date = request.date,
+            )
+        ).let(::toMandatoryTemplateItem)
+    }
+
+    override suspend fun deleteMandatoryTemplate(templateId: Long): Boolean = withContext(Dispatchers.IO) {
+        engine.deleteMandatoryTemplate(templateId)
+    }
+
+    override suspend fun deleteAllMandatoryTemplates(): Long = withContext(Dispatchers.IO) {
+        engine.deleteAllMandatoryTemplates()
+    }
+
+    override suspend fun addMandatoryToRecords(
+        request: AddMandatoryToRecordsRequest,
+    ): OperationRecord = withContext(Dispatchers.IO) {
+        engine.addMandatoryToRecords(
+            NativeAddMandatoryToRecordsRequest(
+                templateId = request.templateId,
+                date = request.date,
+                walletId = request.walletId,
+            )
+        ).let(::toOperationRecord)
+    }
+
+    override suspend fun applyMandatoryAutoPayments(today: String): MandatoryAutoPayResult =
+        withContext(Dispatchers.IO) {
+            engine.applyMandatoryAutoPayments(today).let { result ->
+                MandatoryAutoPayResult(
+                    createdRecords = result.createdRecords.map(::toOperationRecord),
+                )
+            }
+        }
+
     override suspend fun runAudit(): List<AuditFinding> = withContext(Dispatchers.IO) {
         engine.auditRun().map {
             AuditFinding(
@@ -394,6 +472,21 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
             principalPaid = payment.principalPaid,
             isWriteOff = payment.isWriteOff,
             paymentDate = payment.paymentDate,
+        )
+
+    private fun toMandatoryTemplateItem(template: app.ledgera.engine.MandatoryTemplateDto): MandatoryTemplateItem =
+        MandatoryTemplateItem(
+            id = template.id,
+            walletId = template.walletId,
+            amountOriginal = template.amountOriginal,
+            currency = template.currency,
+            rateAtOperation = template.rateAtOperation,
+            amountBase = template.amountBase,
+            category = template.category,
+            description = template.description,
+            period = template.period,
+            date = template.date,
+            autoPay = template.autoPay,
         )
 
     private fun RegisterDebtPaymentRequest.toNative(): NativeRegisterDebtPaymentRequest =

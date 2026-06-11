@@ -1,7 +1,9 @@
 use ledgera_engine_storage::{
     AuditFindingRow, DebtCreatePayload, DebtPayload, DebtPaymentPayload, DebtPaymentRequestPayload,
-    OperationDeleteResult, OperationExportResult, OperationImportResult, RecordFilterPayload,
-    RecordRow, StandaloneRecordCreatePayload, StandaloneRecordUpdatePayload, TransferCreatePayload,
+    MandatoryAddToRecordsPayload, MandatoryAutoPayResult, MandatoryExpenseRow,
+    MandatoryTemplateCreatePayload, MandatoryTemplateUpdatePayload, OperationDeleteResult,
+    OperationExportResult, OperationImportResult, RecordFilterPayload, RecordRow,
+    StandaloneRecordCreatePayload, StandaloneRecordUpdatePayload, TransferCreatePayload,
     TransferRow, TransferUpdatePayload, WalletBalanceRow, WalletCreatePayload, WalletRow,
     audit_run_for_date, base_currency_code, create_standalone_record, create_transfer,
     create_wallet, current_local_date, debt_close_validated, debt_create, debt_delete,
@@ -9,10 +11,12 @@ use ledgera_engine_storage::{
     debt_register_write_off_validated, debt_rows, delete_all_operations,
     delete_operations_selection, delete_standalone_record, delete_transfer, delete_wallet,
     distinct_record_categories, export_records_csv, export_records_xlsx, filtered_record_list_rows,
-    import_records_csv, import_records_xlsx, preview_import_records_csv,
-    preview_import_records_xlsx, standalone_record_get_row, tag_names, transfer_get_row,
-    update_standalone_record, update_transfer, wallet_balance_row, wallet_balance_rows,
-    wallet_list_rows,
+    import_records_csv, import_records_xlsx, mandatory_add_to_records,
+    mandatory_apply_auto_payments, mandatory_expense_row, mandatory_expense_rows,
+    mandatory_template_create, mandatory_template_delete, mandatory_template_delete_all,
+    mandatory_template_update, preview_import_records_csv, preview_import_records_xlsx,
+    standalone_record_get_row, tag_names, transfer_get_row, update_standalone_record,
+    update_transfer, wallet_balance_row, wallet_balance_rows, wallet_list_rows,
 };
 use std::fmt;
 use std::path::Path;
@@ -113,6 +117,34 @@ pub struct RegisterDebtPaymentRequest {
     pub amount: String,
     pub payment_date: String,
     pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateMandatoryTemplateRequest {
+    pub wallet_id: i64,
+    pub amount_original: String,
+    pub currency: String,
+    pub rate_at_operation: String,
+    pub amount_base: String,
+    pub category: String,
+    pub description: String,
+    pub period: String,
+    pub date: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdateMandatoryTemplateRequest {
+    pub wallet_id: i64,
+    pub amount_base: String,
+    pub period: String,
+    pub date: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AddMandatoryToRecordsRequest {
+    pub template_id: i64,
+    pub date: String,
+    pub wallet_id: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -224,6 +256,26 @@ pub struct DebtPaymentDto {
     pub principal_paid: String,
     pub is_write_off: bool,
     pub payment_date: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MandatoryTemplateDto {
+    pub id: i64,
+    pub wallet_id: i64,
+    pub amount_original: String,
+    pub currency: String,
+    pub rate_at_operation: String,
+    pub amount_base: String,
+    pub category: String,
+    pub description: String,
+    pub period: String,
+    pub date: String,
+    pub auto_pay: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MandatoryAutoPayResultDto {
+    pub created_records: Vec<RecordDto>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -585,6 +637,90 @@ impl LedgeraEngine {
             .map_err(storage_error)
     }
 
+    pub fn list_mandatory_templates(
+        &self,
+    ) -> Result<Vec<MandatoryTemplateDto>, LedgeraEngineError> {
+        mandatory_expense_rows(&self.db_path)
+            .map(|rows| rows.into_iter().map(mandatory_template_to_dto).collect())
+            .map_err(storage_error)
+    }
+
+    pub fn get_mandatory_template(
+        &self,
+        template_id: i64,
+    ) -> Result<Option<MandatoryTemplateDto>, LedgeraEngineError> {
+        mandatory_expense_row(&self.db_path, template_id)
+            .map(|row| row.map(mandatory_template_to_dto))
+            .map_err(storage_error)
+    }
+
+    pub fn create_mandatory_template(
+        &self,
+        request: CreateMandatoryTemplateRequest,
+    ) -> Result<MandatoryTemplateDto, LedgeraEngineError> {
+        let payload = MandatoryTemplateCreatePayload {
+            wallet_id: request.wallet_id,
+            amount_original: request.amount_original,
+            currency: request.currency,
+            rate_at_operation: request.rate_at_operation,
+            amount_base: request.amount_base,
+            category: request.category,
+            description: request.description,
+            period: request.period,
+            date: request.date,
+        };
+        mandatory_template_create(&self.db_path, &payload)
+            .map(mandatory_template_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn update_mandatory_template(
+        &self,
+        template_id: i64,
+        request: UpdateMandatoryTemplateRequest,
+    ) -> Result<MandatoryTemplateDto, LedgeraEngineError> {
+        let payload = MandatoryTemplateUpdatePayload {
+            wallet_id: request.wallet_id,
+            amount_base: request.amount_base,
+            period: request.period,
+            date: request.date,
+        };
+        mandatory_template_update(&self.db_path, template_id, &payload)
+            .map(mandatory_template_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn delete_mandatory_template(&self, template_id: i64) -> Result<bool, LedgeraEngineError> {
+        mandatory_template_delete(&self.db_path, template_id).map_err(storage_error)
+    }
+
+    pub fn delete_all_mandatory_templates(&self) -> Result<i64, LedgeraEngineError> {
+        mandatory_template_delete_all(&self.db_path).map_err(storage_error)
+    }
+
+    pub fn add_mandatory_to_records(
+        &self,
+        request: AddMandatoryToRecordsRequest,
+    ) -> Result<RecordDto, LedgeraEngineError> {
+        let payload = MandatoryAddToRecordsPayload {
+            template_id: request.template_id,
+            date: request.date,
+            wallet_id: request.wallet_id,
+        };
+        mandatory_add_to_records(&self.db_path, &payload)
+            .map(record_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn apply_mandatory_auto_payments(
+        &self,
+        today: String,
+    ) -> Result<MandatoryAutoPayResultDto, LedgeraEngineError> {
+        mandatory_apply_auto_payments(&self.db_path, &today)
+            .map(mandatory_auto_pay_to_dto)
+            .map_err(storage_error)
+    }
+
     pub fn audit_run(&self) -> Result<Vec<AuditFindingDto>, LedgeraEngineError> {
         audit_run_for_date(&self.db_path, &current_local_date_text())
             .map(|findings| findings.into_iter().map(audit_finding_to_dto).collect())
@@ -791,6 +927,32 @@ fn audit_finding_to_dto(row: AuditFindingRow) -> AuditFindingDto {
         severity: row.severity,
         message: row.message,
         entity: row.detail,
+    }
+}
+
+fn mandatory_template_to_dto(row: MandatoryExpenseRow) -> MandatoryTemplateDto {
+    MandatoryTemplateDto {
+        id: row.id,
+        wallet_id: row.wallet_id,
+        amount_original: format_money(row.amount_original),
+        currency: row.currency,
+        rate_at_operation: format_rate(row.rate_at_operation),
+        amount_base: format_money(row.amount_base),
+        category: row.category,
+        description: row.description,
+        period: row.period,
+        date: row.date,
+        auto_pay: row.auto_pay,
+    }
+}
+
+fn mandatory_auto_pay_to_dto(result: MandatoryAutoPayResult) -> MandatoryAutoPayResultDto {
+    MandatoryAutoPayResultDto {
+        created_records: result
+            .created_records
+            .into_iter()
+            .map(record_to_dto)
+            .collect(),
     }
 }
 
@@ -2045,6 +2207,90 @@ mod tests {
         assert_eq!(payments[0].debt_id, 1);
         assert_eq!(payments[0].principal_paid, "20.00");
         assert_eq!(payments[0].operation_type, "debt_repay");
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_manages_mandatory_templates_and_records() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+
+        let created = engine
+            .create_mandatory_template(CreateMandatoryTemplateRequest {
+                wallet_id: 1,
+                amount_original: "25.25".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "25.25".to_owned(),
+                category: "Rent".to_owned(),
+                description: "Monthly rent".to_owned(),
+                period: "monthly".to_owned(),
+                date: "2026-02-01".to_owned(),
+            })
+            .unwrap();
+        assert_eq!(created.id, 1);
+        assert!(created.auto_pay);
+        assert_eq!(engine.list_mandatory_templates().unwrap().len(), 1);
+
+        let updated = engine
+            .update_mandatory_template(
+                created.id,
+                UpdateMandatoryTemplateRequest {
+                    wallet_id: 1,
+                    amount_base: "20".to_owned(),
+                    period: "weekly".to_owned(),
+                    date: "".to_owned(),
+                },
+            )
+            .unwrap();
+        assert_eq!(updated.wallet_id, 1);
+        assert_eq!(updated.period, "weekly");
+        assert!(!updated.auto_pay);
+
+        let record = engine
+            .add_mandatory_to_records(AddMandatoryToRecordsRequest {
+                template_id: updated.id,
+                date: "2026-02-03".to_owned(),
+                wallet_id: 1,
+            })
+            .unwrap();
+        assert_eq!(record.record_type, "mandatory_expense");
+        assert_eq!(record.category, "Rent");
+
+        assert!(engine.delete_mandatory_template(updated.id).unwrap());
+        assert!(engine.list_mandatory_templates().unwrap().is_empty());
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_applies_mandatory_auto_payments() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+        engine
+            .create_mandatory_template(CreateMandatoryTemplateRequest {
+                wallet_id: 1,
+                amount_original: "5".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "5".to_owned(),
+                category: "Daily".to_owned(),
+                description: "Coffee".to_owned(),
+                period: "daily".to_owned(),
+                date: "2026-02-01".to_owned(),
+            })
+            .unwrap();
+
+        let result = engine
+            .apply_mandatory_auto_payments("2026-02-05".to_owned())
+            .unwrap();
+        assert_eq!(result.created_records.len(), 1);
+        assert_eq!(result.created_records[0].date, "2026-02-05");
+        assert_eq!(result.created_records[0].record_type, "mandatory_expense");
+
+        let duplicate = engine
+            .apply_mandatory_auto_payments("2026-02-05".to_owned())
+            .unwrap();
+        assert!(duplicate.created_records.is_empty());
         fs::remove_file(db_path).ok();
     }
 
