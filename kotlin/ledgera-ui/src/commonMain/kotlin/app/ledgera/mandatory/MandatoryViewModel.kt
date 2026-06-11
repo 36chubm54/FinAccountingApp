@@ -4,10 +4,12 @@ import app.ledgera.bridge.MandatoryEngine
 import app.ledgera.model.AddMandatoryToRecordsRequest
 import app.ledgera.model.CreateMandatoryTemplateRequest
 import app.ledgera.model.MandatoryAddToRecordsDraft
+import app.ledgera.model.MandatoryImportResult
 import app.ledgera.model.MandatoryTemplateDraft
 import app.ledgera.model.MandatoryTemplateItem
 import app.ledgera.model.UpdateMandatoryTemplateRequest
 import app.ledgera.model.WalletOption
+import app.ledgera.operations.ImportFileSnapshotProvider
 import app.ledgera.validation.currentLedgerDate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +29,9 @@ data class MandatoryUiState(
     val addToRecordsDraft: MandatoryAddToRecordsDraft? = null,
     val deleteTemplateId: Long? = null,
     val confirmDeleteAll: Boolean = false,
+    val importPreview: MandatoryImportResult? = null,
+    val importPath: String? = null,
+    val importFileSnapshot: String? = null,
     val inProgress: Boolean = false,
     val error: String? = null,
     val notice: String? = null,
@@ -35,6 +40,7 @@ data class MandatoryUiState(
 class MandatoryViewModel(
     private val engine: MandatoryEngine,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main),
+    private val importFileSnapshotProvider: ImportFileSnapshotProvider = NoMandatoryImportFileSnapshotProvider,
 ) {
     private val mutableState = MutableStateFlow(MandatoryUiState(loading = true))
     val state: StateFlow<MandatoryUiState> = mutableState.asStateFlow()
@@ -66,6 +72,9 @@ class MandatoryViewModel(
                         templates.any { it.id == id }
                     },
                     confirmDeleteAll = previous.confirmDeleteAll,
+                    importPreview = previous.importPreview,
+                    importPath = previous.importPath,
+                    importFileSnapshot = previous.importFileSnapshot,
                     inProgress = previous.inProgress,
                     notice = notice,
                 )
@@ -322,6 +331,155 @@ class MandatoryViewModel(
         }
     }
 
+    fun previewImportMandatory(path: String?) {
+        val normalizedPath = path?.trim().orEmpty()
+        if (normalizedPath.isEmpty()) {
+            return
+        }
+        val format = mandatoryFileFormat(normalizedPath)
+        if (format == null) {
+            mutableState.value = mutableState.value.copy(
+                error = "Unsupported mandatory file format. Use .csv or .xlsx",
+                notice = null,
+            )
+            return
+        }
+        mutableState.value = mutableState.value.copy(
+            loading = true,
+            error = null,
+            notice = null,
+            importPreview = null,
+            importPath = normalizedPath,
+            importFileSnapshot = importFileSnapshotProvider.snapshot(normalizedPath),
+        )
+        launchSafely {
+            runCatching {
+                val result = when (format) {
+                    MandatoryFileFormat.Csv -> engine.previewImportMandatoryCsv(normalizedPath)
+                    MandatoryFileFormat.Xlsx -> engine.previewImportMandatoryXlsx(normalizedPath)
+                }
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    importPreview = result,
+                    importPath = normalizedPath,
+                    importFileSnapshot = importFileSnapshotProvider.snapshot(normalizedPath),
+                    error = null,
+                    notice = null,
+                )
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    importPreview = null,
+                    importPath = null,
+                    importFileSnapshot = null,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
+    fun cancelImportPreview() {
+        mutableState.value = mutableState.value.copy(
+            importPreview = null,
+            importPath = null,
+            importFileSnapshot = null,
+            error = null,
+        )
+    }
+
+    fun confirmImportMandatory() {
+        val state = mutableState.value
+        val path = state.importPath
+        if (path.isNullOrBlank()) {
+            mutableState.value = state.copy(error = "Import file is required", notice = null)
+            return
+        }
+        if (state.importPreview?.blockingErrors == true) {
+            mutableState.value = state.copy(
+                loading = false,
+                error = "Import preview has blocking errors. Fix the file and run preview again.",
+                notice = null,
+            )
+            return
+        }
+        val expectedSnapshot = state.importFileSnapshot
+        val currentSnapshot = importFileSnapshotProvider.snapshot(path)
+        if (expectedSnapshot != null && currentSnapshot != expectedSnapshot) {
+            mutableState.value = state.copy(
+                loading = false,
+                error = "Import file changed after preview. Run preview again.",
+                notice = null,
+            )
+            return
+        }
+        val format = mandatoryFileFormat(path)
+        if (format == null) {
+            mutableState.value = state.copy(
+                error = "Unsupported mandatory file format. Use .csv or .xlsx",
+                notice = null,
+            )
+            return
+        }
+        mutableState.value = state.copy(loading = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                val result = when (format) {
+                    MandatoryFileFormat.Csv -> engine.importMandatoryCsv(path)
+                    MandatoryFileFormat.Xlsx -> engine.importMandatoryXlsx(path)
+                }
+                mutableState.value = mutableState.value.copy(
+                    selectedTemplateId = null,
+                    importPreview = null,
+                    importPath = null,
+                    importFileSnapshot = null,
+                )
+                refresh("Mandatory templates imported: ${result.imported}")
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
+    fun exportMandatory(path: String?) {
+        val normalizedPath = path?.trim().orEmpty()
+        if (normalizedPath.isEmpty()) {
+            return
+        }
+        val format = mandatoryFileFormat(normalizedPath)
+        if (format == null) {
+            mutableState.value = mutableState.value.copy(
+                error = "Unsupported mandatory file format. Use .csv or .xlsx",
+                notice = null,
+            )
+            return
+        }
+        mutableState.value = mutableState.value.copy(loading = true, error = null, notice = null)
+        launchSafely {
+            runCatching {
+                val result = when (format) {
+                    MandatoryFileFormat.Csv -> engine.exportMandatoryCsv(normalizedPath)
+                    MandatoryFileFormat.Xlsx -> engine.exportMandatoryXlsx(normalizedPath)
+                }
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    error = null,
+                    notice = "Mandatory templates exported: ${result.exportedRows}",
+                )
+            }.onFailure { error ->
+                mutableState.value = mutableState.value.copy(
+                    loading = false,
+                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    notice = null,
+                )
+            }
+        }
+    }
+
     fun clearNotice() {
         mutableState.value = mutableState.value.copy(notice = null)
     }
@@ -346,4 +504,20 @@ class MandatoryViewModel(
 
     private fun todayText(): String =
         currentLedgerDate().let { "%04d-%02d-%02d".format(it.year, it.month, it.day) }
+}
+
+private enum class MandatoryFileFormat {
+    Csv,
+    Xlsx,
+}
+
+private fun mandatoryFileFormat(path: String): MandatoryFileFormat? =
+    when (path.substringAfterLast('.', missingDelimiterValue = "").lowercase()) {
+        "csv" -> MandatoryFileFormat.Csv
+        "xlsx" -> MandatoryFileFormat.Xlsx
+        else -> null
+    }
+
+private object NoMandatoryImportFileSnapshotProvider : ImportFileSnapshotProvider {
+    override fun snapshot(path: String): String? = null
 }

@@ -1,22 +1,24 @@
 use ledgera_engine_storage::{
     AuditFindingRow, DebtCreatePayload, DebtPayload, DebtPaymentPayload, DebtPaymentRequestPayload,
     MandatoryAddToRecordsPayload, MandatoryAutoPayResult, MandatoryExpenseRow,
-    MandatoryTemplateCreatePayload, MandatoryTemplateUpdatePayload, OperationDeleteResult,
-    OperationExportResult, OperationImportResult, RecordFilterPayload, RecordRow,
-    StandaloneRecordCreatePayload, StandaloneRecordUpdatePayload, TransferCreatePayload,
-    TransferRow, TransferUpdatePayload, WalletBalanceRow, WalletCreatePayload, WalletRow,
-    audit_run_for_date, base_currency_code, create_standalone_record, create_transfer,
-    create_wallet, current_local_date, debt_close_validated, debt_create, debt_delete,
-    debt_delete_payment, debt_payment_rows, debt_register_payment_validated,
-    debt_register_write_off_validated, debt_rows, delete_all_operations,
-    delete_operations_selection, delete_standalone_record, delete_transfer, delete_wallet,
-    distinct_record_categories, export_records_csv, export_records_xlsx, filtered_record_list_rows,
-    import_records_csv, import_records_xlsx, mandatory_add_to_records,
+    MandatoryExportResult, MandatoryImportResult, MandatoryTemplateCreatePayload,
+    MandatoryTemplateUpdatePayload, OperationDeleteResult, OperationExportResult,
+    OperationImportResult, RecordFilterPayload, RecordRow, StandaloneRecordCreatePayload,
+    StandaloneRecordUpdatePayload, TransferCreatePayload, TransferRow, TransferUpdatePayload,
+    WalletBalanceRow, WalletCreatePayload, WalletRow, audit_run_for_date, base_currency_code,
+    create_standalone_record, create_transfer, create_wallet, current_local_date,
+    debt_close_validated, debt_create, debt_delete, debt_delete_payment, debt_payment_rows,
+    debt_register_payment_validated, debt_register_write_off_validated, debt_rows,
+    delete_all_operations, delete_operations_selection, delete_standalone_record, delete_transfer,
+    delete_wallet, distinct_record_categories, export_mandatory_csv, export_mandatory_xlsx,
+    export_records_csv, export_records_xlsx, filtered_record_list_rows, import_mandatory_csv,
+    import_mandatory_xlsx, import_records_csv, import_records_xlsx, mandatory_add_to_records,
     mandatory_apply_auto_payments, mandatory_expense_row, mandatory_expense_rows,
     mandatory_template_create, mandatory_template_delete, mandatory_template_delete_all,
-    mandatory_template_update, preview_import_records_csv, preview_import_records_xlsx,
-    standalone_record_get_row, tag_names, transfer_get_row, update_standalone_record,
-    update_transfer, wallet_balance_row, wallet_balance_rows, wallet_list_rows,
+    mandatory_template_update, preview_import_mandatory_csv, preview_import_mandatory_xlsx,
+    preview_import_records_csv, preview_import_records_xlsx, standalone_record_get_row, tag_names,
+    transfer_get_row, update_standalone_record, update_transfer, wallet_balance_row,
+    wallet_balance_rows, wallet_list_rows,
 };
 use std::fmt;
 use std::path::Path;
@@ -172,6 +174,21 @@ pub struct OperationImportResultDto {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OperationExportResultDto {
+    pub exported_rows: i64,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MandatoryImportResultDto {
+    pub imported: i64,
+    pub skipped: i64,
+    pub errors: Vec<String>,
+    pub dry_run: bool,
+    pub blocking_errors: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MandatoryExportResultDto {
     pub exported_rows: i64,
     pub path: String,
 }
@@ -721,6 +738,60 @@ impl LedgeraEngine {
             .map_err(storage_error)
     }
 
+    pub fn preview_import_mandatory_csv(
+        &self,
+        path: String,
+    ) -> Result<MandatoryImportResultDto, LedgeraEngineError> {
+        preview_import_mandatory_csv(&self.db_path, &path)
+            .map(mandatory_import_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn import_mandatory_csv(
+        &self,
+        path: String,
+    ) -> Result<MandatoryImportResultDto, LedgeraEngineError> {
+        import_mandatory_csv(&self.db_path, &path)
+            .map(mandatory_import_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn export_mandatory_csv(
+        &self,
+        path: String,
+    ) -> Result<MandatoryExportResultDto, LedgeraEngineError> {
+        export_mandatory_csv(&self.db_path, &path)
+            .map(mandatory_export_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn preview_import_mandatory_xlsx(
+        &self,
+        path: String,
+    ) -> Result<MandatoryImportResultDto, LedgeraEngineError> {
+        preview_import_mandatory_xlsx(&self.db_path, &path)
+            .map(mandatory_import_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn import_mandatory_xlsx(
+        &self,
+        path: String,
+    ) -> Result<MandatoryImportResultDto, LedgeraEngineError> {
+        import_mandatory_xlsx(&self.db_path, &path)
+            .map(mandatory_import_to_dto)
+            .map_err(storage_error)
+    }
+
+    pub fn export_mandatory_xlsx(
+        &self,
+        path: String,
+    ) -> Result<MandatoryExportResultDto, LedgeraEngineError> {
+        export_mandatory_xlsx(&self.db_path, &path)
+            .map(mandatory_export_to_dto)
+            .map_err(storage_error)
+    }
+
     pub fn audit_run(&self) -> Result<Vec<AuditFindingDto>, LedgeraEngineError> {
         audit_run_for_date(&self.db_path, &current_local_date_text())
             .map(|findings| findings.into_iter().map(audit_finding_to_dto).collect())
@@ -916,6 +987,23 @@ fn operation_import_to_dto(result: OperationImportResult) -> OperationImportResu
 
 fn operation_export_to_dto(result: OperationExportResult) -> OperationExportResultDto {
     OperationExportResultDto {
+        exported_rows: result.exported_rows,
+        path: result.path,
+    }
+}
+
+fn mandatory_import_to_dto(result: MandatoryImportResult) -> MandatoryImportResultDto {
+    MandatoryImportResultDto {
+        imported: result.imported,
+        skipped: result.skipped,
+        errors: result.errors,
+        dry_run: result.dry_run,
+        blocking_errors: result.blocking_errors,
+    }
+}
+
+fn mandatory_export_to_dto(result: MandatoryExportResult) -> MandatoryExportResultDto {
+    MandatoryExportResultDto {
         exported_rows: result.exported_rows,
         path: result.path,
     }
@@ -2259,6 +2347,66 @@ mod tests {
 
         assert!(engine.delete_mandatory_template(updated.id).unwrap());
         assert!(engine.list_mandatory_templates().unwrap().is_empty());
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_imports_and_exports_mandatory_templates() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let import_path = std::env::temp_dir().join(format!("ledgera_mandatory_{unique}.csv"));
+        let export_path = std::env::temp_dir().join(format!("ledgera_mandatory_{unique}.xlsx"));
+        fs::write(
+            &import_path,
+            "type,date,wallet_id,category,amount_original,currency,rate_at_operation,amount_base,description,period\n\
+mandatory_expense,2026-03-01,1,Rent,100,KZT,1,100,Rent,monthly\n\
+mandatory_expense,,2,Phone,25,KZT,1,25,Mobile,weekly\n",
+        )
+        .unwrap();
+
+        let preview = engine
+            .preview_import_mandatory_csv(import_path.to_string_lossy().to_string())
+            .unwrap();
+        assert_eq!(preview.imported, 2);
+        assert!(preview.dry_run);
+        assert!(preview.errors.is_empty());
+
+        let imported = engine
+            .import_mandatory_csv(import_path.to_string_lossy().to_string())
+            .unwrap();
+        assert_eq!(imported.imported, 2);
+        assert_eq!(engine.list_mandatory_templates().unwrap().len(), 2);
+
+        let export = engine
+            .export_mandatory_xlsx(export_path.to_string_lossy().to_string())
+            .unwrap();
+        assert_eq!(export.exported_rows, 2);
+        assert_eq!(export.path, export_path.to_string_lossy());
+
+        fs::write(
+            &import_path,
+            "type,date,wallet_id,category,amount_original,currency,rate_at_operation,amount_base,description,period\n\
+expense,,1,Wrong,10,KZT,1,10,Wrong,monthly\n",
+        )
+        .unwrap();
+        let invalid_preview = engine
+            .preview_import_mandatory_csv(import_path.to_string_lossy().to_string())
+            .unwrap();
+        assert!(invalid_preview.blocking_errors);
+        assert!(
+            engine
+                .import_mandatory_csv(import_path.to_string_lossy().to_string())
+                .unwrap_err()
+                .to_string()
+                .contains("Mandatory import contains validation errors")
+        );
+
+        fs::remove_file(import_path).ok();
+        fs::remove_file(export_path).ok();
         fs::remove_file(db_path).ok();
     }
 

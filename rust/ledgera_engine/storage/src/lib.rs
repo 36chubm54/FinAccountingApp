@@ -64,6 +64,21 @@ pub struct OperationExportResult {
     pub path: String,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MandatoryImportResult {
+    pub imported: i64,
+    pub skipped: i64,
+    pub errors: Vec<String>,
+    pub dry_run: bool,
+    pub blocking_errors: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MandatoryExportResult {
+    pub exported_rows: i64,
+    pub path: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransferRow {
     pub id: i64,
@@ -1300,6 +1315,22 @@ const OPERATION_XLSX_AMOUNT_COLUMNS: [usize; 3] = [4, 6, 7];
 const OPERATION_XLSX_INTEGER_COLUMNS: [usize; 6] = [2, 11, 12, 13, 14, 15];
 const MAX_OPERATION_CSV_FILE_SIZE: u64 = 10 * 1024 * 1024;
 const MAX_OPERATION_CSV_ROWS: usize = 200_000;
+const MANDATORY_TABULAR_HEADERS: [&str; 10] = [
+    "type",
+    "date",
+    "wallet_id",
+    "category",
+    "amount_original",
+    "currency",
+    "rate_at_operation",
+    "amount_base",
+    "description",
+    "period",
+];
+const MANDATORY_XLSX_AMOUNT_COLUMNS: [usize; 3] = [4, 6, 7];
+const MANDATORY_XLSX_INTEGER_COLUMNS: [usize; 1] = [2];
+const MAX_MANDATORY_IMPORT_FILE_SIZE: u64 = 10 * 1024 * 1024;
+const MAX_MANDATORY_IMPORT_ROWS: usize = 200_000;
 
 #[derive(Debug, Clone)]
 struct ParsedOperationCsvRecord {
@@ -1338,6 +1369,31 @@ struct ParsedOperationCsvTransfer {
 #[derive(Debug, Clone, Default)]
 struct OperationCsvPlan {
     rows: Vec<ParsedOperationCsvRow>,
+    imported: i64,
+    skipped: i64,
+    errors: Vec<String>,
+    has_blocking_errors: bool,
+}
+
+#[derive(Debug, Clone)]
+struct ParsedMandatoryTemplate {
+    wallet_id: i64,
+    amount_original: f64,
+    amount_original_minor: i64,
+    currency: String,
+    rate_text: String,
+    rate: f64,
+    amount_base: f64,
+    amount_base_minor: i64,
+    category: String,
+    description: String,
+    period: String,
+    date: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct MandatoryImportPlan {
+    templates: Vec<ParsedMandatoryTemplate>,
     imported: i64,
     skipped: i64,
     errors: Vec<String>,
@@ -1635,6 +1691,191 @@ pub fn export_records_xlsx(db_path: &str, path: &str) -> StorageResult<Operation
     })
 }
 
+pub fn preview_import_mandatory_csv(
+    db_path: &str,
+    path: &str,
+) -> StorageResult<MandatoryImportResult> {
+    let conn = open_sqlite_connection(db_path)?;
+    let plan = parse_mandatory_csv_import(&conn, path)?;
+    Ok(MandatoryImportResult {
+        imported: plan.imported,
+        skipped: plan.skipped,
+        errors: plan.errors,
+        dry_run: true,
+        blocking_errors: plan.has_blocking_errors,
+    })
+}
+
+pub fn preview_import_mandatory_xlsx(
+    db_path: &str,
+    path: &str,
+) -> StorageResult<MandatoryImportResult> {
+    let conn = open_sqlite_connection(db_path)?;
+    let plan = parse_mandatory_xlsx_import(&conn, path)?;
+    Ok(MandatoryImportResult {
+        imported: plan.imported,
+        skipped: plan.skipped,
+        errors: plan.errors,
+        dry_run: true,
+        blocking_errors: plan.has_blocking_errors,
+    })
+}
+
+pub fn import_mandatory_csv(db_path: &str, path: &str) -> StorageResult<MandatoryImportResult> {
+    let mut conn = open_sqlite_connection(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(sqlite_err)?;
+    let plan = parse_mandatory_csv_import(&conn, path)?;
+    import_mandatory_plan(&mut conn, plan)
+}
+
+pub fn import_mandatory_xlsx(db_path: &str, path: &str) -> StorageResult<MandatoryImportResult> {
+    let mut conn = open_sqlite_connection(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(sqlite_err)?;
+    let plan = parse_mandatory_xlsx_import(&conn, path)?;
+    import_mandatory_plan(&mut conn, plan)
+}
+
+pub fn export_mandatory_csv(db_path: &str, path: &str) -> StorageResult<MandatoryExportResult> {
+    let conn = open_sqlite_connection(db_path)?;
+    let rows = mandatory_export_rows(&conn)?;
+    let temp_path = export_temp_path(path)?;
+    let exported_rows =
+        match write_csv_rows(path_text(&temp_path)?, &MANDATORY_TABULAR_HEADERS, &rows) {
+            Ok(exported_rows) => exported_rows,
+            Err(error) => {
+                let _ = fs::remove_file(&temp_path);
+                return Err(error);
+            }
+        };
+    replace_export_file(&temp_path, Path::new(path))?;
+    Ok(MandatoryExportResult {
+        exported_rows,
+        path: path.to_owned(),
+    })
+}
+
+pub fn export_mandatory_xlsx(db_path: &str, path: &str) -> StorageResult<MandatoryExportResult> {
+    let conn = open_sqlite_connection(db_path)?;
+    let rows = mandatory_export_rows(&conn)?;
+    let temp_path = export_temp_path(path)?;
+    let mut worksheet = StyledWorksheet::new_records_sheet(
+        "Mandatory",
+        &MANDATORY_TABULAR_HEADERS,
+        &MANDATORY_XLSX_AMOUNT_COLUMNS,
+        &MANDATORY_XLSX_INTEGER_COLUMNS,
+    )
+    .map_err(|error| error.to_string())?;
+    for row in &rows {
+        worksheet
+            .append_row(row)
+            .map_err(|error| error.to_string())?;
+    }
+    if let Err(error) = worksheet.save(path_text(&temp_path)?) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error.to_string());
+    }
+    replace_export_file(&temp_path, Path::new(path))?;
+    Ok(MandatoryExportResult {
+        exported_rows: i64::try_from(rows.len()).unwrap_or(i64::MAX),
+        path: path.to_owned(),
+    })
+}
+
+fn import_mandatory_plan(
+    conn: &mut Connection,
+    plan: MandatoryImportPlan,
+) -> StorageResult<MandatoryImportResult> {
+    if plan.has_blocking_errors {
+        let message = plan
+            .errors
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "Mandatory import contains validation errors".to_owned());
+        return Err(format!(
+            "Mandatory import contains validation errors: {message}"
+        ));
+    }
+
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    tx.execute("DELETE FROM mandatory_expenses", [])
+        .map_err(sqlite_err)?;
+    reset_sqlite_sequence_to_max_id_in_tx(&tx, "mandatory_expenses")?;
+    for template in &plan.templates {
+        insert_import_mandatory_template_in_tx(&tx, template)?;
+    }
+    normalize_mandatory_template_ids_in_tx(&tx)?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+
+    Ok(MandatoryImportResult {
+        imported: plan.imported,
+        skipped: plan.skipped,
+        errors: plan.errors,
+        dry_run: false,
+        blocking_errors: false,
+    })
+}
+
+fn mandatory_export_rows(conn: &Connection) -> StorageResult<Vec<Vec<String>>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                wallet_id,
+                amount_original,
+                amount_original_minor,
+                currency,
+                rate_at_operation,
+                rate_at_operation_text,
+                amount_base,
+                amount_base_minor,
+                category,
+                description,
+                period,
+                COALESCE(date, '')
+             FROM mandatory_expenses
+             ORDER BY id",
+        )
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(MandatoryExpenseRow {
+                id: 0,
+                wallet_id: row.get(0)?,
+                amount_original: money_value_from_sql_row(row, 1, 2)?,
+                currency: row.get(3)?,
+                rate_at_operation: rate_value_from_sql_row(row, 4, 5)?,
+                amount_base: money_value_from_sql_row(row, 6, 7)?,
+                category: row.get(8)?,
+                description: row.get(9)?,
+                period: row.get(10)?,
+                date: row.get::<_, Option<String>>(11)?.unwrap_or_default(),
+                auto_pay: false,
+            })
+        })
+        .map_err(sqlite_err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sqlite_err)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            vec![
+                "mandatory_expense".to_owned(),
+                row.date,
+                row.wallet_id.to_string(),
+                row.category,
+                format_money_export(row.amount_original),
+                row.currency,
+                format_rate_export(row.rate_at_operation),
+                format_money_export(row.amount_base),
+                row.description,
+                row.period,
+            ]
+        })
+        .collect())
+}
+
 fn export_temp_path(path: &str) -> StorageResult<PathBuf> {
     let target = Path::new(path);
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
@@ -1732,6 +1973,130 @@ fn parse_operation_xlsx_import(conn: &Connection, path: &str) -> StorageResult<O
         rows.push((index + 2, xlsx_row_values(&headers, row)));
     }
     parse_operation_tabular_import(conn, rows)
+}
+
+fn parse_mandatory_csv_import(conn: &Connection, path: &str) -> StorageResult<MandatoryImportPlan> {
+    let rows = read_csv_rows(
+        path,
+        MAX_MANDATORY_IMPORT_FILE_SIZE,
+        MAX_MANDATORY_IMPORT_ROWS,
+        "Mandatory CSV import",
+    )?;
+    parse_mandatory_tabular_import(conn, rows)
+}
+
+fn parse_mandatory_xlsx_import(
+    conn: &Connection,
+    path: &str,
+) -> StorageResult<MandatoryImportPlan> {
+    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
+    if metadata.len() > MAX_MANDATORY_IMPORT_FILE_SIZE {
+        return Err(format!(
+            "Mandatory XLSX import file is too large: {} bytes",
+            metadata.len()
+        ));
+    }
+    let mut workbook = open_workbook_auto(path).map_err(|error| error.to_string())?;
+    let Some(sheet_name) = workbook.sheet_names().first().cloned() else {
+        return Ok(MandatoryImportPlan::default());
+    };
+    let range = workbook
+        .worksheet_range(&sheet_name)
+        .map_err(|error| error.to_string())?;
+    let mut rows_iter = range.rows();
+    let Some(header_row) = rows_iter.next() else {
+        return Ok(MandatoryImportPlan::default());
+    };
+    let headers = header_row
+        .iter()
+        .map(xlsx_cell_to_string)
+        .map(|value| normalize_tabular_key(&value))
+        .collect::<Vec<_>>();
+    let mut rows = Vec::new();
+    for (index, row) in rows_iter.enumerate() {
+        if index >= MAX_MANDATORY_IMPORT_ROWS {
+            return Err(format!(
+                "Mandatory XLSX import exceeded row limit ({MAX_MANDATORY_IMPORT_ROWS})"
+            ));
+        }
+        rows.push((index + 2, xlsx_row_values(&headers, row)));
+    }
+    parse_mandatory_tabular_import(conn, rows)
+}
+
+fn parse_mandatory_tabular_import(
+    conn: &Connection,
+    rows: Vec<(usize, HashMap<String, String>)>,
+) -> StorageResult<MandatoryImportPlan> {
+    let base_currency = base_currency_code_in_conn(conn)?;
+    let wallet_ids = active_wallet_ids_in_conn(conn)?;
+    let mut plan = MandatoryImportPlan::default();
+    for (row_number, values) in rows {
+        let row_label = format!("row {row_number}");
+        if values.values().all(|value| value.trim().is_empty()) {
+            continue;
+        }
+        match parse_mandatory_template_row(&values, &row_label, &base_currency, &wallet_ids) {
+            Ok(template) => {
+                plan.templates.push(template);
+                plan.imported += 1;
+            }
+            Err(error) => {
+                plan.skipped += 1;
+                plan.errors.push(error);
+                plan.has_blocking_errors = true;
+            }
+        }
+    }
+    Ok(plan)
+}
+
+fn parse_mandatory_template_row(
+    values: &HashMap<String, String>,
+    row_label: &str,
+    base_currency: &str,
+    wallet_ids: &HashSet<i64>,
+) -> StorageResult<ParsedMandatoryTemplate> {
+    let row_type = required_csv_value(values, "type", row_label)?
+        .trim()
+        .to_lowercase();
+    if row_type != "mandatory_expense" {
+        return Err(format!("{row_label}: unsupported type '{row_type}'"));
+    }
+    let date = csv_value(values, "date").trim().to_owned();
+    if !date.is_empty() {
+        validate_ymd_syntax(&date)?;
+    }
+    let wallet_id = parse_required_positive_i64(values, "wallet_id", row_label)?;
+    if !wallet_ids.contains(&wallet_id) {
+        return Err(format!("{row_label}: wallet not found ({wallet_id})"));
+    }
+    let category = required_csv_value(values, "category", row_label)?;
+    let description = csv_value(values, "description");
+    let period = csv_value(values, "period").trim().to_lowercase();
+    validate_mandatory_period(&period)?;
+    let currency = required_csv_value(values, "currency", row_label)?.to_uppercase();
+    validate_currency_code(&currency)?;
+    validate_mandatory_base_currency_only(&currency, base_currency)?;
+    let (_amount_original_text, amount_original, amount_original_minor) =
+        parse_abs_positive_money(values, "amount_original", row_label)?;
+    let (_amount_base_text, amount_base, amount_base_minor) =
+        parse_abs_positive_money(values, "amount_base", row_label)?;
+    let (rate_text, rate) = parse_positive_rate(values, "rate_at_operation", row_label)?;
+    Ok(ParsedMandatoryTemplate {
+        wallet_id,
+        amount_original,
+        amount_original_minor,
+        currency,
+        rate_text,
+        rate,
+        amount_base,
+        amount_base_minor,
+        description: normalize_mandatory_description(&description, &category),
+        category,
+        period,
+        date,
+    })
 }
 
 fn parse_operation_tabular_import(
@@ -2150,6 +2515,15 @@ fn decimal_text(value: f64) -> String {
     text.trim_end_matches('0').trim_end_matches('.').to_owned()
 }
 
+fn format_money_export(value: f64) -> String {
+    format!("{value:.2}")
+}
+
+fn format_rate_export(value: f64) -> String {
+    let text = format!("{value:.6}");
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
 fn excel_serial_to_date_text(serial: f64) -> String {
     let days = serial.floor() as i64;
     let (year, month, day) = civil_from_days(days - 25_569);
@@ -2216,6 +2590,22 @@ fn parse_positive_money(
         .parse::<f64>()
         .map_err(|_| format!("{row_label}: invalid {key}"))?;
     Ok((text, value, minor))
+}
+
+fn parse_abs_positive_money(
+    values: &HashMap<String, String>,
+    key: &str,
+    row_label: &str,
+) -> StorageResult<(String, f64, i64)> {
+    let raw = required_csv_value(values, key, row_label)?;
+    let text = quantize_money_text(&raw).map_err(|error| format!("{row_label}: {key}: {error}"))?;
+    let minor = to_minor_units(&text).map_err(|error| format!("{row_label}: {key}: {error}"))?;
+    let abs_minor = minor.abs();
+    if abs_minor <= 0 {
+        return Err(format!("{row_label}: {key} must be positive"));
+    }
+    let value = minor_to_money_value(abs_minor);
+    Ok((format_money_export(value), value, abs_minor))
 }
 
 fn parse_positive_rate(
@@ -4084,6 +4474,56 @@ fn validate_mandatory_template_update_payload_in_tx(
     Ok(())
 }
 
+fn insert_import_mandatory_template_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    template: &ParsedMandatoryTemplate,
+) -> StorageResult<()> {
+    tx.execute(
+        "INSERT INTO mandatory_expenses (
+            wallet_id,
+            amount_original,
+            amount_original_minor,
+            currency,
+            rate_at_operation,
+            rate_at_operation_text,
+            amount_base,
+            amount_base_minor,
+            category,
+            description,
+            period,
+            date,
+            auto_pay
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        (
+            template.wallet_id,
+            template.amount_original,
+            template.amount_original_minor,
+            template.currency.as_str(),
+            template.rate,
+            template.rate_text.as_str(),
+            template.amount_base,
+            template.amount_base_minor,
+            template.category.as_str(),
+            template.description.as_str(),
+            template.period.as_str(),
+            template.date.as_str(),
+            i64::from(!template.date.trim().is_empty()),
+        ),
+    )
+    .map_err(sqlite_err)?;
+    Ok(())
+}
+
+fn normalize_mandatory_description(description: &str, category: &str) -> String {
+    let trimmed = description.trim();
+    if trimmed.is_empty() {
+        category.to_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}
+
 fn validate_active_wallet_for_mandatory_in_tx(
     tx: &rusqlite::Transaction<'_>,
     wallet_id: i64,
@@ -5254,6 +5694,26 @@ mod tests {
         worksheet.save(path.to_str().unwrap()).unwrap();
     }
 
+    fn write_mandatory_xlsx_fixture(path: &std::path::Path, rows: &[Vec<&str>]) {
+        let mut worksheet = StyledWorksheet::new_records_sheet(
+            "Mandatory",
+            &MANDATORY_TABULAR_HEADERS,
+            &MANDATORY_XLSX_AMOUNT_COLUMNS,
+            &MANDATORY_XLSX_INTEGER_COLUMNS,
+        )
+        .unwrap();
+        for row in rows {
+            worksheet
+                .append_row(
+                    &row.iter()
+                        .map(|value| value.to_string())
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap();
+        }
+        worksheet.save(path.to_str().unwrap()).unwrap();
+    }
+
     fn xlsx_entry_text(path: &std::path::Path, entry_name: &str) -> String {
         let file = fs::File::open(path).unwrap();
         let mut archive = zip::ZipArchive::new(file).unwrap();
@@ -5917,6 +6377,155 @@ mod tests {
                 .iter()
                 .all(|record| record.category != future.category)
         );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn import_export_mandatory_csv_replaces_templates_and_normalizes_ids() {
+        let db_path = create_balance_test_db();
+        let path = temp_test_path("ledgera_mandatory_import", "csv");
+        fs::write(
+            &path,
+            "type,date,wallet_id,category,amount_original,currency,rate_at_operation,amount_base,description,period\n\
+mandatory_expense,2026-03-01,1,Rent,-100,KZT,1,100,,monthly\n\
+mandatory_expense,,2,Phone,25,KZT,1,25,Mobile,weekly\n",
+        )
+        .unwrap();
+
+        let preview = preview_import_mandatory_csv(&db_path, path.to_str().unwrap()).unwrap();
+        assert_eq!(preview.imported, 2);
+        assert!(preview.errors.is_empty());
+        assert_eq!(mandatory_expense_rows(&db_path).unwrap().len(), 1);
+
+        let result = import_mandatory_csv(&db_path, path.to_str().unwrap()).unwrap();
+        assert_eq!(result.imported, 2);
+        let templates = mandatory_expense_rows(&db_path).unwrap();
+        assert_eq!(
+            templates.iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(templates[0].description, "Rent");
+        assert!(templates[0].auto_pay);
+        assert_eq!(templates[0].amount_base, 100.0);
+        assert!(!templates[1].auto_pay);
+
+        let export_path = temp_test_path("ledgera_mandatory_export", "csv");
+        let export = export_mandatory_csv(&db_path, export_path.to_str().unwrap()).unwrap();
+        assert_eq!(export.exported_rows, 2);
+        let exported = fs::read_to_string(&export_path).unwrap();
+        assert!(exported.starts_with(
+            "type,date,wallet_id,category,amount_original,currency,rate_at_operation,amount_base,description,period"
+        ));
+        assert!(
+            exported
+                .contains("mandatory_expense,2026-03-01,1,Rent,100.00,KZT,1,100.00,Rent,monthly")
+        );
+
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(export_path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn import_export_mandatory_xlsx_uses_python_style_sheet() {
+        let db_path = create_balance_test_db();
+        let import_path = temp_test_path("ledgera_mandatory_import", "xlsx");
+        write_mandatory_xlsx_fixture(
+            &import_path,
+            &[
+                vec![
+                    "mandatory_expense",
+                    "2026-04-01",
+                    "1",
+                    "Utilities",
+                    "50",
+                    "KZT",
+                    "1",
+                    "50",
+                    "Internet",
+                    "monthly",
+                ],
+                vec![
+                    "mandatory_expense",
+                    "",
+                    "2",
+                    "Gym",
+                    "30",
+                    "KZT",
+                    "1",
+                    "30",
+                    "Membership",
+                    "yearly",
+                ],
+            ],
+        );
+
+        let preview =
+            preview_import_mandatory_xlsx(&db_path, import_path.to_str().unwrap()).unwrap();
+        assert_eq!(preview.imported, 2);
+        import_mandatory_xlsx(&db_path, import_path.to_str().unwrap()).unwrap();
+        let templates = mandatory_expense_rows(&db_path).unwrap();
+        assert_eq!(templates.len(), 2);
+        assert_eq!(templates[0].category, "Utilities");
+        assert_eq!(templates[1].period, "yearly");
+
+        let export_path = temp_test_path("ledgera_mandatory_export", "xlsx");
+        let export = export_mandatory_xlsx(&db_path, export_path.to_str().unwrap()).unwrap();
+        assert_eq!(export.exported_rows, 2);
+        let sheet_xml = xlsx_entry_text(&export_path, "xl/worksheets/sheet1.xml");
+        assert!(sheet_xml.contains("<sheetViews><sheetView"));
+        assert!(sheet_xml.contains("<pane ySplit=\"1\" topLeftCell=\"A2\""));
+        assert!(sheet_xml.contains("<autoFilter ref=\"A1:J3\""));
+        let styles_xml = xlsx_entry_text(&export_path, "xl/styles.xml");
+        assert!(styles_xml.contains("1F4E78"));
+        assert!(styles_xml.contains("#,##0.00"));
+
+        let _ = fs::remove_file(import_path);
+        let _ = fs::remove_file(export_path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn import_mandatory_rejects_invalid_rows_without_replacing_existing_templates() {
+        let db_path = create_balance_test_db();
+        let path = temp_test_path("ledgera_mandatory_invalid", "csv");
+        fs::write(
+            &path,
+            "type,date,wallet_id,category,amount_original,currency,rate_at_operation,amount_base,description,period\n\
+mandatory_expense,2026-02-30,1,Rent,100,KZT,1,100,Rent,monthly\n\
+mandatory_expense,,99,Phone,25,KZT,1,25,Mobile,weekly\n\
+expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
+        )
+        .unwrap();
+
+        let preview = preview_import_mandatory_csv(&db_path, path.to_str().unwrap()).unwrap();
+        assert_eq!(preview.imported, 0);
+        assert_eq!(preview.skipped, 3);
+        assert!(preview.blocking_errors);
+        assert!(
+            preview
+                .errors
+                .iter()
+                .any(|error| error.contains("Date day"))
+        );
+        assert!(
+            preview
+                .errors
+                .iter()
+                .any(|error| error.contains("wallet not found"))
+        );
+        assert!(
+            preview
+                .errors
+                .iter()
+                .any(|error| error.contains("unsupported type"))
+        );
+        let before = mandatory_expense_rows(&db_path).unwrap();
+        let error = import_mandatory_csv(&db_path, path.to_str().unwrap()).unwrap_err();
+        assert!(error.contains("Mandatory import contains validation errors"));
+        assert_eq!(mandatory_expense_rows(&db_path).unwrap(), before);
+
+        let _ = fs::remove_file(path);
         remove_test_db(&db_path);
     }
 

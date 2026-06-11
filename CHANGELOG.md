@@ -19,7 +19,7 @@ This project adheres to Semantic Versioning.
 - Added beta.1 Kotlin Operations safe bulk deletion through Rust/Kotlin UniFFI, including delete-all for Operations-owned standalone records/transfers and selective delete mode for chosen records/transfers.
 - Added beta.1 Kotlin Operations CSV/XLSX import/export through Rust/Kotlin UniFFI, including previewed replace-import for Operations-owned standalone records, transfers, and debt-linked records, Python-style XLSX `Data` sheet styling, and aggregate transfer rows.
 - Added beta.1 Kotlin Debts read/write slices through Rust/Kotlin UniFFI for listing debts/loans, viewing selected debt payment history, creating base-currency debts/loans with linked cashflow rows, registering payments, registering write-offs, closing debts/loans, deleting debt cards, and deleting payments.
-- Added beta.1 Kotlin Mandatory template CRUD, add-to-records, and auto-pay application through Rust/Kotlin UniFFI.
+- Added beta.1 Kotlin Mandatory template CRUD, add-to-records, auto-pay application, and CSV/XLSX import/export through Rust/Kotlin UniFFI.
 - Added a beta.1 Kotlin Settings wallet slice for listing wallets and creating active base-currency wallets through Rust/Kotlin UniFFI.
 - Added a beta.1 Kotlin Settings Audit card that runs the read-only Rust AuditEngine v2 report through Rust/Kotlin UniFFI and shows findings without repair actions.
 
@@ -32,7 +32,7 @@ This project adheres to Semantic Versioning.
 - Extended the Kotlin UniFFI Operations contract with standalone record get/update/delete methods plus tag and category lookup surfaces.
 - Extended the Kotlin UniFFI Operations contract with transfer create/get/update/delete, safe bulk delete, and CSV/XLSX records migration support for standalone, transfer, and debt-linked rows; transfer list parity, `.xls`/JSON import/export, current-rate import, and commission editing remain pending beta.1 slices.
 - Extended the Kotlin adapter contract with a Debts capability group for debt/loan list, selected history, create, payment, write-off, close, delete debt, and delete payment flows; debt-card editing and import/export remain pending beta.1 slices.
-- Extended the Kotlin adapter contract with a Mandatory capability group for template list/create/update/delete/delete-all, generated record creation, and auto-pay application; Mandatory CSV/XLSX migration remains a separate beta.1 slice.
+- Extended the Kotlin adapter contract with a Mandatory capability group for template list/create/update/delete/delete-all, generated record creation, auto-pay application, and previewed CSV/XLSX replace-import/export; `.xls`, JSON backup/export, current-rate import, and wallet creation from import remain pending beta.1 slices.
 - Extended the Kotlin adapter contract with a Settings capability group for wallet list/create/delete and read-only audit flows; wallet edit and broader Settings surfaces remain pending beta.1 slices.
 - Extracted reusable Rust storage CSV helpers alongside the Excel utility so later tabs can share bounded tabular import/export infrastructure instead of duplicating Operations-specific CSV I/O.
 

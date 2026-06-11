@@ -18,6 +18,8 @@ import app.ledgera.model.OperationExportResult
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
 import app.ledgera.model.MandatoryAutoPayResult
+import app.ledgera.model.MandatoryExportResult
+import app.ledgera.model.MandatoryImportResult
 import app.ledgera.model.MandatoryTemplateItem
 import app.ledgera.model.RegisterDebtPaymentRequest
 import app.ledgera.model.TransferDetails
@@ -1361,6 +1363,24 @@ private class FakeEngineAdapter(
 
     override suspend fun applyMandatoryAutoPayments(today: String): MandatoryAutoPayResult =
         MandatoryAutoPayResult(createdRecords = emptyList())
+
+    override suspend fun previewImportMandatoryCsv(path: String): MandatoryImportResult =
+        MandatoryImportResult(imported = 0, skipped = 0, errors = emptyList(), dryRun = true)
+
+    override suspend fun importMandatoryCsv(path: String): MandatoryImportResult =
+        MandatoryImportResult(imported = 0, skipped = 0, errors = emptyList(), dryRun = false)
+
+    override suspend fun exportMandatoryCsv(path: String): MandatoryExportResult =
+        MandatoryExportResult(exportedRows = 0, path = path)
+
+    override suspend fun previewImportMandatoryXlsx(path: String): MandatoryImportResult =
+        MandatoryImportResult(imported = 0, skipped = 0, errors = emptyList(), dryRun = true)
+
+    override suspend fun importMandatoryXlsx(path: String): MandatoryImportResult =
+        MandatoryImportResult(imported = 0, skipped = 0, errors = emptyList(), dryRun = false)
+
+    override suspend fun exportMandatoryXlsx(path: String): MandatoryExportResult =
+        MandatoryExportResult(exportedRows = 0, path = path)
 
     private fun replaceWalletBalance(walletId: Long, update: (Double) -> Double) {
         val index = wallets.indexOfFirst { it.id == walletId }

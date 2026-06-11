@@ -11,6 +11,7 @@ import androidx.compose.ui.window.rememberWindowState
 import app.ledgera.bridge.RustEngineAdapter
 import app.ledgera.debts.DebtsViewModel
 import app.ledgera.mandatory.MandatoryViewModel
+import app.ledgera.mandatory.MandatoryFileActions
 import app.ledgera.operations.ImportFileSnapshotProvider
 import app.ledgera.operations.OperationsViewModel
 import app.ledgera.operations.OperationsFileActions
@@ -62,9 +63,13 @@ private fun runApplication(args: Array<String>) = application {
                             importFileSnapshotProvider = DesktopImportFileSnapshotProvider,
                         ),
                         debtsViewModel = DebtsViewModel(engine),
-                        mandatoryViewModel = MandatoryViewModel(engine),
+                        mandatoryViewModel = MandatoryViewModel(
+                            engine,
+                            importFileSnapshotProvider = DesktopImportFileSnapshotProvider,
+                        ),
                         settingsViewModel = SettingsViewModel(engine),
                         operationsFileActions = DesktopOperationsFileActions(window),
+                        mandatoryFileActions = DesktopMandatoryFileActions(window),
                     )
                 }
             }
@@ -111,11 +116,48 @@ private class DesktopOperationsFileActions(private val owner: AwtWindow) : Opera
     }
 }
 
+private class DesktopMandatoryFileActions(private val owner: AwtWindow) : MandatoryFileActions {
+    override fun openImportPath(): String? =
+        FileDialog(ownerFrame(), "Import mandatory templates", FileDialog.LOAD)
+            .apply {
+                file = "*.csv;*.xlsx"
+                filenameFilter = tabularFileFilter
+                isVisible = true
+            }
+            .selectedPath(defaultExtension = "xlsx")
+
+    override fun saveExportPath(): String? =
+        FileDialog(ownerFrame(), "Export mandatory templates", FileDialog.SAVE)
+            .apply {
+                file = "mandatory.xlsx"
+                filenameFilter = tabularFileFilter
+                isVisible = true
+            }
+            .selectedPath(defaultExtension = "xlsx")
+
+    private fun ownerFrame(): Frame? = owner as? Frame
+}
+
 private object DesktopImportFileSnapshotProvider : ImportFileSnapshotProvider {
     override fun snapshot(path: String): String? {
         val file = File(path)
         return if (file.isFile) "${file.length()}:${file.lastModified()}" else null
     }
+}
+
+private fun FileDialog.selectedPath(defaultExtension: String): String? {
+    val selectedDirectory = directory ?: return null
+    val selectedFile = file ?: return null
+    val path = File(selectedDirectory, selectedFile).absolutePath
+    return if (path.endsWith(".csv", ignoreCase = true) || path.endsWith(".xlsx", ignoreCase = true)) {
+        path
+    } else {
+        "$path.$defaultExtension"
+    }
+}
+
+private val tabularFileFilter = FilenameFilter { _, name ->
+    name.endsWith(".csv", ignoreCase = true) || name.endsWith(".xlsx", ignoreCase = true)
 }
 
 @Composable

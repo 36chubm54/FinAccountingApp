@@ -29,18 +29,37 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.ledgera.model.MandatoryImportResult
 import app.ledgera.model.MandatoryAddToRecordsDraft
 import app.ledgera.model.MandatoryTemplateDraft
 import app.ledgera.model.MandatoryTemplateItem
 import app.ledgera.model.WalletOption
 
+interface MandatoryFileActions {
+    fun openImportPath(): String?
+    fun saveExportPath(): String?
+}
+
+object NoMandatoryFileActions : MandatoryFileActions {
+    override fun openImportPath(): String? = null
+    override fun saveExportPath(): String? = null
+}
+
 @Composable
-fun MandatoryScreen(viewModel: MandatoryViewModel, modifier: Modifier = Modifier) {
+fun MandatoryScreen(
+    viewModel: MandatoryViewModel,
+    modifier: Modifier = Modifier,
+    fileActions: MandatoryFileActions = NoMandatoryFileActions,
+) {
     val state by viewModel.state.collectAsState()
+    var confirmExport by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         viewModel.refresh()
     }
@@ -65,6 +84,8 @@ fun MandatoryScreen(viewModel: MandatoryViewModel, modifier: Modifier = Modifier
                 inProgress = state.inProgress,
                 onAddToRecords = viewModel::openAddToRecordsDialog,
                 onApplyAutoPay = viewModel::applyAutoPayments,
+                onImport = { viewModel.previewImportMandatory(fileActions.openImportPath()) },
+                onExport = { confirmExport = true },
                 onDelete = viewModel::requestDeleteSelectedTemplate,
                 onDeleteAll = viewModel::requestDeleteAllTemplates,
                 modifier = Modifier.weight(0.34f),
@@ -121,6 +142,27 @@ fun MandatoryScreen(viewModel: MandatoryViewModel, modifier: Modifier = Modifier
                 submitting = state.inProgress,
                 onConfirm = viewModel::deleteAllTemplates,
                 onCancel = viewModel::closeDeleteAllDialog,
+            )
+        }
+
+        if (confirmExport) {
+            ExportMandatoryConfirmDialog(
+                onConfirm = {
+                    confirmExport = false
+                    viewModel.exportMandatory(fileActions.saveExportPath())
+                },
+                onCancel = { confirmExport = false },
+            )
+        }
+
+        state.importPreview?.let { preview ->
+            ImportMandatoryPreviewDialog(
+                preview = preview,
+                path = state.importPath.orEmpty(),
+                submitting = state.loading,
+                engineError = state.error,
+                onConfirm = viewModel::confirmImportMandatory,
+                onCancel = viewModel::cancelImportPreview,
             )
         }
     }
@@ -196,6 +238,8 @@ private fun MandatoryActionsCard(
     inProgress: Boolean,
     onAddToRecords: () -> Unit,
     onApplyAutoPay: () -> Unit,
+    onImport: () -> Unit,
+    onExport: () -> Unit,
     onDelete: () -> Unit,
     onDeleteAll: () -> Unit,
     modifier: Modifier = Modifier,
@@ -214,6 +258,14 @@ private fun MandatoryActionsCard(
                 OutlinedButton(onClick = onApplyAutoPay, enabled = !inProgress) {
                     Text("Apply auto-pay")
                 }
+                OutlinedButton(onClick = onImport, enabled = !inProgress) {
+                    Text("Import")
+                }
+                OutlinedButton(onClick = onExport, enabled = !inProgress) {
+                    Text("Export")
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = onDelete, enabled = selected != null && !inProgress) {
                     Text("Delete")
                 }
@@ -402,6 +454,78 @@ private fun DeleteAllMandatoryTemplatesDialog(
         },
         confirmButton = { Button(onClick = onConfirm, enabled = !submitting) { Text("Delete all") } },
         dismissButton = { TextButton(onClick = onCancel, enabled = !submitting) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun ExportMandatoryConfirmDialog(onConfirm: () -> Unit, onCancel: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Export mandatory templates") },
+        text = {
+            Text(
+                "Export creates a readable file with financial data. Save it only to a trusted location."
+            )
+        },
+        confirmButton = {
+            Button(onClick = onConfirm) { Text("Export") }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun ImportMandatoryPreviewDialog(
+    preview: MandatoryImportResult,
+    path: String,
+    submitting: Boolean,
+    engineError: String?,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (!submitting) onCancel() },
+        title = { Text("Import preview") },
+        text = {
+            Column(
+                Modifier.widthIn(min = 420.dp, max = 560.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(path, style = MaterialTheme.typography.bodySmall)
+                Text("Templates to import: ${preview.imported}")
+                Text("Rows skipped: ${preview.skipped}")
+                if (preview.errors.isNotEmpty()) {
+                    Text("First errors", fontWeight = FontWeight.SemiBold)
+                    preview.errors.take(5).forEach { error ->
+                        Text("- $error", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                if (preview.blockingErrors) {
+                    Text(
+                        "This preview has blocking validation errors. Fix the file and run preview again.",
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                engineError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                Text(
+                    "Current mandatory templates will be replaced. Generated operation rows are kept.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm, enabled = !submitting && !preview.blockingErrors) {
+                Text("Import")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel, enabled = !submitting) {
+                Text("Cancel")
+            }
+        },
     )
 }
 

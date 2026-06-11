@@ -4,10 +4,13 @@ import app.ledgera.bridge.MandatoryEngine
 import app.ledgera.model.AddMandatoryToRecordsRequest
 import app.ledgera.model.CreateMandatoryTemplateRequest
 import app.ledgera.model.MandatoryAutoPayResult
+import app.ledgera.model.MandatoryExportResult
+import app.ledgera.model.MandatoryImportResult
 import app.ledgera.model.MandatoryTemplateItem
 import app.ledgera.model.OperationRecord
 import app.ledgera.model.UpdateMandatoryTemplateRequest
 import app.ledgera.model.WalletOption
+import app.ledgera.operations.ImportFileSnapshotProvider
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -154,6 +157,73 @@ class MandatoryViewModelTest {
         assertEquals(1, engine.createCalls)
         assertEquals("Internet", viewModel.state.value.editDraft?.description)
     }
+
+    @Test
+    fun importPreviewSuccessStoresPreviewAndPath() {
+        val engine = FakeMandatoryEngine()
+        val viewModel = MandatoryViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.previewImportMandatory("C:\\Temp\\mandatory.xlsx")
+
+        assertEquals(1, engine.previewXlsxCalls)
+        assertEquals(2, viewModel.state.value.importPreview?.imported)
+        assertEquals("C:\\Temp\\mandatory.xlsx", viewModel.state.value.importPath)
+    }
+
+    @Test
+    fun importRejectsUnsupportedExtensionBeforeEngineCall() {
+        val engine = FakeMandatoryEngine()
+        val viewModel = MandatoryViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.previewImportMandatory("C:\\Temp\\mandatory.json")
+        viewModel.exportMandatory("C:\\Temp\\mandatory.json")
+
+        assertEquals(0, engine.previewCsvCalls + engine.previewXlsxCalls + engine.exportCsvCalls + engine.exportXlsxCalls)
+        assertEquals("Unsupported mandatory file format. Use .csv or .xlsx", viewModel.state.value.error)
+    }
+
+    @Test
+    fun confirmImportSuccessRefreshesAndShowsNotice() {
+        val engine = FakeMandatoryEngine(templates = mutableListOf(mandatoryTemplate(description = "Old")))
+        val viewModel = MandatoryViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.previewImportMandatory("C:\\Temp\\mandatory.csv")
+        viewModel.confirmImportMandatory()
+
+        assertEquals(1, engine.importCsvCalls)
+        assertNull(viewModel.state.value.importPreview)
+        assertEquals("Mandatory templates imported: 2", viewModel.state.value.notice)
+        assertEquals(listOf("Imported"), viewModel.state.value.templates.map { it.description })
+    }
+
+    @Test
+    fun confirmImportRejectsChangedFileSnapshot() {
+        val snapshotProvider = MutableSnapshotProvider("a")
+        val engine = FakeMandatoryEngine()
+        val viewModel = MandatoryViewModel(
+            engine,
+            importFileSnapshotProvider = snapshotProvider,
+            scope = CoroutineScope(Dispatchers.Unconfined),
+        )
+
+        viewModel.previewImportMandatory("C:\\Temp\\mandatory.csv")
+        snapshotProvider.value = "b"
+        viewModel.confirmImportMandatory()
+
+        assertEquals(0, engine.importCsvCalls)
+        assertEquals("Import file changed after preview. Run preview again.", viewModel.state.value.error)
+    }
+
+    @Test
+    fun exportSuccessShowsToastNotice() {
+        val engine = FakeMandatoryEngine()
+        val viewModel = MandatoryViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.exportMandatory("C:\\Temp\\mandatory.xlsx")
+
+        assertEquals(1, engine.exportXlsxCalls)
+        assertEquals("Mandatory templates exported: 3", viewModel.state.value.notice)
+    }
 }
 
 private class FakeMandatoryEngine(
@@ -167,6 +237,12 @@ private class FakeMandatoryEngine(
     var autoPayCalls = 0
     var deleteCalls = 0
     var deleteAllCalls = 0
+    var previewCsvCalls = 0
+    var previewXlsxCalls = 0
+    var importCsvCalls = 0
+    var importXlsxCalls = 0
+    var exportCsvCalls = 0
+    var exportXlsxCalls = 0
 
     override suspend fun baseCurrency(): String = "KZT"
 
@@ -233,6 +309,44 @@ private class FakeMandatoryEngine(
         autoPayCalls += 1
         return MandatoryAutoPayResult(createdRecords = autoPayRecords)
     }
+
+    override suspend fun previewImportMandatoryCsv(path: String): MandatoryImportResult {
+        previewCsvCalls += 1
+        return MandatoryImportResult(imported = 2, skipped = 0, errors = emptyList(), dryRun = true)
+    }
+
+    override suspend fun importMandatoryCsv(path: String): MandatoryImportResult {
+        importCsvCalls += 1
+        templates.clear()
+        templates += mandatoryTemplate(description = "Imported")
+        return MandatoryImportResult(imported = 2, skipped = 0, errors = emptyList(), dryRun = false)
+    }
+
+    override suspend fun exportMandatoryCsv(path: String): MandatoryExportResult {
+        exportCsvCalls += 1
+        return MandatoryExportResult(exportedRows = 3, path = path)
+    }
+
+    override suspend fun previewImportMandatoryXlsx(path: String): MandatoryImportResult {
+        previewXlsxCalls += 1
+        return MandatoryImportResult(imported = 2, skipped = 0, errors = emptyList(), dryRun = true)
+    }
+
+    override suspend fun importMandatoryXlsx(path: String): MandatoryImportResult {
+        importXlsxCalls += 1
+        templates.clear()
+        templates += mandatoryTemplate(description = "Imported")
+        return MandatoryImportResult(imported = 2, skipped = 0, errors = emptyList(), dryRun = false)
+    }
+
+    override suspend fun exportMandatoryXlsx(path: String): MandatoryExportResult {
+        exportXlsxCalls += 1
+        return MandatoryExportResult(exportedRows = 3, path = path)
+    }
+}
+
+private class MutableSnapshotProvider(var value: String?) : ImportFileSnapshotProvider {
+    override fun snapshot(path: String): String? = value
 }
 
 private fun mandatoryTemplate(

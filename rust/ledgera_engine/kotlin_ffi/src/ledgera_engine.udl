@@ -142,6 +142,19 @@ dictionary OperationExportResultDto {
     string path;
 };
 
+dictionary MandatoryImportResultDto {
+    i64 imported;
+    i64 skipped;
+    sequence<string> errors;
+    boolean dry_run;
+    boolean blocking_errors;
+};
+
+dictionary MandatoryExportResultDto {
+    i64 exported_rows;
+    string path;
+};
+
 dictionary AuditFindingDto {
     string check;
     string severity;
@@ -323,6 +336,18 @@ interface LedgeraEngine {
     RecordDto add_mandatory_to_records(AddMandatoryToRecordsRequest request);
     [Throws=LedgeraEngineError]
     MandatoryAutoPayResultDto apply_mandatory_auto_payments(string today);
+    [Throws=LedgeraEngineError]
+    MandatoryImportResultDto preview_import_mandatory_csv(string path);
+    [Throws=LedgeraEngineError]
+    MandatoryImportResultDto import_mandatory_csv(string path);
+    [Throws=LedgeraEngineError]
+    MandatoryExportResultDto export_mandatory_csv(string path);
+    [Throws=LedgeraEngineError]
+    MandatoryImportResultDto preview_import_mandatory_xlsx(string path);
+    [Throws=LedgeraEngineError]
+    MandatoryImportResultDto import_mandatory_xlsx(string path);
+    [Throws=LedgeraEngineError]
+    MandatoryExportResultDto export_mandatory_xlsx(string path);
     [Throws=LedgeraEngineError]
     sequence<AuditFindingDto> audit_run();
     [Throws=LedgeraEngineError]

@@ -7,6 +7,8 @@ import app.ledgera.engine.CreateDebtRequest as NativeCreateDebtRequest
 import app.ledgera.engine.CreateTransferRequest as NativeCreateTransferRequest
 import app.ledgera.engine.CreateWalletRequest as NativeCreateWalletRequest
 import app.ledgera.engine.LedgeraEngine
+import app.ledgera.engine.MandatoryExportResultDto
+import app.ledgera.engine.MandatoryImportResultDto
 import app.ledgera.engine.OperationExportResultDto
 import app.ledgera.engine.OperationImportResultDto
 import app.ledgera.engine.RecordFilterDto
@@ -31,6 +33,8 @@ import app.ledgera.model.OperationExportResult
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
 import app.ledgera.model.MandatoryAutoPayResult
+import app.ledgera.model.MandatoryExportResult
+import app.ledgera.model.MandatoryImportResult
 import app.ledgera.model.MandatoryTemplateItem
 import app.ledgera.model.RegisterDebtPaymentRequest
 import app.ledgera.model.TransferDetails
@@ -408,6 +412,36 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
             }
         }
 
+    override suspend fun previewImportMandatoryCsv(path: String): MandatoryImportResult =
+        withContext(Dispatchers.IO) {
+            engine.previewImportMandatoryCsv(path).toModel()
+        }
+
+    override suspend fun importMandatoryCsv(path: String): MandatoryImportResult =
+        withContext(Dispatchers.IO) {
+            engine.importMandatoryCsv(path).toModel()
+        }
+
+    override suspend fun exportMandatoryCsv(path: String): MandatoryExportResult =
+        withContext(Dispatchers.IO) {
+            engine.exportMandatoryCsv(path).toModel()
+        }
+
+    override suspend fun previewImportMandatoryXlsx(path: String): MandatoryImportResult =
+        withContext(Dispatchers.IO) {
+            engine.previewImportMandatoryXlsx(path).toModel()
+        }
+
+    override suspend fun importMandatoryXlsx(path: String): MandatoryImportResult =
+        withContext(Dispatchers.IO) {
+            engine.importMandatoryXlsx(path).toModel()
+        }
+
+    override suspend fun exportMandatoryXlsx(path: String): MandatoryExportResult =
+        withContext(Dispatchers.IO) {
+            engine.exportMandatoryXlsx(path).toModel()
+        }
+
     override suspend fun runAudit(): List<AuditFinding> = withContext(Dispatchers.IO) {
         engine.auditRun().map {
             AuditFinding(
@@ -509,4 +543,16 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
 
     private fun OperationExportResultDto.toModel(): OperationExportResult =
         OperationExportResult(exportedRows = exportedRows, path = path)
+
+    private fun MandatoryImportResultDto.toModel(): MandatoryImportResult =
+        MandatoryImportResult(
+            imported = imported,
+            skipped = skipped,
+            errors = errors,
+            dryRun = dryRun,
+            blockingErrors = blockingErrors,
+        )
+
+    private fun MandatoryExportResultDto.toModel(): MandatoryExportResult =
+        MandatoryExportResult(exportedRows = exportedRows, path = path)
 }

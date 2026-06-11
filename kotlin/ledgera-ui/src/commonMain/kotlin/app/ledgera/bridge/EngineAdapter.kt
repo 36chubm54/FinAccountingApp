@@ -17,6 +17,8 @@ import app.ledgera.model.OperationExportResult
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
 import app.ledgera.model.MandatoryAutoPayResult
+import app.ledgera.model.MandatoryExportResult
+import app.ledgera.model.MandatoryImportResult
 import app.ledgera.model.MandatoryTemplateItem
 import app.ledgera.model.RegisterDebtPaymentRequest
 import app.ledgera.model.TransferDetails
@@ -89,6 +91,12 @@ interface MandatoryEngine {
     suspend fun deleteAllMandatoryTemplates(): Long
     suspend fun addMandatoryToRecords(request: AddMandatoryToRecordsRequest): OperationRecord
     suspend fun applyMandatoryAutoPayments(today: String): MandatoryAutoPayResult
+    suspend fun previewImportMandatoryCsv(path: String): MandatoryImportResult
+    suspend fun importMandatoryCsv(path: String): MandatoryImportResult
+    suspend fun exportMandatoryCsv(path: String): MandatoryExportResult
+    suspend fun previewImportMandatoryXlsx(path: String): MandatoryImportResult
+    suspend fun importMandatoryXlsx(path: String): MandatoryImportResult
+    suspend fun exportMandatoryXlsx(path: String): MandatoryExportResult
 }
 
 interface EngineAdapter : RuntimeEngine, OperationsEngine, SettingsEngine, DebtsEngine, MandatoryEngine

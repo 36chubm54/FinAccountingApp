@@ -100,10 +100,10 @@ Current Kotlin/Rust contract:
   deletion, and payment deletion; debt import/export and debt-card editing
   remain separate beta.1 slices
 - Kotlin Mandatory uses Rust/Kotlin UniFFI for template listing, creation,
-  update, deletion, delete-all, add-to-records, and auto-pay application.
-  Template import/export remains a separate migration slice because it needs
-  previewed replace-import and CSV/XLSX styling parity rather than live UI
-  action wiring.
+  update, deletion, delete-all, add-to-records, auto-pay application, and
+  previewed CSV/XLSX replace-import/export. `.xls`, JSON backup/export,
+  current-rate import, and wallet creation from import remain outside the
+  beta.1 Mandatory slice.
 - Debts payment, write-off, and close actions keep remaining-balance validation,
   linked cashflow row writes, debt payment inserts, and debt status updates in a
   single Rust storage transaction; closing an already closed debt remains
@@ -489,14 +489,15 @@ Core modules:
 
 This subsystem owns reusable mandatory-payment templates, add-to-records flows, startup auto-application, and the dedicated `Mandatory` desktop tab introduced during the final `2.0.0` GUI cleanup wave.
 
-The beta.1 Kotlin Mandatory track exposes the live template CRUD,
-add-to-records, and auto-pay flows through Rust/Kotlin UniFFI without a
-Kotlin-to-Python runtime bridge. Rust storage owns validation, wallet checks,
-generated `mandatory_expense` records, duplicate prevention for auto-pay, and
+The beta.1 Kotlin Mandatory track exposes live template CRUD, add-to-records,
+auto-pay flows, and CSV/XLSX template migration through Rust/Kotlin UniFFI
+without a Kotlin-to-Python runtime bridge. Rust storage owns validation, wallet
+checks, generated `mandatory_expense` records, duplicate prevention for
+auto-pay, atomic replace-import, template id normalization, Excel styling, and
 cache invalidation. Kotlin owns only screen state, fast form validation, modal
-confirmation, and Toast feedback. Mandatory CSV/XLSX import/export remains a
-separate migration slice so it can share the Rust tabular import/export utility
-contract and preserve Python workbook styling parity.
+confirmation, file-picker dispatch, preview confirmation, and Toast feedback.
+Mandatory `.xls`, JSON backup/export, current-rate import, and wallet creation
+from import remain out of this beta.1 slice.
 
 ### 4.5 Distribution
 

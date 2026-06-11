@@ -135,6 +135,19 @@ data class OperationExportResult(
     val path: String,
 )
 
+data class MandatoryImportResult(
+    val imported: Long,
+    val skipped: Long,
+    val errors: List<String>,
+    val dryRun: Boolean,
+    val blockingErrors: Boolean = false,
+)
+
+data class MandatoryExportResult(
+    val exportedRows: Long,
+    val path: String,
+)
+
 data class WalletOption(
     val id: Long,
     val name: String,
