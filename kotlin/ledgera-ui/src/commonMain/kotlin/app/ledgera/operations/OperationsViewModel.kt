@@ -45,7 +45,7 @@ data class OperationsUiState(
             if (record.transferId != null) {
                 true
             } else {
-                (record.type == "income" || record.type == "expense") &&
+                (record.type == "income" || record.type == "expense" || record.type == "mandatory_expense") &&
                     !isTransferCommissionMarker(record.description)
             }
         }
@@ -577,7 +577,7 @@ class OperationsViewModel(
         if (!mutableState.value.hasBulkDeleteCandidates) {
             mutableState.value = mutableState.value.copy(
                 error = null,
-                notice = "No operations, transfers, or debt-linked rows to delete",
+                notice = "No operations, transfers, mandatory, or debt-linked rows to delete",
             )
             return
         }

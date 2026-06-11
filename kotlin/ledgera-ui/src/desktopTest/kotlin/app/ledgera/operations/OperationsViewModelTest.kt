@@ -445,10 +445,10 @@ class OperationsViewModelTest {
 
         assertEquals(1, adapter.deleteAllOperationsCalls)
         assertEquals(
-            "Deleted 1 records, 1 transfers, and 1 debt-linked records. Skipped 1 unsupported linked records",
+            "Deleted 2 records, 1 transfers, and 1 debt-linked records",
             viewModel.state.value.notice,
         )
-        assertEquals(listOf(4L), viewModel.state.value.records.map { it.id })
+        assertEquals(emptyList<Long>(), viewModel.state.value.records.map { it.id })
         assertEquals(false, viewModel.state.value.selectiveDeleteMode)
     }
 
@@ -456,7 +456,7 @@ class OperationsViewModelTest {
     fun deleteAllOperationsWithoutCandidatesDoesNotCallEngine() {
         val adapter = FakeEngineAdapter(
             records = mutableListOf(
-                operationRecord(id = 4, type = "mandatory_expense", category = "Mandatory"),
+                operationRecord(id = 4, type = "unsupported", category = "Unsupported"),
             )
         )
         val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
@@ -467,7 +467,7 @@ class OperationsViewModelTest {
         viewModel.deleteAllOperations()
 
         assertEquals(0, adapter.deleteAllOperationsCalls)
-        assertEquals("No operations, transfers, or debt-linked rows to delete", viewModel.state.value.notice)
+        assertEquals("No operations, transfers, mandatory, or debt-linked rows to delete", viewModel.state.value.notice)
         assertEquals(null, viewModel.state.value.error)
     }
 
@@ -513,6 +513,24 @@ class OperationsViewModelTest {
         assertEquals(1, adapter.deleteSelectionCalls)
         assertEquals(listOf(5L), adapter.lastDeletedRecordIds)
         assertEquals("Deleted 0 records, 0 transfers, and 1 debt-linked records", viewModel.state.value.notice)
+        assertEquals(emptyList(), viewModel.state.value.records)
+    }
+
+    @Test
+    fun selectiveDeleteCanSelectMandatoryExpenseRecords() {
+        val adapter = FakeEngineAdapter(
+            records = mutableListOf(operationRecord(id = 6, type = "mandatory_expense", category = "Rent"))
+        )
+        val viewModel = OperationsViewModel(adapter, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.startSelectiveDelete()
+        viewModel.toggleBulkRecord(6)
+        viewModel.deleteSelectedOperations()
+
+        assertEquals(1, adapter.deleteSelectionCalls)
+        assertEquals(listOf(6L), adapter.lastDeletedRecordIds)
+        assertEquals("Deleted 1 records, 0 transfers, and 0 debt-linked records", viewModel.state.value.notice)
         assertEquals(emptyList(), viewModel.state.value.records)
     }
 
@@ -1161,7 +1179,7 @@ private class FakeEngineAdapter(
         val deletedRecords = records.count {
             it.transferId == null &&
                 it.relatedDebtId == null &&
-                (it.type == "income" || it.type == "expense") &&
+                (it.type == "income" || it.type == "expense" || it.type == "mandatory_expense") &&
                 !it.description.matches(Regex("""^\[transfer:\d+]$"""))
         }.toLong()
         val deletedDebtLinkedRecords = records.count {
@@ -1170,13 +1188,16 @@ private class FakeEngineAdapter(
                 (it.type == "income" || it.type == "expense")
         }.toLong()
         val skippedRecords = records.count {
-            it.transferId == null && it.type != "income" && it.type != "expense"
+            it.transferId == null &&
+                it.type != "income" &&
+                it.type != "expense" &&
+                it.type != "mandatory_expense"
         }.toLong()
         records.removeIf {
             it.transferId in transferIds ||
                 (
                     it.transferId == null &&
-                        (it.type == "income" || it.type == "expense") &&
+                        (it.type == "income" || it.type == "expense" || it.type == "mandatory_expense") &&
                         !it.description.matches(Regex("""^\[transfer:\d+]$"""))
                     )
         }

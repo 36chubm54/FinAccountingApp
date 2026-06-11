@@ -88,8 +88,9 @@ Current Kotlin/Rust contract:
   delete, tag replacement, basic wallet/date/type filters, and base-currency
   transfer creation/editing/deletion with optional base-currency commission
   records, safe delete-all and selective-delete flows for Operations-owned
-  records/transfers plus debt-linked cashflow rows, and CSV/XLSX import/export
-  for Operations-owned standalone, transfer, and debt-linked records
+  standalone/generated mandatory records, transfers, and debt-linked cashflow
+  rows, and CSV/XLSX import/export for Operations-owned standalone, generated
+  mandatory, transfer, and debt-linked records
 - Kotlin Settings supports wallet listing, active base-currency wallet
   creation/deletion, and read-only AuditEngine v2 report runs through
   Rust/Kotlin UniFFI; wallet edit, runtime currency, sync, updater controls,

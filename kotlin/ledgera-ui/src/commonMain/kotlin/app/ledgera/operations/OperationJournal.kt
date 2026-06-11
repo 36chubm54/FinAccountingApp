@@ -48,7 +48,7 @@ private fun standaloneJournalItem(
     selectedBulkRecordIds: Set<Long>,
 ): OperationJournalItem {
     val bulkSelectable =
-        (record.type == "income" || record.type == "expense") &&
+        (record.type == "income" || record.type == "expense" || record.type == "mandatory_expense") &&
             !isTransferCommissionMarker(record.description)
     val selected = selectedBulkRecordIds.contains(record.id)
     return OperationJournalItem(

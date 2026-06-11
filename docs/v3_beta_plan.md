@@ -31,17 +31,18 @@ Current status:
   transfers with optional base-currency commission marker records; transfer
   editing/deletion is wired for base-currency transfers.
 - Operations safe bulk deletion is wired for delete-all and selective-delete
-  flows over Operations-owned standalone records/transfers and debt-linked
-  cashflow rows; matching debt history rows are removed
+  flows over Operations-owned standalone records, generated mandatory rows,
+  transfers, and debt-linked cashflow rows; matching debt history rows are removed
   synchronously when present, while unsupported linked records are preserved and
   reported as skipped. Rust storage normalizes `records.id` after Operations
   write/delete flows and keeps record tags plus debt payment record links
   remapped.
-- Operations CSV/XLSX import/export is wired for standalone records, aggregate
-  transfer rows, and debt-linked operation rows while preserving debt payment
-  record links during same-database replace-import. Debt-linked import is
-  strict: rows whose existing debt card, source record, or matching payment
-  history cannot be verified are rejected instead of detached or recreated.
+- Operations CSV/XLSX import/export is wired for standalone records, generated
+  mandatory rows, aggregate transfer rows, and debt-linked operation rows while
+  preserving debt payment record links during same-database replace-import.
+  Debt-linked import is strict: rows whose existing debt card, source record,
+  or matching payment history cannot be verified are rejected instead of
+  detached or recreated.
   Transfer list parity,
   `.xls`/JSON/current-rate import, and commission editing remain later
   Operations slices.

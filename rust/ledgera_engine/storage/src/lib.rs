@@ -1349,6 +1349,7 @@ struct ParsedOperationCsvRecord {
     amount_base_minor: i64,
     category: String,
     description: String,
+    period: Option<String>,
     tags: Vec<String>,
 }
 
@@ -1482,7 +1483,7 @@ fn import_operation_plan(
 
     let tx = conn.transaction().map_err(sqlite_err)?;
     let existing_transfer_ids = all_transfer_ids_in_tx(&tx)?;
-    let existing_record_ids = deletable_standalone_record_ids_in_tx(&tx, &existing_transfer_ids)?;
+    let existing_record_ids = import_replace_record_ids_in_tx(&tx, &existing_transfer_ids)?;
     let skipped_existing = skipped_operation_record_count_in_tx(&tx, &existing_transfer_ids)?;
     delete_operations_in_tx(
         &tx,
@@ -1645,9 +1646,6 @@ fn operation_export_rows(conn: &Connection) -> StorageResult<Vec<Vec<String>>> {
     let mut rows = Vec::new();
 
     for record in records {
-        if record.record_type == "mandatory_expense" {
-            continue;
-        }
         if let Some(transfer_id) = record.transfer_id {
             if exported_transfer_ids.insert(transfer_id)
                 && let Some(transfer) = transfer_map.get(&transfer_id)
@@ -1656,7 +1654,10 @@ fn operation_export_rows(conn: &Connection) -> StorageResult<Vec<Vec<String>>> {
             }
             continue;
         }
-        if record.record_type != "income" && record.record_type != "expense" {
+        if record.record_type != "income"
+            && record.record_type != "expense"
+            && record.record_type != "mandatory_expense"
+        {
             continue;
         }
         rows.push(operation_record_csv_row(&record));
@@ -2203,7 +2204,7 @@ fn parse_operation_csv_row(
             Ok(ParsedOperationCsvRow::Transfer(transfer))
         });
     }
-    if row_type != "income" && row_type != "expense" {
+    if row_type != "income" && row_type != "expense" && row_type != "mandatory_expense" {
         return Err(format!("{row_label}: unsupported type '{row_type}'"));
     }
     let transfer_id = csv_value(values, "transfer_id");
@@ -2212,13 +2213,36 @@ fn parse_operation_csv_row(
             "{row_label}: transfer-linked child rows are not supported; use aggregate transfer rows"
         ));
     }
-    if !csv_value(values, "period").trim().is_empty() {
+    let period_value = csv_value(values, "period").trim().to_lowercase();
+    let period = if row_type == "mandatory_expense" {
+        if period_value.is_empty() {
+            return Err(format!("{row_label}: mandatory_expense requires period"));
+        }
+        validate_mandatory_period(&period_value)
+            .map_err(|error| format!("{row_label}: {error}"))?;
+        Some(period_value)
+    } else if !period_value.is_empty() {
         return Err(format!(
-            "{row_label}: mandatory rows are not supported in Operations import"
+            "{row_label}: period is only supported for mandatory_expense rows"
+        ));
+    } else {
+        None
+    };
+    if row_type == "mandatory_expense"
+        && (!csv_value(values, "from_wallet_id").trim().is_empty()
+            || !csv_value(values, "to_wallet_id").trim().is_empty())
+    {
+        return Err(format!(
+            "{row_label}: mandatory_expense rows cannot include transfer wallet fields"
         ));
     }
     let source_record_id = parse_optional_positive_i64(values, "record_id", row_label)?;
     let related_debt_id = parse_optional_positive_i64(values, "related_debt_id", row_label)?;
+    if row_type == "mandatory_expense" && related_debt_id.is_some() {
+        return Err(format!(
+            "{row_label}: mandatory_expense rows cannot be debt-linked"
+        ));
+    }
     if let Some(debt_id) = related_debt_id
         && !debt_ids.contains(&debt_id)
     {
@@ -2278,6 +2302,7 @@ fn parse_operation_csv_row(
         amount_base_minor,
         category,
         description,
+        period,
         tags: parse_csv_tags(&csv_value(values, "tags")),
     }))
 }
@@ -2796,7 +2821,7 @@ fn insert_import_record_in_tx(
             description,
             period
         )
-        VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL)",
+        VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         (
             record.record_type.as_str(),
             record.date.as_str(),
@@ -2811,6 +2836,7 @@ fn insert_import_record_in_tx(
             record.amount_base_minor,
             record.category.as_str(),
             description,
+            record.period.as_deref(),
         ),
     )
     .map_err(sqlite_err)?;
@@ -2858,7 +2884,15 @@ fn operation_record_csv_row(record: &RecordRow) -> Vec<String> {
         money_csv_text(record.amount_base),
         record.description.clone(),
         record.tags.join(", "),
-        String::new(),
+        if record.record_type == "mandatory_expense" {
+            record
+                .period
+                .clone()
+                .filter(|period| !period.trim().is_empty())
+                .unwrap_or_else(|| "monthly".to_owned())
+        } else {
+            String::new()
+        },
         record.id.to_string(),
         record
             .related_debt_id
@@ -3976,7 +4010,43 @@ fn deletable_standalone_record_ids_in_tx(
              FROM records
              WHERE transfer_id IS NULL
                AND related_debt_id IS NULL
-               AND type IN ('income', 'expense')
+               AND type IN ('income', 'expense', 'mandatory_expense')
+             ORDER BY id",
+        )
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(sqlite_err)?;
+    let mut ids = Vec::new();
+    for row in rows {
+        let (record_id, description) = row.map_err(sqlite_err)?;
+        if transfer_marker_id(&description)
+            .is_some_and(|transfer_id| selected_transfers.contains(&transfer_id))
+        {
+            continue;
+        }
+        if transfer_marker_id(&description).is_some() {
+            continue;
+        }
+        ids.push(record_id);
+    }
+    Ok(ids)
+}
+
+fn import_replace_record_ids_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    transfer_ids: &[i64],
+) -> StorageResult<Vec<i64>> {
+    let selected_transfers: HashSet<i64> = transfer_ids.iter().copied().collect();
+    let mut stmt = tx
+        .prepare(
+            "SELECT id, description
+             FROM records
+             WHERE transfer_id IS NULL
+               AND related_debt_id IS NULL
+               AND type IN ('income', 'expense', 'mandatory_expense')
              ORDER BY id",
         )
         .map_err(sqlite_err)?;
@@ -4052,7 +4122,8 @@ fn skipped_operation_record_count_in_tx(
             skipped += 1;
             continue;
         }
-        if record_type != "income" && record_type != "expense" {
+        if record_type != "income" && record_type != "expense" && record_type != "mandatory_expense"
+        {
             skipped += 1;
         }
     }
@@ -4093,9 +4164,10 @@ fn validate_selected_operation_record_ids_in_tx(
                 "Select transfer #{transfer_id} instead of linked record #{record_id}"
             ));
         }
-        if record_type != "income" && record_type != "expense" {
+        if record_type != "income" && record_type != "expense" && record_type != "mandatory_expense"
+        {
             return Err(
-                "Only income and expense records can be bulk deleted from Operations".to_owned(),
+                "Only income, expense, and mandatory_expense records can be bulk deleted from Operations".to_owned(),
             );
         }
         if let Some(debt_id) = related_debt_id {
@@ -4232,8 +4304,11 @@ fn delete_operation_record_in_tx(
             "Select transfer #{transfer_id} instead of linked record #{record_id}"
         ));
     }
-    if record_type != "income" && record_type != "expense" {
-        return Err("Only income and expense records can be deleted from Operations".to_owned());
+    if record_type != "income" && record_type != "expense" && record_type != "mandatory_expense" {
+        return Err(
+            "Only income, expense, and mandatory_expense records can be deleted from Operations"
+                .to_owned(),
+        );
     }
     if related_debt_id.is_none() && transfer_marker_id(&description).is_some() {
         return Err("Transfer commission must be deleted with its transfer".to_owned());
@@ -7674,16 +7749,15 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
         assert_eq!(
             result,
             OperationDeleteResult {
-                deleted_records: 2,
+                deleted_records: 3,
                 deleted_transfers: 2,
                 deleted_debt_linked_records: 2,
-                skipped_records: 1,
+                skipped_records: 0,
             }
         );
         assert!(transfer_get_row(&db_path, created.id).unwrap().is_none());
         let rows = filtered_record_list_rows(&db_path, &RecordFilterPayload::default()).unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].record_type, "mandatory_expense");
+        assert!(rows.is_empty());
         let conn = Connection::open(&db_path).unwrap();
         let payment_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM debt_payments", [], |row| row.get(0))
@@ -7780,6 +7854,47 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
     }
 
     #[test]
+    fn delete_operations_selection_removes_mandatory_expense_record() {
+        let db_path = create_balance_test_db();
+
+        let result = delete_operations_selection(&db_path, &[3], &[]).unwrap();
+
+        assert_eq!(
+            result,
+            OperationDeleteResult {
+                deleted_records: 1,
+                deleted_transfers: 0,
+                deleted_debt_linked_records: 0,
+                skipped_records: 0,
+            }
+        );
+        let rows = filtered_record_list_rows(&db_path, &RecordFilterPayload::default()).unwrap();
+        assert!(
+            !rows
+                .iter()
+                .any(|record| record.record_type == "mandatory_expense")
+        );
+        let created = create_standalone_record(
+            &db_path,
+            &StandaloneRecordCreatePayload {
+                record_type: "income".to_owned(),
+                date: "2026-02-10".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Next".to_owned(),
+                description: "".to_owned(),
+                tags: vec![],
+            },
+        )
+        .unwrap();
+        assert_eq!(created.id, 5);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
     fn delete_operations_selection_rejects_linked_rows_without_partial_delete() {
         let db_path = create_balance_test_db();
 
@@ -7810,13 +7925,15 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
 
         let result = export_records_csv(&db_path, path.to_str().unwrap()).unwrap();
 
-        assert_eq!(result.exported_rows, 3);
+        assert_eq!(result.exported_rows, 4);
         let contents = fs::read_to_string(&path).unwrap();
         assert!(!contents.contains("stale export"));
         assert!(contents.contains("date,type,wallet_id,category"));
         assert_eq!(contents.matches(",transfer,").count(), 1);
         assert!(contents.contains("Move to card"));
-        assert!(!contents.contains("mandatory_expense"));
+        assert!(contents.contains("mandatory_expense"));
+        assert!(contents.contains("2026-01-03,mandatory_expense,2,Rent"));
+        assert!(contents.contains("Monthly,,monthly,3"));
 
         let _ = fs::remove_file(path);
         remove_test_db(&db_path);
@@ -7839,7 +7956,7 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
 
         let result = import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
 
-        assert_eq!(result.imported, 4);
+        assert_eq!(result.imported, 5);
         assert_eq!(result.skipped, 0);
         let records = record_list_rows(&db_path).unwrap();
         let debt_records: Vec<_> = records
@@ -7878,7 +7995,7 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
 
         let result = import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
 
-        assert_eq!(result.imported, 4);
+        assert_eq!(result.imported, 5);
         assert_eq!(result.skipped, 0);
         let records = record_list_rows(&db_path).unwrap();
         let debt_records: Vec<_> = records
@@ -7892,6 +8009,155 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
             .query_row("SELECT COUNT(*) FROM debt_payments", [], |row| row.get(0))
             .unwrap();
         assert_eq!(payment_count, 0);
+
+        let _ = fs::remove_file(path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn import_export_records_csv_round_trips_mandatory_expense_rows() {
+        let db_path = create_balance_test_db();
+        let path = temp_test_path("ledgera_ops_export_mandatory", "csv");
+        export_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+        let contents = fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("mandatory_expense"));
+        assert!(contents.contains(",mandatory_expense,2,Rent"));
+        assert!(contents.contains("Monthly,,monthly,3"));
+
+        let result = import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+
+        assert_eq!(result.imported, 4);
+        assert_eq!(result.skipped, 0);
+        let records = record_list_rows(&db_path).unwrap();
+        let mandatory_rows: Vec<_> = records
+            .iter()
+            .filter(|record| record.record_type == "mandatory_expense")
+            .collect();
+        assert_eq!(mandatory_rows.len(), 1);
+        assert_eq!(mandatory_rows[0].period.as_deref(), Some("monthly"));
+        assert_eq!(mandatory_rows[0].category, "Rent");
+
+        let _ = fs::remove_file(path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn import_records_csv_rejects_invalid_mandatory_expense_rows() {
+        let db_path = create_balance_test_db();
+        let path = temp_test_path("ledgera_ops_import_invalid_mandatory", "csv");
+        write_csv_rows(
+            path.to_str().unwrap(),
+            &OPERATION_TABULAR_HEADERS,
+            &[
+                vec![
+                    "2026-01-05".to_owned(),
+                    "mandatory_expense".to_owned(),
+                    "1".to_owned(),
+                    "Rent".to_owned(),
+                    "100.00".to_owned(),
+                    "KZT".to_owned(),
+                    "1".to_owned(),
+                    "100.00".to_owned(),
+                    "Rent".to_owned(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                ],
+                vec![
+                    "2026-01-05".to_owned(),
+                    "mandatory_expense".to_owned(),
+                    "1".to_owned(),
+                    "Rent".to_owned(),
+                    "100.00".to_owned(),
+                    "KZT".to_owned(),
+                    "1".to_owned(),
+                    "100.00".to_owned(),
+                    "Rent".to_owned(),
+                    String::new(),
+                    "quarterly".to_owned(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                ],
+                vec![
+                    "2026-01-05".to_owned(),
+                    "mandatory_expense".to_owned(),
+                    "1".to_owned(),
+                    "Rent".to_owned(),
+                    "100.00".to_owned(),
+                    "KZT".to_owned(),
+                    "1".to_owned(),
+                    "100.00".to_owned(),
+                    "Rent".to_owned(),
+                    String::new(),
+                    "monthly".to_owned(),
+                    String::new(),
+                    "1".to_owned(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                ],
+                vec![
+                    "2026-01-05".to_owned(),
+                    "income".to_owned(),
+                    "1".to_owned(),
+                    "Salary".to_owned(),
+                    "100.00".to_owned(),
+                    "KZT".to_owned(),
+                    "1".to_owned(),
+                    "100.00".to_owned(),
+                    "Salary".to_owned(),
+                    String::new(),
+                    "monthly".to_owned(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                ],
+            ],
+        )
+        .unwrap();
+
+        let preview = preview_import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+
+        assert_eq!(preview.imported, 0);
+        assert_eq!(preview.skipped, 4);
+        assert!(preview.blocking_errors);
+        assert!(
+            preview
+                .errors
+                .iter()
+                .any(|error| error.contains("mandatory_expense requires period"))
+        );
+        assert!(
+            preview
+                .errors
+                .iter()
+                .any(|error| error.contains("Invalid mandatory period"))
+        );
+        assert!(
+            preview
+                .errors
+                .iter()
+                .any(|error| error.contains("mandatory_expense rows cannot be debt-linked"))
+        );
+        assert!(
+            preview
+                .errors
+                .iter()
+                .any(|error| error.contains("period is only supported for mandatory_expense rows"))
+        );
+        let before = record_list_rows(&db_path).unwrap();
+        let error = import_records_csv(&db_path, path.to_str().unwrap()).unwrap_err();
+        assert!(error.contains("debt-linked integrity errors"));
+        assert_eq!(record_list_rows(&db_path).unwrap(), before);
 
         let _ = fs::remove_file(path);
         remove_test_db(&db_path);
@@ -8245,7 +8511,7 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
 
         let result = import_records_xlsx(&db_path, path.to_str().unwrap()).unwrap();
 
-        assert_eq!(result.imported, 4);
+        assert_eq!(result.imported, 5);
         assert_eq!(result.skipped, 0);
         let records = record_list_rows(&db_path).unwrap();
         let debt_records: Vec<_> = records
@@ -8325,7 +8591,7 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
 
         let result = export_records_xlsx(&db_path, path.to_str().unwrap()).unwrap();
 
-        assert_eq!(result.exported_rows, 3);
+        assert_eq!(result.exported_rows, 4);
         let mut workbook = open_workbook_auto(&path).unwrap();
         assert_eq!(workbook.sheet_names()[0], "Data");
         let range = workbook.worksheet_range("Data").unwrap();
@@ -8349,11 +8615,11 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
             rows.iter()
                 .any(|row| row.iter().any(|cell| cell == "Move to card"))
         );
-        assert!(
-            !rows
-                .iter()
-                .any(|row| row.iter().any(|cell| cell == "mandatory_expense"))
-        );
+        let mandatory_row = rows
+            .iter()
+            .find(|row| row.get(1).map(String::as_str) == Some("mandatory_expense"))
+            .unwrap();
+        assert_eq!(mandatory_row.get(10).map(String::as_str), Some("monthly"));
         let transfer_row = raw_rows
             .iter()
             .find(|row| row.get(1).map(xlsx_cell_to_string).as_deref() == Some("transfer"))
@@ -8381,7 +8647,7 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
 
         let sheet_xml = xlsx_entry_text(&path, "xl/worksheets/sheet1.xml");
         assert!(sheet_xml.contains("<pane ySplit=\"1\" topLeftCell=\"A2\""));
-        assert!(sheet_xml.contains("<autoFilter ref=\"A1:P4\""));
+        assert!(sheet_xml.contains("<autoFilter ref=\"A1:P5\""));
         assert!(sheet_xml.contains("<c r=\"C2\" s=\""));
         assert!(sheet_xml.contains("<c r=\"E2\" s=\""));
         assert!(sheet_xml.contains("<c r=\"N2\" s=\""));
@@ -8423,7 +8689,7 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
         assert!(!result.dry_run);
         let records = record_list_rows(&db_path).unwrap();
         assert!(
-            records
+            !records
                 .iter()
                 .any(|record| record.record_type == "mandatory_expense")
         );
@@ -8510,7 +8776,7 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
         assert!(!result.dry_run);
         let records = record_list_rows(&db_path).unwrap();
         assert!(
-            records
+            !records
                 .iter()
                 .any(|record| record.record_type == "mandatory_expense")
         );

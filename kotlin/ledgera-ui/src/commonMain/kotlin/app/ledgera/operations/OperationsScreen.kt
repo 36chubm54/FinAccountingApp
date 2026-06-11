@@ -1076,7 +1076,7 @@ private fun DeleteAllConfirmDialog(onConfirm: () -> Unit, onCancel: () -> Unit) 
         title = { Text("Delete all operations") },
         text = {
             Text(
-                "Delete all standalone operations, transfers, and debt-linked operation rows? Matching debt payment history rows will be removed too. Unsupported rows will be kept."
+                "Delete all standalone operations, generated mandatory rows, transfers, and debt-linked operation rows? Matching debt payment history rows will be removed too. Unsupported rows will be kept."
             )
         },
         confirmButton = {
