@@ -1225,7 +1225,7 @@ pub fn delete_operations_selection(
     Ok(result)
 }
 
-const OPERATION_TABULAR_HEADERS: [&str; 14] = [
+const OPERATION_TABULAR_HEADERS: [&str; 16] = [
     "date",
     "type",
     "wallet_id",
@@ -1237,17 +1237,21 @@ const OPERATION_TABULAR_HEADERS: [&str; 14] = [
     "description",
     "tags",
     "period",
+    "record_id",
+    "related_debt_id",
     "transfer_id",
     "from_wallet_id",
     "to_wallet_id",
 ];
 const OPERATION_XLSX_AMOUNT_COLUMNS: [usize; 3] = [4, 6, 7];
-const OPERATION_XLSX_INTEGER_COLUMNS: [usize; 4] = [2, 11, 12, 13];
+const OPERATION_XLSX_INTEGER_COLUMNS: [usize; 6] = [2, 11, 12, 13, 14, 15];
 const MAX_OPERATION_CSV_FILE_SIZE: u64 = 10 * 1024 * 1024;
 const MAX_OPERATION_CSV_ROWS: usize = 200_000;
 
 #[derive(Debug, Clone)]
 struct ParsedOperationCsvRecord {
+    source_record_id: Option<i64>,
+    related_debt_id: Option<i64>,
     record_type: String,
     date: String,
     wallet_id: i64,
@@ -1354,7 +1358,8 @@ fn import_operation_plan(
     )?;
 
     let mut transfer_id_map: HashMap<i64, i64> = HashMap::new();
-    let mut imported_standalone_records: Vec<(i64, String)> = Vec::new();
+    let mut imported_records: Vec<(i64, String)> = Vec::new();
+    let mut debt_record_id_map: Vec<(i64, i64)> = Vec::new();
     for row in &plan.rows {
         match row {
             ParsedOperationCsvRow::Transfer(transfer) => {
@@ -1422,10 +1427,17 @@ fn import_operation_plan(
             ParsedOperationCsvRow::Record(record) => {
                 let record_id = insert_import_record_in_tx(&tx, record, &record.description)?;
                 replace_record_tags_in_tx(&tx, record_id, &record.tags)?;
-                imported_standalone_records.push((record_id, record.description.clone()));
+                imported_records.push((record_id, record.description.clone()));
+                if record.related_debt_id.is_some()
+                    && let Some(source_record_id) = record.source_record_id
+                {
+                    debt_record_id_map.push((source_record_id, record_id));
+                }
             }
         }
     }
+
+    remap_debt_payment_records_in_tx(&tx, &debt_record_id_map)?;
 
     if !transfer_id_map.is_empty() {
         let normalized_ids = normalize_transfer_ids_in_tx(&tx)?;
@@ -1434,7 +1446,7 @@ fn import_operation_plan(
                 *mapped_transfer_id = *normalized_transfer_id;
             }
         }
-        for (record_id, original_description) in &imported_standalone_records {
+        for (record_id, original_description) in &imported_records {
             let description =
                 remap_transfer_marker_description(original_description, &transfer_id_map);
             if description != *original_description {
@@ -1489,7 +1501,7 @@ fn operation_export_rows(conn: &Connection) -> StorageResult<Vec<Vec<String>>> {
     let mut rows = Vec::new();
 
     for record in records {
-        if record.related_debt_id.is_some() || record.record_type == "mandatory_expense" {
+        if record.record_type == "mandatory_expense" {
             continue;
         }
         if let Some(transfer_id) = record.transfer_id {
@@ -1640,6 +1652,7 @@ fn parse_operation_tabular_import(
 ) -> StorageResult<OperationCsvPlan> {
     let base_currency = base_currency_code_in_conn(conn)?;
     let wallet_ids = active_wallet_ids_in_conn(conn)?;
+    let debt_ids = debt_ids_in_conn(conn)?;
     let mut plan = OperationCsvPlan::default();
     let mut logical_transfer_ids = HashSet::new();
     let mut next_implicit_transfer_id = -1_i64;
@@ -1653,6 +1666,7 @@ fn parse_operation_tabular_import(
             &row_label,
             &base_currency,
             &wallet_ids,
+            &debt_ids,
             &mut logical_transfer_ids,
             &mut next_implicit_transfer_id,
         );
@@ -1681,6 +1695,7 @@ fn parse_operation_csv_row(
     row_label: &str,
     base_currency: &str,
     wallet_ids: &HashSet<i64>,
+    debt_ids: &HashSet<i64>,
     logical_transfer_ids: &mut HashSet<i64>,
     next_implicit_transfer_id: &mut i64,
 ) -> StorageResult<ParsedOperationCsvRow> {
@@ -1717,6 +1732,13 @@ fn parse_operation_csv_row(
             "{row_label}: mandatory rows are not supported in Operations import"
         ));
     }
+    let source_record_id = parse_optional_positive_i64(values, "record_id", row_label)?;
+    let related_debt_id = parse_optional_positive_i64(values, "related_debt_id", row_label)?;
+    if let Some(debt_id) = related_debt_id
+        && !debt_ids.contains(&debt_id)
+    {
+        return Err(format!("{row_label}: debt not found ({debt_id})"));
+    }
     let date = required_csv_value(values, "date", row_label)?;
     validate_ymd_date(&date)?;
     let wallet_id = parse_required_positive_i64(values, "wallet_id", row_label)?;
@@ -1739,6 +1761,8 @@ fn parse_operation_csv_row(
         parse_positive_money(values, "amount_base", row_label)?;
     let (rate_text, rate) = parse_positive_rate(values, "rate_at_operation", row_label)?;
     Ok(ParsedOperationCsvRow::Record(ParsedOperationCsvRecord {
+        source_record_id,
+        related_debt_id,
         record_type: row_type,
         date,
         wallet_id,
@@ -1762,6 +1786,13 @@ fn parse_operation_csv_transfer(
     wallet_ids: &HashSet<i64>,
     next_implicit_transfer_id: &mut i64,
 ) -> StorageResult<ParsedOperationCsvTransfer> {
+    if !csv_value(values, "record_id").trim().is_empty()
+        || !csv_value(values, "related_debt_id").trim().is_empty()
+    {
+        return Err(format!(
+            "{row_label}: transfer aggregate rows cannot include record_id or related_debt_id"
+        ));
+    }
     let date = required_csv_value(values, "date", row_label)?;
     validate_ymd_date(&date)?;
     let from_wallet_id = parse_required_positive_i64(values, "from_wallet_id", row_label)?;
@@ -1954,6 +1985,28 @@ fn active_wallet_ids_in_conn(conn: &Connection) -> StorageResult<HashSet<i64>> {
     rows.collect::<Result<HashSet<_>, _>>().map_err(sqlite_err)
 }
 
+fn debt_ids_in_conn(conn: &Connection) -> StorageResult<HashSet<i64>> {
+    let has_debts = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'debts'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(sqlite_err)?
+        .is_some();
+    if !has_debts {
+        return Ok(HashSet::new());
+    }
+    let mut stmt = conn
+        .prepare("SELECT id FROM debts ORDER BY id")
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, i64>(0))
+        .map_err(sqlite_err)?;
+    rows.collect::<Result<HashSet<_>, _>>().map_err(sqlite_err)
+}
+
 fn remap_transfer_marker_description(
     description: &str,
     transfer_id_map: &HashMap<i64, i64>,
@@ -1965,6 +2018,37 @@ fn remap_transfer_marker_description(
         Some(new_transfer_id) => format!("[transfer:{new_transfer_id}]"),
         None => description.to_owned(),
     }
+}
+
+fn remap_debt_payment_records_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    record_id_map: &[(i64, i64)],
+) -> StorageResult<()> {
+    for (old_record_id, new_record_id) in record_id_map {
+        if old_record_id == new_record_id {
+            continue;
+        }
+        tx.execute(
+            "UPDATE debt_payments SET record_id = ?1 WHERE record_id = ?2",
+            (new_record_id, old_record_id),
+        )
+        .map_err(sqlite_err)?;
+        tx.execute(
+            "DELETE FROM record_tags WHERE record_id = ?1",
+            [old_record_id],
+        )
+        .map_err(sqlite_err)?;
+        tx.execute(
+            "DELETE FROM records
+             WHERE id = ?1
+               AND transfer_id IS NULL
+               AND related_debt_id IS NOT NULL
+               AND type IN ('income', 'expense')",
+            [old_record_id],
+        )
+        .map_err(sqlite_err)?;
+    }
+    Ok(())
 }
 
 fn insert_import_record_in_tx(
@@ -1990,11 +2074,12 @@ fn insert_import_record_in_tx(
             description,
             period
         )
-        VALUES (?1, ?2, ?3, NULL, NULL, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NULL)",
+        VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL)",
         (
             record.record_type.as_str(),
             record.date.as_str(),
             record.wallet_id,
+            record.related_debt_id,
             record.amount_original,
             record.amount_original_minor,
             record.currency.as_str(),
@@ -2052,6 +2137,11 @@ fn operation_record_csv_row(record: &RecordRow) -> Vec<String> {
         record.description.clone(),
         record.tags.join(", "),
         String::new(),
+        record.id.to_string(),
+        record
+            .related_debt_id
+            .map(|value| value.to_string())
+            .unwrap_or_default(),
         String::new(),
         String::new(),
         String::new(),
@@ -2069,6 +2159,8 @@ fn operation_transfer_csv_row(transfer: &TransferRow) -> Vec<String> {
         rate_csv_text(transfer.rate_at_operation),
         money_csv_text(transfer.amount_base),
         transfer.description.clone(),
+        String::new(),
+        String::new(),
         String::new(),
         String::new(),
         transfer.id.to_string(),
@@ -2887,25 +2979,20 @@ fn skipped_operation_record_count_in_tx(
 ) -> StorageResult<i64> {
     let selected_transfers: HashSet<i64> = transfer_ids.iter().copied().collect();
     let mut stmt = tx
-        .prepare("SELECT type, transfer_id, related_debt_id, description FROM records")
+        .prepare("SELECT type, transfer_id, description FROM records")
         .map_err(sqlite_err)?;
     let rows = stmt
         .query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<i64>>(1)?,
-                row.get::<_, Option<i64>>(2)?,
-                row.get::<_, String>(3)?,
+                row.get::<_, String>(2)?,
             ))
         })
         .map_err(sqlite_err)?;
     let mut skipped = 0_i64;
     for row in rows {
-        let (record_type, transfer_id, related_debt_id, description) = row.map_err(sqlite_err)?;
-        if related_debt_id.is_some() {
-            skipped += 1;
-            continue;
-        }
+        let (record_type, transfer_id, description) = row.map_err(sqlite_err)?;
         if let Some(transfer_id) = transfer_id {
             if !selected_transfers.contains(&transfer_id) {
                 skipped += 1;
@@ -3722,6 +3809,27 @@ mod tests {
                 record_id INTEGER NOT NULL,
                 tag_id INTEGER NOT NULL
             );
+            CREATE TABLE debts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                contact_name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                total_amount_minor INTEGER NOT NULL,
+                remaining_amount_minor INTEGER NOT NULL,
+                currency TEXT NOT NULL,
+                interest_rate REAL NOT NULL DEFAULT 0,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                closed_at TEXT
+            );
+            CREATE TABLE debt_payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                debt_id INTEGER NOT NULL,
+                record_id INTEGER,
+                operation_type TEXT NOT NULL,
+                principal_paid_minor INTEGER NOT NULL,
+                is_write_off INTEGER NOT NULL DEFAULT 0,
+                payment_date TEXT NOT NULL
+            );
             ",
         )
         .unwrap();
@@ -3823,13 +3931,15 @@ mod tests {
         )
         .unwrap();
         for row in rows {
-            worksheet
-                .append_row(
-                    &row.iter()
-                        .map(|value| value.to_string())
-                        .collect::<Vec<_>>(),
-                )
-                .unwrap();
+            let mut values = row
+                .iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>();
+            if values.len() == 14 {
+                values.insert(11, String::new());
+                values.insert(12, String::new());
+            }
+            worksheet.append_row(&values).unwrap();
         }
         worksheet.save(path.to_str().unwrap()).unwrap();
     }
@@ -5416,6 +5526,84 @@ mod tests {
     }
 
     #[test]
+    fn import_export_records_csv_round_trips_debt_linked_rows() {
+        let db_path = create_balance_test_db();
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute(
+            "INSERT INTO debts (
+                id, contact_name, kind, total_amount_minor, remaining_amount_minor,
+                currency, interest_rate, status, created_at
+             )
+             VALUES (1, 'Alex', 'debt', 10000, 5000, 'KZT', 0.0, 'open', '2026-01-05')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO records (
+                id, type, date, wallet_id, related_debt_id,
+                amount_original, amount_original_minor, currency,
+                rate_at_operation, rate_at_operation_text,
+                amount_base, amount_base_minor, category, description
+             )
+             VALUES (
+                6, 'income', '2026-01-05', 1, 1,
+                100.0, 10000, 'KZT', 1.0, '1.000000',
+                100.0, 10000, 'Debt', 'Debt opening'
+             )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO debt_payments (
+                id, debt_id, record_id, operation_type,
+                principal_paid_minor, is_write_off, payment_date
+             )
+             VALUES (1, 1, 6, 'create', 10000, 0, '2026-01-05')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let path = std::env::temp_dir().join(format!(
+            "ledgera_ops_export_debt_{}.csv",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        export_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+        let contents = fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("record_id,related_debt_id,transfer_id"));
+        assert!(contents.contains("Debt opening"));
+        assert!(contents.contains(",6,1,,,"));
+
+        let result = import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+
+        assert_eq!(result.imported, 4);
+        assert_eq!(result.skipped, 0);
+        let records = record_list_rows(&db_path).unwrap();
+        let debt_records: Vec<_> = records
+            .iter()
+            .filter(|record| record.related_debt_id == Some(1))
+            .collect();
+        assert_eq!(debt_records.len(), 1);
+        assert_eq!(debt_records[0].description, "Debt opening");
+        let payment_record_id: i64 = Connection::open(&db_path)
+            .unwrap()
+            .query_row(
+                "SELECT record_id FROM debt_payments WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(payment_record_id, debt_records[0].id);
+        assert_ne!(payment_record_id, 6);
+
+        let _ = fs::remove_file(path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
     fn export_records_xlsx_writes_python_style_data_sheet() {
         let db_path = create_balance_test_db();
         let path = std::env::temp_dir().join(format!(
@@ -5462,15 +5650,15 @@ mod tests {
             .find(|row| row.get(1).map(xlsx_cell_to_string).as_deref() == Some("transfer"))
             .unwrap();
         assert!(matches!(
-            transfer_row.get(11),
-            Some(Data::Int(1)) | Some(Data::Float(1.0))
-        ));
-        assert!(matches!(
-            transfer_row.get(12),
-            Some(Data::Int(1)) | Some(Data::Float(1.0))
-        ));
-        assert!(matches!(
             transfer_row.get(13),
+            Some(Data::Int(1)) | Some(Data::Float(1.0))
+        ));
+        assert!(matches!(
+            transfer_row.get(14),
+            Some(Data::Int(1)) | Some(Data::Float(1.0))
+        ));
+        assert!(matches!(
+            transfer_row.get(15),
             Some(Data::Int(2)) | Some(Data::Float(2.0))
         ));
         let standalone_row = raw_rows
@@ -5484,10 +5672,10 @@ mod tests {
 
         let sheet_xml = xlsx_entry_text(&path, "xl/worksheets/sheet1.xml");
         assert!(sheet_xml.contains("<pane ySplit=\"1\" topLeftCell=\"A2\""));
-        assert!(sheet_xml.contains("<autoFilter ref=\"A1:N4\""));
+        assert!(sheet_xml.contains("<autoFilter ref=\"A1:P4\""));
         assert!(sheet_xml.contains("<c r=\"C2\" s=\""));
         assert!(sheet_xml.contains("<c r=\"E2\" s=\""));
-        assert!(sheet_xml.contains("<c r=\"L2\" s=\""));
+        assert!(sheet_xml.contains("<c r=\"N2\" s=\""));
         let styles_xml = xlsx_entry_text(&path, "xl/styles.xml");
         assert!(styles_xml.contains("<fgColor rgb=\"FF1F4E78\""));
         assert!(styles_xml.contains("<color rgb=\"FFFFFFFF\""));

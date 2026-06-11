@@ -32,8 +32,12 @@ Current status:
   editing/deletion is wired for base-currency transfers.
 - Operations safe bulk deletion is wired for delete-all and selective-delete
   flows over Operations-owned standalone records/transfers; unsupported linked
-  records are preserved and reported as skipped. Transfer list parity,
-  import/export, and commission editing remain later Operations slices.
+  records are preserved and reported as skipped.
+- Operations CSV/XLSX import/export is wired for standalone records, aggregate
+  transfer rows, and debt-linked operation rows while preserving debt payment
+  record links during same-database replace-import. Transfer list parity,
+  `.xls`/JSON/current-rate import, and commission editing remain later
+  Operations slices.
 - Settings wallet listing and active base-currency wallet creation are wired,
   which unlocks manual transfer-creator smoke testing on copied ledger DBs.
 - Debts wiring is moving in phased slices: Kotlin Desktop can list debts/loans,

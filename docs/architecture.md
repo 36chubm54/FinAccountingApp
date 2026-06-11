@@ -88,7 +88,8 @@ Current Kotlin/Rust contract:
   delete, tag replacement, basic wallet/date/type filters, and base-currency
   transfer creation/editing/deletion with optional base-currency commission
   records, safe delete-all and selective-delete flows for Operations-owned
-  records/transfers, and CSV/XLSX import/export for Operations-owned records
+  records/transfers, and CSV/XLSX import/export for Operations-owned standalone,
+  transfer, and debt-linked records
 - Kotlin Settings supports wallet listing, active base-currency wallet
   creation/deletion, and read-only AuditEngine v2 report runs through
   Rust/Kotlin UniFFI; wallet edit, runtime currency, sync, updater controls,
@@ -102,12 +103,13 @@ Current Kotlin/Rust contract:
   transfer journal row with source/target wallet direction and transfer-level
   editing/deletion through modal dialogs; delete-all preserves unsupported
   linked rows and reports skipped records; CSV/XLSX import uses a previewed
-  replace flow over Operations-owned standalone records/transfers and exports
-  transfers as aggregate `type=transfer` rows; XLSX export mirrors the
-  Python/Tkinter records `Data` sheet contract and shares reusable Rust CSV
-  and Excel tabular utilities for later tabs; transfer list parity, `.xls`/JSON
-  import/export, current-rate import, and full inline editor keyboard parity
-  remain separate beta.1 slices
+  replace flow over Operations-owned standalone records/transfers/debt-linked
+  rows, remaps `debt_payments.record_id` for same-database debt-linked
+  round-trips, and exports transfers as aggregate `type=transfer` rows; XLSX
+  export mirrors the Python/Tkinter records `Data` sheet contract and shares
+  reusable Rust CSV and Excel tabular utilities for later tabs; transfer list
+  parity, `.xls`/JSON import/export, current-rate import, and full inline
+  editor keyboard parity remain separate beta.1 slices
 - transfer commissions are represented as standalone expense records adjacent
   to the transfer, so commission amount/category edits use standalone
   operation editing rather than a separate transfer-level commission contract;

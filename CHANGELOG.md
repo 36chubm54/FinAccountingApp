@@ -17,7 +17,7 @@ This project adheres to Semantic Versioning.
 - Added beta.1 Kotlin Operations standalone record CRUD for income/expense records, including edit/delete UI, wallet/date/type filters, tag replacement, category/tag lookups, and Rust-side rejection for transfer/debt-linked rows.
 - Added beta.1 Kotlin Operations base-currency transfer create/edit/delete support through Rust/Kotlin UniFFI, including linked source/target record maintenance and preserved or removed commission marker records.
 - Added beta.1 Kotlin Operations safe bulk deletion through Rust/Kotlin UniFFI, including delete-all for Operations-owned standalone records/transfers and selective delete mode for chosen records/transfers.
-- Added beta.1 Kotlin Operations CSV/XLSX import/export through Rust/Kotlin UniFFI, including previewed replace-import for Operations-owned standalone records/transfers, Python-style XLSX `Data` sheet styling, and aggregate transfer rows.
+- Added beta.1 Kotlin Operations CSV/XLSX import/export through Rust/Kotlin UniFFI, including previewed replace-import for Operations-owned standalone records, transfers, and debt-linked records, Python-style XLSX `Data` sheet styling, and aggregate transfer rows.
 - Added beta.1 Kotlin Debts read/write slices through Rust/Kotlin UniFFI for listing debts/loans, viewing selected debt payment history, creating base-currency debts/loans with linked cashflow rows, registering payments, registering write-offs, and closing debts/loans.
 - Added a beta.1 Kotlin Settings wallet slice for listing wallets and creating active base-currency wallets through Rust/Kotlin UniFFI.
 - Added a beta.1 Kotlin Settings Audit card that runs the read-only Rust AuditEngine v2 report through Rust/Kotlin UniFFI and shows findings without repair actions.
@@ -29,7 +29,7 @@ This project adheres to Semantic Versioning.
 - Reorganized analytics, planning, import, shell, settings, report, operations, backup, export, spreadsheet, finance, and records helpers into clearer package clusters with narrower ownership boundaries.
 - Renamed the Kotlin Desktop runtime framing from alpha.4 to beta.1 and split the Kotlin adapter contract into runtime and operations capability groups so ViewModels depend only on the surfaces they use.
 - Extended the Kotlin UniFFI Operations contract with standalone record get/update/delete methods plus tag and category lookup surfaces.
-- Extended the Kotlin UniFFI Operations contract with transfer create/get/update/delete, safe bulk delete, and CSV/XLSX records migration support; transfer list parity, `.xls`/JSON import/export, current-rate import, and commission editing remain pending beta.1 slices.
+- Extended the Kotlin UniFFI Operations contract with transfer create/get/update/delete, safe bulk delete, and CSV/XLSX records migration support for standalone, transfer, and debt-linked rows; transfer list parity, `.xls`/JSON import/export, current-rate import, and commission editing remain pending beta.1 slices.
 - Extended the Kotlin adapter contract with a Debts capability group for debt/loan list, selected history, create, payment, write-off, and close flows; delete, debt-card editing, and import/export remain pending beta.1 slices.
 - Extended the Kotlin adapter contract with a Settings capability group for wallet list/create/delete and read-only audit flows; wallet edit and broader Settings surfaces remain pending beta.1 slices.
 - Extracted reusable Rust storage CSV helpers alongside the Excel utility so later tabs can share bounded tabular import/export infrastructure instead of duplicating Operations-specific CSV I/O.
@@ -47,6 +47,7 @@ This project adheres to Semantic Versioning.
 - Fixed Rust-backed Kotlin transfer creation and CSV import so transfer IDs are normalized after gaps and linked operation rows plus commission markers keep the remapped transfer IDs.
 - Fixed CSV replace-import so source file row order is preserved when assigning operation ids, keeping the Kotlin journal order consistent with old-to-new exports.
 - Fixed XLSX replace-import to use the same ordered tabular import pipeline as CSV, preserving source row order and transfer id remapping.
+- Fixed Rust-backed Kotlin Operations CSV/XLSX migration so debt-linked operation rows are exported/imported with `related_debt_id`, while same-database replace-import remaps `debt_payments.record_id` to the newly inserted record.
 
 ### Docs
 
