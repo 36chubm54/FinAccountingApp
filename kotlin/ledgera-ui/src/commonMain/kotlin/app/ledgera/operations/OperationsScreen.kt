@@ -133,7 +133,6 @@ fun OperationsScreen(
                 modifier = Modifier.weight(1f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 if (state.loading) {
                     CircularProgressIndicator()
                 } else if (state.records.isEmpty()) {

@@ -67,13 +67,12 @@ fun MandatoryScreen(
     Box(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier.fillMaxSize().padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Text("Mandatory", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text("Mandatory", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
 
-            MandatoryListCard(
-                templates = state.templates,
+        MandatoryListCard(
+            templates = state.templates,
                 selectedTemplateId = state.selectedTemplateId,
                 loading = state.loading,
                 onSelect = viewModel::selectTemplate,

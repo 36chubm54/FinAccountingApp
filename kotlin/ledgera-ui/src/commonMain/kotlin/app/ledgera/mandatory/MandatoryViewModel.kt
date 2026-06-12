@@ -484,6 +484,10 @@ class MandatoryViewModel(
         mutableState.value = mutableState.value.copy(notice = null)
     }
 
+    fun clearFeedback() {
+        mutableState.value = mutableState.value.copy(error = null, notice = null)
+    }
+
     private fun launchSafely(block: suspend () -> Unit) {
         scope.launch { block() }
     }

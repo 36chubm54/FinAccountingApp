@@ -86,19 +86,19 @@ fun AppShell(
 
     ToastHost(
         message = when (state.selectedSection) {
-            DesktopSection.Operations -> operationsState.notice
-            DesktopSection.Debts -> debtsState.notice
-            DesktopSection.Mandatory -> mandatoryState.notice
-            DesktopSection.Settings -> settingsState.notice
+            DesktopSection.Operations -> operationsState.notice ?: operationsState.error
+            DesktopSection.Debts -> debtsState.notice ?: debtsState.error
+            DesktopSection.Mandatory -> mandatoryState.notice ?: mandatoryState.error
+            DesktopSection.Settings -> settingsState.notice ?: settingsState.error
             else -> null
         },
         modifier = modifier.fillMaxSize(),
         onDismiss = {
             when (state.selectedSection) {
-                DesktopSection.Operations -> operationsViewModel.clearNotice()
-                DesktopSection.Debts -> debtsViewModel.clearNotice()
-                DesktopSection.Mandatory -> mandatoryViewModel.clearNotice()
-                DesktopSection.Settings -> settingsViewModel.clearNotice()
+                DesktopSection.Operations -> operationsViewModel.clearFeedback()
+                DesktopSection.Debts -> debtsViewModel.clearFeedback()
+                DesktopSection.Mandatory -> mandatoryViewModel.clearFeedback()
+                DesktopSection.Settings -> settingsViewModel.clearFeedback()
                 else -> Unit
             }
         },

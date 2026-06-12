@@ -59,13 +59,12 @@ fun DebtsScreen(viewModel: DebtsViewModel, modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier.fillMaxSize().padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Text("Debts", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text("Debts", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
 
-            Column(
-                Modifier.fillMaxSize(),
+        Column(
+            Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 DebtsListCard(

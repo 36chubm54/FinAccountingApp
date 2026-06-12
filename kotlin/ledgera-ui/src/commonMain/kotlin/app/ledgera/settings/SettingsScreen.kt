@@ -71,7 +71,6 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Settings", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
         WalletsSection(
             wallets = state.wallets,
