@@ -1457,9 +1457,9 @@ fn import_operation_plan(
                 .errors
                 .first()
                 .cloned()
-                .unwrap_or_else(|| "Import contains debt-linked integrity errors".to_owned());
+                .unwrap_or_else(|| "Operations import contains validation errors".to_owned());
             return Err(format!(
-                "Import contains debt-linked integrity errors: {message}"
+                "Operations import contains validation errors: {message}"
             ));
         }
         return Ok(OperationImportResult {
@@ -1475,9 +1475,9 @@ fn import_operation_plan(
             .errors
             .first()
             .cloned()
-            .unwrap_or_else(|| "Import contains debt-linked integrity errors".to_owned());
+            .unwrap_or_else(|| "Operations import contains validation errors".to_owned());
         return Err(format!(
-            "Import contains debt-linked integrity errors: {message}"
+            "Operations import contains validation errors: {message}"
         ));
     }
 
@@ -2170,8 +2170,11 @@ enum ParsedOperationCsvRow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DebtLinkImportKind {
     Opening,
-    RemapPayment { payment_id: i64 },
-    RecreatePayment { operation_type: String },
+    RemapPayment {
+        payment_id: i64,
+        previous_record_id: Option<i64>,
+    },
+    RecreateDeletedPayment { operation_type: String },
 }
 
 struct DebtRecordRemap {
@@ -2181,6 +2184,12 @@ struct DebtRecordRemap {
     kind: DebtLinkImportKind,
     principal_paid_minor: i64,
     payment_date: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DebtPaymentImportMatch {
+    payment_id: i64,
+    previous_record_id: Option<i64>,
 }
 
 fn parse_operation_csv_row(
@@ -2382,6 +2391,7 @@ fn validate_debt_linked_import_source_in_conn(
                 }
                 Ok(DebtLinkImportKind::RemapPayment {
                     payment_id: *payment_id,
+                    previous_record_id: Some(source_record_id),
                 })
             }
             [] if imported_record_type == expected_opening_type
@@ -2391,7 +2401,7 @@ fn validate_debt_linked_import_source_in_conn(
                 Ok(DebtLinkImportKind::Opening)
             }
             [] if imported_record_type == expected_payment_type => {
-                if let Some(payment_id) = matching_debt_payment_for_import(
+                if let Some(payment) = matching_debt_payment_for_import(
                     conn,
                     debt_id,
                     expected_payment_operation,
@@ -2399,14 +2409,20 @@ fn validate_debt_linked_import_source_in_conn(
                     imported_amount_base_minor,
                     row_label,
                 )? {
-                    return Ok(DebtLinkImportKind::RemapPayment { payment_id });
+                    return validate_semantic_debt_payment_match(
+                        conn,
+                        row_label,
+                        debt_id,
+                        source_record_id,
+                        payment,
+                    );
                 }
                 if imported_amount_base_minor > remaining_amount_minor {
                     return Err(format!(
                         "{row_label}: debt-linked payment exceeds remaining amount for debt {debt_id}"
                     ));
                 }
-                Ok(DebtLinkImportKind::RecreatePayment {
+                Ok(DebtLinkImportKind::RecreateDeletedPayment {
                     operation_type: expected_payment_operation.to_owned(),
                 })
             }
@@ -2437,7 +2453,7 @@ fn validate_debt_linked_import_source_in_conn(
                 return Ok(DebtLinkImportKind::Opening);
             }
             if imported_record_type == expected_payment_type {
-                if let Some(payment_id) = matching_debt_payment_for_import(
+                if let Some(payment) = matching_debt_payment_for_import(
                     conn,
                     debt_id,
                     expected_payment_operation,
@@ -2445,16 +2461,17 @@ fn validate_debt_linked_import_source_in_conn(
                     imported_amount_base_minor,
                     row_label,
                 )? {
-                    return Ok(DebtLinkImportKind::RemapPayment { payment_id });
+                    return validate_semantic_debt_payment_match(
+                        conn,
+                        row_label,
+                        debt_id,
+                        source_record_id,
+                        payment,
+                    );
                 }
-                if imported_amount_base_minor > remaining_amount_minor {
-                    return Err(format!(
-                        "{row_label}: debt-linked payment exceeds remaining amount for debt {debt_id}"
-                    ));
-                }
-                return Ok(DebtLinkImportKind::RecreatePayment {
-                    operation_type: expected_payment_operation.to_owned(),
-                });
+                return Err(format!(
+                    "{row_label}: debt-linked source record {source_record_id} is not linked to payment history for debt {debt_id}"
+                ));
             }
             Err(format!(
                 "{row_label}: debt-linked opening record does not match debt {debt_id}"
@@ -2478,6 +2495,7 @@ fn validate_debt_linked_import_source_in_conn(
             }
             Ok(DebtLinkImportKind::RemapPayment {
                 payment_id: *payment_id,
+                previous_record_id: Some(source_record_id),
             })
         }
         _ => Err(format!(
@@ -2552,10 +2570,10 @@ fn matching_debt_payment_for_import(
     imported_date: &str,
     imported_amount_base_minor: i64,
     row_label: &str,
-) -> StorageResult<Option<i64>> {
+) -> StorageResult<Option<DebtPaymentImportMatch>> {
     let mut stmt = conn
         .prepare(
-            "SELECT id
+            "SELECT id, record_id
              FROM debt_payments
              WHERE debt_id = ?1
                AND operation_type = ?2
@@ -2573,18 +2591,54 @@ fn matching_debt_payment_for_import(
                 imported_amount_base_minor,
                 imported_date,
             ),
-            |row| row.get::<_, i64>(0),
+            |row| {
+                Ok(DebtPaymentImportMatch {
+                    payment_id: row.get(0)?,
+                    previous_record_id: row.get(1)?,
+                })
+            },
         )
         .map_err(sqlite_err)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(sqlite_err)?;
     match matches.as_slice() {
         [] => Ok(None),
-        [payment_id] => Ok(Some(*payment_id)),
+        [payment] => Ok(Some(*payment)),
         _ => Err(format!(
             "{row_label}: debt-linked payment row matches multiple debt history entries for debt {debt_id}"
         )),
     }
+}
+
+fn record_exists_for_import(conn: &Connection, record_id: i64) -> StorageResult<bool> {
+    conn.query_row("SELECT 1 FROM records WHERE id = ?1", [record_id], |_row| {
+        Ok(())
+    })
+    .optional()
+    .map(|value| value.is_some())
+    .map_err(sqlite_err)
+}
+
+fn validate_semantic_debt_payment_match(
+    conn: &Connection,
+    row_label: &str,
+    debt_id: i64,
+    source_record_id: i64,
+    payment: DebtPaymentImportMatch,
+) -> StorageResult<DebtLinkImportKind> {
+    if let Some(previous_record_id) = payment.previous_record_id
+        && previous_record_id != source_record_id
+        && record_exists_for_import(conn, previous_record_id)?
+    {
+        return Err(format!(
+            "{row_label}: debt payment {} is already linked to existing record {} for debt {}",
+            payment.payment_id, previous_record_id, debt_id
+        ));
+    }
+    Ok(DebtLinkImportKind::RemapPayment {
+        payment_id: payment.payment_id,
+        previous_record_id: payment.previous_record_id,
+    })
 }
 
 fn parse_operation_csv_transfer(
@@ -2916,7 +2970,7 @@ fn replace_debt_linked_records_in_tx(
         }
         match &remap.kind {
             DebtLinkImportKind::Opening => {}
-            DebtLinkImportKind::RemapPayment { payment_id } => {
+            DebtLinkImportKind::RemapPayment { payment_id, .. } => {
                 let updated = tx
                     .execute(
                         "UPDATE debt_payments
@@ -2931,7 +2985,7 @@ fn replace_debt_linked_records_in_tx(
                     ));
                 }
             }
-            DebtLinkImportKind::RecreatePayment { operation_type } => {
+            DebtLinkImportKind::RecreateDeletedPayment { operation_type } => {
                 recreate_debt_payment_for_import_in_tx(tx, remap, operation_type)?;
             }
         }
@@ -8244,6 +8298,128 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
             )
             .unwrap();
         assert_eq!(linked_record, ("Repay Alex".to_owned(), 1));
+
+        let _ = fs::remove_file(path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn import_records_csv_rejects_semantic_remap_from_existing_other_record() {
+        let db_path = create_balance_test_db();
+        let conn = Connection::open(&db_path).unwrap();
+        insert_test_debt(&conn, 1, "Alex");
+        conn.execute(
+            "INSERT INTO records (
+                id, type, date, wallet_id, related_debt_id,
+                amount_original, amount_original_minor, currency,
+                rate_at_operation, rate_at_operation_text,
+                amount_base, amount_base_minor, category, description
+             )
+             VALUES (
+                7, 'expense', '2026-01-06', 1, 1,
+                50.0, 5000, 'KZT', 1.0, '1.000000',
+                50.0, 5000, 'Debt payment', 'Existing repay'
+             )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO records (
+                id, type, date, wallet_id, related_debt_id,
+                amount_original, amount_original_minor, currency,
+                rate_at_operation, rate_at_operation_text,
+                amount_base, amount_base_minor, category, description
+             )
+             VALUES (
+                8, 'expense', '2026-01-06', 1, 1,
+                50.0, 5000, 'KZT', 1.0, '1.000000',
+                50.0, 5000, 'Debt payment', 'Imported repay'
+             )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO debt_payments (
+                id, debt_id, record_id, operation_type,
+                principal_paid_minor, is_write_off, payment_date
+             )
+             VALUES (1, 1, 7, 'debt_repay', 5000, 0, '2026-01-06')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let path = temp_test_path("ledgera_ops_import_existing_other_debt_payment", "csv");
+        fs::write(
+            &path,
+            concat!(
+                "date,type,wallet_id,category,amount_original,currency,rate_at_operation,amount_base,description,tags,period,record_id,related_debt_id,transfer_id,from_wallet_id,to_wallet_id\n",
+                "2026-01-06,expense,1,Debt payment,50,KZT,1,50,Imported repay,,,8,1,,,\n"
+            ),
+        )
+        .unwrap();
+
+        let preview = preview_import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+
+        assert!(preview.blocking_errors);
+        assert!(preview.errors.iter().any(|error| {
+            error.contains("is already linked to existing record 7")
+        }));
+        let error = import_records_csv(&db_path, path.to_str().unwrap()).unwrap_err();
+        assert!(error.contains("debt-linked integrity errors"));
+        let payment_record_id: i64 = Connection::open(&db_path)
+            .unwrap()
+            .query_row("SELECT record_id FROM debt_payments WHERE id = 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(payment_record_id, 7);
+
+        let _ = fs::remove_file(path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn import_records_csv_rejects_existing_payment_like_orphan_debt_record() {
+        let db_path = create_balance_test_db();
+        let conn = Connection::open(&db_path).unwrap();
+        insert_test_debt(&conn, 1, "Alex");
+        conn.execute(
+            "INSERT INTO records (
+                id, type, date, wallet_id, related_debt_id,
+                amount_original, amount_original_minor, currency,
+                rate_at_operation, rate_at_operation_text,
+                amount_base, amount_base_minor, category, description
+             )
+             VALUES (
+                8, 'expense', '2026-01-06', 1, 1,
+                50.0, 5000, 'KZT', 1.0, '1.000000',
+                50.0, 5000, 'Debt payment', 'Orphan repay'
+             )",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let path = temp_test_path("ledgera_ops_import_orphan_debt_payment", "csv");
+        fs::write(
+            &path,
+            concat!(
+                "date,type,wallet_id,category,amount_original,currency,rate_at_operation,amount_base,description,tags,period,record_id,related_debt_id,transfer_id,from_wallet_id,to_wallet_id\n",
+                "2026-01-06,expense,1,Debt payment,50,KZT,1,50,Orphan repay,,,8,1,,,\n"
+            ),
+        )
+        .unwrap();
+
+        let preview = preview_import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
+
+        assert!(preview.blocking_errors);
+        assert!(preview.errors.iter().any(|error| {
+            error.contains("is not linked to payment history")
+        }));
+        let payment_count: i64 = Connection::open(&db_path)
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM debt_payments", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(payment_count, 0);
 
         let _ = fs::remove_file(path);
         remove_test_db(&db_path);
