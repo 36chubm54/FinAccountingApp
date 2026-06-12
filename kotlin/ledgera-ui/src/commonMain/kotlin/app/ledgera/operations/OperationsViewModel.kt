@@ -360,7 +360,7 @@ class OperationsViewModel(
         }
         if (
             record.transferId != null ||
-            (record.type != "income" && record.type != "expense") ||
+            (record.type != "income" && record.type != "expense" && record.type != "mandatory_expense") ||
             isTransferCommissionMarker(record.description)
         ) {
             mutableState.value = mutableState.value.copy(

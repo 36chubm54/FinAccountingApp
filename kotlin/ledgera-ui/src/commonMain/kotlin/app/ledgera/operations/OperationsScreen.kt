@@ -1154,7 +1154,7 @@ private fun ImportPreviewDialog(
                 }
                 if (preview.blockingErrors) {
                     Text(
-                        "This preview has blocking debt-linked integrity errors. Fix the file and run preview again.",
+                        "This preview has blocking validation errors. Fix the file and run preview again.",
                         color = MaterialTheme.colorScheme.error,
                     )
                 }

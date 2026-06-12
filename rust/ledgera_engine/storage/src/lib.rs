@@ -8365,7 +8365,7 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
             error.contains("is already linked to existing record 7")
         }));
         let error = import_records_csv(&db_path, path.to_str().unwrap()).unwrap_err();
-        assert!(error.contains("debt-linked integrity errors"));
+        assert!(error.contains("Operations import contains validation errors"));
         let payment_record_id: i64 = Connection::open(&db_path)
             .unwrap()
             .query_row("SELECT record_id FROM debt_payments WHERE id = 1", [], |row| {
@@ -8602,7 +8602,7 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
         );
         let before = record_list_rows(&db_path).unwrap();
         let error = import_records_csv(&db_path, path.to_str().unwrap()).unwrap_err();
-        assert!(error.contains("debt-linked integrity errors"));
+        assert!(error.contains("Operations import contains validation errors"));
         assert_eq!(record_list_rows(&db_path).unwrap(), before);
 
         let _ = fs::remove_file(path);
@@ -8697,7 +8697,7 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
                 .any(|error| error.contains("debt not found"))
         );
         let error = import_records_csv(&db_path, path.to_str().unwrap()).unwrap_err();
-        assert!(error.contains("debt-linked integrity errors"));
+        assert!(error.contains("Operations import contains validation errors"));
 
         let _ = fs::remove_file(path);
         remove_test_db(&db_path);
@@ -8854,7 +8854,7 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
                 .any(|error| error.contains("does not match payment history"))
         );
         let error = import_records_csv(&db_path, path.to_str().unwrap()).unwrap_err();
-        assert!(error.contains("debt-linked integrity errors"));
+        assert!(error.contains("Operations import contains validation errors"));
         let unchanged_count: i64 = Connection::open(&db_path)
             .unwrap()
             .query_row(
@@ -9112,7 +9112,7 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
                 .any(|error| error.contains("debt not found"))
         );
         let error = import_records_xlsx(&db_path, path.to_str().unwrap()).unwrap_err();
-        assert!(error.contains("debt-linked integrity errors"));
+        assert!(error.contains("Operations import contains validation errors"));
 
         let _ = fs::remove_file(path);
         remove_test_db(&db_path);
