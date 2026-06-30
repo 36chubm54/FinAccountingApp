@@ -4,6 +4,7 @@ import app.ledgera.bridge.MandatoryEngine
 import app.ledgera.model.AddMandatoryToRecordsRequest
 import app.ledgera.model.CreateMandatoryTemplateRequest
 import app.ledgera.model.MandatoryAddToRecordsDraft
+import app.ledgera.model.MandatoryAutoPayPopup
 import app.ledgera.model.MandatoryImportResult
 import app.ledgera.model.MandatoryTemplateDraft
 import app.ledgera.model.MandatoryTemplateItem
@@ -35,6 +36,7 @@ data class MandatoryUiState(
     val inProgress: Boolean = false,
     val error: String? = null,
     val notice: String? = null,
+    val autoPayPopup: MandatoryAutoPayPopup? = null,
 )
 
 class MandatoryViewModel(
@@ -60,6 +62,7 @@ class MandatoryViewModel(
                 val selectedTemplateId = previous.selectedTemplateId?.takeIf { id ->
                     templates.any { it.id == id }
                 } ?: templates.firstOrNull()?.id
+                val latest = mutableState.value
                 mutableState.value = MandatoryUiState(
                     loading = false,
                     templates = templates,
@@ -75,11 +78,13 @@ class MandatoryViewModel(
                     importPreview = previous.importPreview,
                     importPath = previous.importPath,
                     importFileSnapshot = previous.importFileSnapshot,
-                    inProgress = previous.inProgress,
+                    inProgress = latest.inProgress,
                     notice = notice,
+                    autoPayPopup = latest.autoPayPopup,
                 )
             }.onFailure { error ->
-                mutableState.value = previous.copy(
+                val latest = mutableState.value
+                mutableState.value = latest.copy(
                     loading = false,
                     error = error.message ?: error::class.simpleName ?: "Unknown error",
                     notice = null,
@@ -247,17 +252,49 @@ class MandatoryViewModel(
     }
 
     fun applyAutoPayments() {
+        applyAutoPayments(showWhenEmpty = true)
+    }
+
+    fun applyAutoPaymentsOnStartup() {
+        applyAutoPayments(showWhenEmpty = false)
+    }
+
+    private fun applyAutoPayments(showWhenEmpty: Boolean) {
         val state = mutableState.value
-        mutableState.value = state.copy(inProgress = true, error = null, notice = null)
+        val today = todayText()
+        mutableState.value = state.copy(
+            inProgress = true,
+            editDraft = null,
+            addToRecordsDraft = null,
+            deleteTemplateId = null,
+            confirmDeleteAll = false,
+            importPreview = null,
+            importPath = null,
+            importFileSnapshot = null,
+            error = null,
+            notice = null,
+        )
         launchSafely {
             runCatching {
-                val result = engine.applyMandatoryAutoPayments(todayText())
-                mutableState.value = mutableState.value.copy(inProgress = false)
-                refresh("Auto-pay applied: ${result.createdRecords.size} records")
+                val result = engine.applyMandatoryAutoPayments(today)
+                val popup = if (result.createdRecords.isNotEmpty() || showWhenEmpty) {
+                    autoPayPopup(result.createdRecords.size)
+                } else {
+                    null
+                }
+                mutableState.value = mutableState.value.copy(
+                    inProgress = false,
+                    autoPayPopup = popup,
+                )
+                refresh(notice = null)
             }.onFailure { error ->
                 mutableState.value = mutableState.value.copy(
                     inProgress = false,
-                    error = error.message ?: error::class.simpleName ?: "Unknown error",
+                    error = null,
+                    autoPayPopup = MandatoryAutoPayPopup(
+                        title = "Auto-pay failed",
+                        message = error.message ?: error::class.simpleName ?: "Unknown error",
+                    ),
                     notice = null,
                 )
             }
@@ -487,6 +524,20 @@ class MandatoryViewModel(
     fun clearFeedback() {
         mutableState.value = mutableState.value.copy(error = null, notice = null)
     }
+
+    fun closeAutoPayPopup() {
+        mutableState.value = mutableState.value.copy(autoPayPopup = null)
+    }
+
+    private fun autoPayPopup(createdCount: Int): MandatoryAutoPayPopup =
+        MandatoryAutoPayPopup(
+            title = "Auto-pay applied",
+            message = if (createdCount == 1) {
+                "Created 1 mandatory operation record."
+            } else {
+                "Created $createdCount mandatory operation records."
+            },
+        )
 
     private fun launchSafely(block: suspend () -> Unit) {
         scope.launch { block() }

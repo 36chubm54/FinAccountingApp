@@ -250,7 +250,10 @@ private fun MandatoryActionsCard(
                 selected?.let { "Selected: ${it.description}" } ?: "Select a mandatory template to add or delete it.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 Button(onClick = onAddToRecords, enabled = selected != null && !inProgress) {
                     Text("Add to records")
                 }
@@ -264,7 +267,10 @@ private fun MandatoryActionsCard(
                     Text("Export")
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 OutlinedButton(onClick = onDelete, enabled = selected != null && !inProgress) {
                     Text("Delete")
                 }

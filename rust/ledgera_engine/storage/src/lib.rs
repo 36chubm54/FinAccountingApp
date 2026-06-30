@@ -1803,6 +1803,9 @@ fn import_mandatory_plan(
             "Mandatory import contains validation errors: {message}"
         ));
     }
+    if plan.templates.is_empty() {
+        return Err("Mandatory import contains no templates".to_owned());
+    }
 
     let tx = conn.transaction().map_err(sqlite_err)?;
     tx.execute("DELETE FROM mandatory_expenses", [])
@@ -2004,14 +2007,14 @@ fn parse_mandatory_xlsx_import(
     }
     let mut workbook = open_workbook_auto(path).map_err(|error| error.to_string())?;
     let Some(sheet_name) = workbook.sheet_names().first().cloned() else {
-        return Ok(MandatoryImportPlan::default());
+        return Ok(empty_mandatory_import_plan());
     };
     let range = workbook
         .worksheet_range(&sheet_name)
         .map_err(|error| error.to_string())?;
     let mut rows_iter = range.rows();
     let Some(header_row) = rows_iter.next() else {
-        return Ok(MandatoryImportPlan::default());
+        return Ok(empty_mandatory_import_plan());
     };
     let headers = header_row
         .iter()
@@ -2054,7 +2057,18 @@ fn parse_mandatory_tabular_import(
             }
         }
     }
+    if plan.imported == 0 && plan.skipped == 0 {
+        plan = empty_mandatory_import_plan();
+    }
     Ok(plan)
+}
+
+fn empty_mandatory_import_plan() -> MandatoryImportPlan {
+    let mut plan = MandatoryImportPlan::default();
+    plan.has_blocking_errors = true;
+    plan.errors
+        .push("Mandatory import contains no templates".to_owned());
+    plan
 }
 
 fn parse_mandatory_template_row(
@@ -3483,7 +3497,8 @@ pub fn mandatory_apply_auto_payments(
     db_path: &str,
     today: &str,
 ) -> StorageResult<MandatoryAutoPayResult> {
-    validate_ymd_date(today)?;
+    validate_ymd_syntax(today)
+        .map_err(|error| format!("auto-pay service date is invalid ({today}): {error}"))?;
     let mut conn = open_sqlite_connection(db_path)?;
     conn.pragma_update(None, "foreign_keys", "ON")
         .map_err(sqlite_err)?;
@@ -3500,7 +3515,12 @@ pub fn mandatory_apply_auto_payments(
         if anchor_raw.is_empty() {
             continue;
         }
-        let anchor = parse_ymd_parts(anchor_raw)?;
+        let anchor = parse_ymd_parts(anchor_raw).map_err(|error| {
+            format!(
+                "auto-pay template {} has invalid anchor date ({}): {}",
+                template.id, anchor_raw, error
+            )
+        })?;
         if today_parts < anchor {
             continue;
         }
@@ -3512,6 +3532,9 @@ pub fn mandatory_apply_auto_payments(
         if target_date < anchor {
             continue;
         }
+        if target_date > today_parts {
+            continue;
+        }
         let target_date_text = ymd_text(target_date);
         if mandatory_generated_record_exists_in_tx(&tx, &template, &target_date_text)? {
             continue;
@@ -3521,8 +3544,14 @@ pub fn mandatory_apply_auto_payments(
             &template,
             &target_date_text,
             template.wallet_id,
-            true,
-        )?;
+            false,
+        )
+        .map_err(|error| {
+            format!(
+                "auto-pay failed for template {} anchor={} target={} today={}: {}",
+                template.id, anchor_raw, target_date_text, today, error
+            )
+        })?;
         inserted_record_ids.push(tx.last_insert_rowid());
     }
 
@@ -6715,6 +6744,201 @@ mod tests {
     }
 
     #[test]
+    fn mandatory_auto_pay_skips_future_anchors_without_error() {
+        let db_path = create_balance_test_db();
+        let future = mandatory_template_create(
+            &db_path,
+            &MandatoryTemplateCreatePayload {
+                wallet_id: 2,
+                amount_original: "9".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "9".to_owned(),
+                category: "Future".to_owned(),
+                description: "Not yet".to_owned(),
+                period: "daily".to_owned(),
+                date: "2099-02-28".to_owned(),
+            },
+        )
+        .unwrap();
+
+        let result = mandatory_apply_auto_payments(&db_path, "2026-06-21").unwrap();
+
+        assert!(
+            result
+                .created_records
+                .iter()
+                .all(|record| record.category != future.category)
+        );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn mandatory_auto_pay_monthly_waits_until_anchor_day_each_month() {
+        let db_path = create_balance_test_db();
+        let monthly = mandatory_template_create(
+            &db_path,
+            &MandatoryTemplateCreatePayload {
+                wallet_id: 2,
+                amount_original: "11".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "11".to_owned(),
+                category: "Monthly".to_owned(),
+                description: "Due on 13th".to_owned(),
+                period: "monthly".to_owned(),
+                date: "2026-03-13".to_owned(),
+            },
+        )
+        .unwrap();
+
+        let before_due = mandatory_apply_auto_payments(&db_path, "2026-06-12").unwrap();
+        assert!(before_due.created_records.is_empty());
+
+        let on_due = mandatory_apply_auto_payments(&db_path, "2026-06-13").unwrap();
+        assert!(
+            on_due
+                .created_records
+                .iter()
+                .any(|record| record.category == monthly.category && record.date == "2026-06-13")
+        );
+
+        let duplicate = mandatory_apply_auto_payments(&db_path, "2026-06-21").unwrap();
+        assert!(!duplicate.created_records.iter().any(|record| {
+            record.category == monthly.category && record.date == "2026-06-13"
+        }));
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn mandatory_auto_pay_daily_runs_each_day_after_anchor() {
+        let db_path = create_balance_test_db();
+        let daily = mandatory_template_create(
+            &db_path,
+            &MandatoryTemplateCreatePayload {
+                wallet_id: 2,
+                amount_original: "4".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "4".to_owned(),
+                category: "Daily anchor".to_owned(),
+                description: "Every day after anchor".to_owned(),
+                period: "daily".to_owned(),
+                date: "2026-06-20".to_owned(),
+            },
+        )
+        .unwrap();
+
+        let before_anchor = mandatory_apply_auto_payments(&db_path, "2026-06-19").unwrap();
+        assert!(!before_anchor
+            .created_records
+            .iter()
+            .any(|record| record.category == daily.category));
+
+        let on_anchor = mandatory_apply_auto_payments(&db_path, "2026-06-20").unwrap();
+        assert!(on_anchor
+            .created_records
+            .iter()
+            .any(|record| record.category == daily.category && record.date == "2026-06-20"));
+
+        let next_day = mandatory_apply_auto_payments(&db_path, "2026-06-21").unwrap();
+        assert!(next_day
+            .created_records
+            .iter()
+            .any(|record| record.category == daily.category && record.date == "2026-06-21"));
+
+        let duplicate = mandatory_apply_auto_payments(&db_path, "2026-06-21").unwrap();
+        assert!(!duplicate
+            .created_records
+            .iter()
+            .any(|record| record.category == daily.category && record.date == "2026-06-21"));
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn mandatory_auto_pay_weekly_runs_on_anchor_weekday_each_week() {
+        let db_path = create_balance_test_db();
+        let weekly = mandatory_template_create(
+            &db_path,
+            &MandatoryTemplateCreatePayload {
+                wallet_id: 2,
+                amount_original: "6".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "6".to_owned(),
+                category: "Weekly anchor".to_owned(),
+                description: "Every Monday".to_owned(),
+                period: "weekly".to_owned(),
+                date: "2026-06-15".to_owned(),
+            },
+        )
+        .unwrap();
+
+        let before_anchor = mandatory_apply_auto_payments(&db_path, "2026-06-14").unwrap();
+        assert!(!before_anchor
+            .created_records
+            .iter()
+            .any(|record| record.category == weekly.category));
+
+        let on_anchor = mandatory_apply_auto_payments(&db_path, "2026-06-15").unwrap();
+        assert!(on_anchor
+            .created_records
+            .iter()
+            .any(|record| record.category == weekly.category && record.date == "2026-06-15"));
+
+        let later_same_week = mandatory_apply_auto_payments(&db_path, "2026-06-18").unwrap();
+        assert!(!later_same_week
+            .created_records
+            .iter()
+            .any(|record| record.category == weekly.category && record.date == "2026-06-15"));
+
+        let next_week = mandatory_apply_auto_payments(&db_path, "2026-06-22").unwrap();
+        assert!(next_week
+            .created_records
+            .iter()
+            .any(|record| record.category == weekly.category && record.date == "2026-06-22"));
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn mandatory_auto_pay_matches_legacy_balance_behavior() {
+        let db_path = create_balance_test_db();
+        mandatory_template_delete_all(&db_path).unwrap();
+        let template = mandatory_template_create(
+            &db_path,
+            &MandatoryTemplateCreatePayload {
+                wallet_id: 1,
+                amount_original: "5000".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "5000".to_owned(),
+                category: "Large autopay".to_owned(),
+                description: "Legacy batch behavior".to_owned(),
+                period: "daily".to_owned(),
+                date: "2026-06-01".to_owned(),
+            },
+        )
+        .unwrap();
+
+        let manual = mandatory_add_to_records(
+            &db_path,
+            &MandatoryAddToRecordsPayload {
+                template_id: template.id,
+                date: "2026-06-02".to_owned(),
+                wallet_id: 1,
+            },
+        )
+        .unwrap_err();
+        assert!(manual.contains("Insufficient funds in wallet"));
+
+        let result = mandatory_apply_auto_payments(&db_path, "2026-06-02").unwrap();
+        assert!(result.created_records.iter().any(|record| {
+            record.category == "Large autopay" && record.date == "2026-06-02"
+        }));
+        remove_test_db(&db_path);
+    }
+
+    #[test]
     fn import_export_mandatory_csv_replaces_templates_and_normalizes_ids() {
         let db_path = create_balance_test_db();
         let path = temp_test_path("ledgera_mandatory_import", "csv");
@@ -6857,6 +7081,34 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
         let before = mandatory_expense_rows(&db_path).unwrap();
         let error = import_mandatory_csv(&db_path, path.to_str().unwrap()).unwrap_err();
         assert!(error.contains("Mandatory import contains validation errors"));
+        assert_eq!(mandatory_expense_rows(&db_path).unwrap(), before);
+
+        let _ = fs::remove_file(path);
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn import_mandatory_rejects_empty_files_without_replacing_existing_templates() {
+        let db_path = create_balance_test_db();
+        let path = temp_test_path("ledgera_mandatory_empty", "csv");
+        fs::write(
+            &path,
+            "type,date,wallet_id,category,amount_original,currency,rate_at_operation,amount_base,description,period\n",
+        )
+        .unwrap();
+
+        let before = mandatory_expense_rows(&db_path).unwrap();
+        let preview = preview_import_mandatory_csv(&db_path, path.to_str().unwrap()).unwrap();
+        assert_eq!(preview.imported, 0);
+        assert_eq!(preview.skipped, 0);
+        assert!(preview.blocking_errors);
+        assert!(preview
+            .errors
+            .iter()
+            .any(|error| error.contains("Mandatory import contains no templates")));
+
+        let error = import_mandatory_csv(&db_path, path.to_str().unwrap()).unwrap_err();
+        assert!(error.contains("Mandatory import contains no templates"));
         assert_eq!(mandatory_expense_rows(&db_path).unwrap(), before);
 
         let _ = fs::remove_file(path);

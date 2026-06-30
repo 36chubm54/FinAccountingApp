@@ -68,6 +68,28 @@ class MandatoryViewModelTest {
     }
 
     @Test
+    fun createAllowsFutureAutoPayAnchorDate() {
+        val engine = FakeMandatoryEngine(templates = mutableListOf())
+        val viewModel = MandatoryViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.openCreateDialog()
+        viewModel.updateDraft(
+            viewModel.state.value.editDraft!!.copy(
+                amountOriginal = "25",
+                amountBase = "25",
+                description = "Internet",
+                date = "2099-01-01",
+            )
+        )
+        viewModel.saveTemplate()
+
+        assertEquals(1, engine.createCalls)
+        assertNull(viewModel.state.value.error)
+        assertEquals("2099-01-01", viewModel.state.value.templates.single().date)
+    }
+
+    @Test
     fun updateSuccessClosesDialogAndShowsNotice() {
         val engine = FakeMandatoryEngine()
         val viewModel = MandatoryViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
@@ -81,6 +103,21 @@ class MandatoryViewModelTest {
         assertNull(viewModel.state.value.editDraft)
         assertEquals("Mandatory template updated (id=1)", viewModel.state.value.notice)
         assertEquals("weekly", viewModel.state.value.templates.first().period)
+    }
+
+    @Test
+    fun updateAllowsFutureAutoPayAnchorDate() {
+        val engine = FakeMandatoryEngine()
+        val viewModel = MandatoryViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.selectTemplate(1)
+        viewModel.updateDraft(viewModel.state.value.editDraft!!.copy(date = "2099-01-01"))
+        viewModel.saveTemplate()
+
+        assertEquals(1, engine.updateCalls)
+        assertNull(viewModel.state.value.error)
+        assertEquals("2099-01-01", viewModel.state.value.templates.first().date)
     }
 
     @Test
@@ -98,6 +135,20 @@ class MandatoryViewModelTest {
     }
 
     @Test
+    fun addToRecordsRejectsFutureRecordDate() {
+        val engine = FakeMandatoryEngine()
+        val viewModel = MandatoryViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.openAddToRecordsDialog()
+        viewModel.updateAddToRecordsDraft(viewModel.state.value.addToRecordsDraft!!.copy(date = "2099-01-01"))
+        viewModel.addToRecords()
+
+        assertEquals(0, engine.addToRecordsCalls)
+        assertEquals("Date cannot be in the future", viewModel.state.value.error)
+    }
+
+    @Test
     fun autoPaySuccessShowsCreatedCount() {
         val engine = FakeMandatoryEngine(autoPayRecords = listOf(operationRecord(id = 8), operationRecord(id = 9)))
         val viewModel = MandatoryViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
@@ -106,7 +157,69 @@ class MandatoryViewModelTest {
         viewModel.applyAutoPayments()
 
         assertEquals(1, engine.autoPayCalls)
-        assertEquals("Auto-pay applied: 2 records", viewModel.state.value.notice)
+        assertNull(viewModel.state.value.notice)
+        assertEquals("Auto-pay applied", viewModel.state.value.autoPayPopup?.title)
+        assertEquals("Created 2 mandatory operation records.", viewModel.state.value.autoPayPopup?.message)
+    }
+
+    @Test
+    fun autoPayIgnoresFutureTemplateAnchorValidation() {
+        val engine = FakeMandatoryEngine(
+            templates = mutableListOf(mandatoryTemplate(date = "2099-01-01")),
+            autoPayRecords = emptyList(),
+        )
+        val viewModel = MandatoryViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.selectTemplate(1)
+        viewModel.applyAutoPayments()
+
+        assertEquals(1, engine.autoPayCalls)
+        assertNull(viewModel.state.value.editDraft)
+        assertNull(viewModel.state.value.error)
+        assertNull(viewModel.state.value.notice)
+        assertEquals("Auto-pay applied", viewModel.state.value.autoPayPopup?.title)
+        assertEquals("Created 0 mandatory operation records.", viewModel.state.value.autoPayPopup?.message)
+    }
+
+    @Test
+    fun startupAutoPaySkipsPopupWhenNoRecordsWereCreated() {
+        val engine = FakeMandatoryEngine(autoPayRecords = emptyList())
+        val viewModel = MandatoryViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.applyAutoPaymentsOnStartup()
+
+        assertEquals(1, engine.autoPayCalls)
+        assertNull(viewModel.state.value.notice)
+        assertNull(viewModel.state.value.error)
+        assertNull(viewModel.state.value.autoPayPopup)
+    }
+
+    @Test
+    fun startupAutoPayShowsPopupWhenRecordsWereCreated() {
+        val engine = FakeMandatoryEngine(autoPayRecords = listOf(operationRecord(id = 8)))
+        val viewModel = MandatoryViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.applyAutoPaymentsOnStartup()
+
+        assertEquals(1, engine.autoPayCalls)
+        assertNull(viewModel.state.value.notice)
+        assertEquals("Auto-pay applied", viewModel.state.value.autoPayPopup?.title)
+        assertEquals("Created 1 mandatory operation record.", viewModel.state.value.autoPayPopup?.message)
+    }
+
+    @Test
+    fun closeAutoPayPopupClearsPopup() {
+        val engine = FakeMandatoryEngine(autoPayRecords = listOf(operationRecord(id = 8)))
+        val viewModel = MandatoryViewModel(engine, CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+        viewModel.applyAutoPayments()
+        viewModel.closeAutoPayPopup()
+
+        assertNull(viewModel.state.value.autoPayPopup)
     }
 
     @Test

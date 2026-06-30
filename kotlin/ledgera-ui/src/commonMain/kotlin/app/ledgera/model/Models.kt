@@ -300,6 +300,11 @@ data class MandatoryAutoPayResult(
     val createdRecords: List<OperationRecord>,
 )
 
+data class MandatoryAutoPayPopup(
+    val title: String,
+    val message: String,
+)
+
 data class AuditFinding(
     val check: String,
     val severity: String,

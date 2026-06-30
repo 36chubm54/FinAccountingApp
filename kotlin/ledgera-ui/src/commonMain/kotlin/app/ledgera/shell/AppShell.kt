@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationRail
@@ -82,6 +84,7 @@ fun AppShell(
     val settingsState by settingsViewModel.state.collectAsState()
     LaunchedEffect(Unit) {
         viewModel.refreshStatus()
+        mandatoryViewModel.applyAutoPaymentsOnStartup()
     }
 
     ToastHost(
@@ -154,6 +157,18 @@ fun AppShell(
                     }
                 }
             }
+        }
+        mandatoryState.autoPayPopup?.let { popup ->
+            AlertDialog(
+                onDismissRequest = mandatoryViewModel::closeAutoPayPopup,
+                title = { Text(popup.title) },
+                text = { Text(popup.message) },
+                confirmButton = {
+                    Button(onClick = mandatoryViewModel::closeAutoPayPopup) {
+                        Text("OK")
+                    }
+                },
+            )
         }
     }
 }
