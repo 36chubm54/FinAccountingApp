@@ -41,6 +41,7 @@ import app.ledgera.model.MandatoryAddToRecordsDraft
 import app.ledgera.model.MandatoryTemplateDraft
 import app.ledgera.model.MandatoryTemplateItem
 import app.ledgera.model.WalletOption
+import app.ledgera.ui.LedgerDateField
 
 interface MandatoryFileActions {
     fun openImportPath(): String?
@@ -342,10 +343,12 @@ private fun MandatoryTemplateDialog(
                     enabled = draft.id == null,
                 )
                 PeriodChips(draft.period) { onDraftChange(draft.copy(period = it)) }
-                SingleLineField(
+                LedgerDateField(
                     value = draft.date,
                     onValueChange = { onDraftChange(draft.copy(date = it)) },
-                    label = "Date YYYY-MM-DD (optional)",
+                    label = "Auto-pay anchor",
+                    required = false,
+                    allowFuture = true,
                 )
                 Text(
                     if (draft.date.isBlank()) {
@@ -397,10 +400,11 @@ private fun AddMandatoryToRecordsDialog(
                     selectedWalletId = draft.walletId,
                     onSelected = { onDraftChange(draft.copy(walletId = it)) },
                 )
-                SingleLineField(
+                LedgerDateField(
                     value = draft.date,
                     onValueChange = { onDraftChange(draft.copy(date = it)) },
-                    label = "Date YYYY-MM-DD",
+                    label = "Date",
+                    allowFuture = false,
                 )
                 validationError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 engineError?.let { Text(it, color = MaterialTheme.colorScheme.error) }

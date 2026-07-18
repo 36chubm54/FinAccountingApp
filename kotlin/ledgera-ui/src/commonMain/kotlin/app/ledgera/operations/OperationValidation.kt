@@ -17,7 +17,7 @@ internal object OperationValidation {
         baseCurrency: String? = null,
     ): String? {
         val normalizedType = type.trim().lowercase()
-        val dateError = if (date.isBlank()) null else DateValidation.validateYmdNotFuture(date)
+        val dateError = if (date.isBlank()) null else DateValidation.validateDmyNotFuture(date)
         val amountError = if (amountOriginal.isBlank()) null else MoneyValidation.validatePositiveAmount(amountOriginal)
         val currencyError = CurrencyValidation.validateSupportedCurrency(currency)
         val baseCurrencyError = validateBaseCurrencyOnly(currency, baseCurrency)
@@ -55,7 +55,7 @@ internal object OperationValidation {
     ): String? {
         val normalizedCommission = commissionAmount.ifBlank { "0" }
         val normalizedCommissionCurrency = commissionCurrency.ifBlank { baseCurrency }
-        val dateError = if (date.isBlank()) null else DateValidation.validateYmdNotFuture(date)
+        val dateError = if (date.isBlank()) null else DateValidation.validateDmyNotFuture(date)
         val amountError = if (amount.isBlank()) null else MoneyValidation.validatePositiveAmount(amount)
         val commissionError = MoneyValidation.validateNonNegativeAmount(normalizedCommission)
         val currencyError = CurrencyValidation.validateSupportedCurrency(currency)

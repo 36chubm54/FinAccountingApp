@@ -45,6 +45,7 @@ import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.TransferDraft
 import app.ledgera.model.WalletOption
+import app.ledgera.ui.LedgerDateField
 import app.ledgera.validation.currentLedgerDate
 
 interface OperationsFileActions {
@@ -405,19 +406,21 @@ private fun OperationFilters(
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
+            LedgerDateField(
                 modifier = Modifier.weight(1f),
                 value = filter.startDate.orEmpty(),
                 onValueChange = { onFilterChanged(filter.copy(startDate = it.ifBlank { null })) },
-                label = { Text("From") },
-                singleLine = true,
+                label = "From",
+                required = false,
+                allowFuture = false,
             )
-            OutlinedTextField(
+            LedgerDateField(
                 modifier = Modifier.weight(1f),
                 value = filter.endDate.orEmpty(),
                 onValueChange = { onFilterChanged(filter.copy(endDate = it.ifBlank { null })) },
-                label = { Text("To") },
-                singleLine = true,
+                label = "To",
+                required = false,
+                allowFuture = false,
             )
         }
         Row(
@@ -513,12 +516,12 @@ private fun CreateTransferDialog(
                         toWalletId = wallet.id
                     }
                 }
-                OutlinedTextField(
+                LedgerDateField(
                     modifier = dialogFieldModifier(),
                     value = date,
                     onValueChange = { date = it },
-                    label = { Text("Date YYYY-MM-DD") },
-                    singleLine = true,
+                    label = "Date",
+                    allowFuture = false,
                 )
                 OutlinedTextField(
                     modifier = dialogFieldModifier(),
@@ -760,12 +763,12 @@ private fun CreateOperationForm(
                 }
             }
         }
-        OutlinedTextField(
+        LedgerDateField(
             modifier = dialogFieldModifier(),
             value = date,
             onValueChange = onDateChanged,
-            label = { Text("Date YYYY-MM-DD") },
-            singleLine = true,
+            label = "Date",
+            allowFuture = false,
         )
         OutlinedTextField(
             modifier = dialogFieldModifier(),
@@ -884,12 +887,12 @@ private fun EditOperationFields(
                 )
             }
         }
-        OutlinedTextField(
+        LedgerDateField(
             modifier = dialogFieldModifier(),
             value = draft.date,
             onValueChange = { onDraftChanged(draft.copy(date = it)) },
-            label = { Text("Date YYYY-MM-DD") },
-            singleLine = true,
+            label = "Date",
+            allowFuture = false,
         )
         OutlinedTextField(
             modifier = dialogFieldModifier(),
@@ -973,12 +976,12 @@ private fun EditTransferDialog(
                 WalletChips(wallets, draft.toWalletId) { wallet ->
                     onDraftChanged(draft.copy(toWalletId = wallet.id))
                 }
-                OutlinedTextField(
+                LedgerDateField(
                     modifier = dialogFieldModifier(),
                     value = draft.date,
                     onValueChange = { onDraftChanged(draft.copy(date = it)) },
-                    label = { Text("Date YYYY-MM-DD") },
-                    singleLine = true,
+                    label = "Date",
+                    allowFuture = false,
                 )
                 OutlinedTextField(
                     modifier = dialogFieldModifier(),

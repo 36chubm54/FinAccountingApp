@@ -48,6 +48,7 @@ import app.ledgera.model.DebtDraft
 import app.ledgera.model.DebtItem
 import app.ledgera.model.DebtPaymentItem
 import app.ledgera.model.WalletOption
+import app.ledgera.ui.LedgerDateField
 
 @Composable
 fun DebtsScreen(viewModel: DebtsViewModel, modifier: Modifier = Modifier) {
@@ -453,12 +454,12 @@ private fun CreateDebtDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
+                LedgerDateField(
                     value = draft.createdAt,
                     onValueChange = { onDraftChange(draft.copy(createdAt = it.lineSafe())) },
-                    label = { Text("Date YYYY-MM-DD") },
-                    singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
+                    label = "Date",
+                    allowFuture = false,
                 )
                 OutlinedTextField(
                     value = draft.amount,
@@ -549,12 +550,12 @@ private fun DebtActionDialog(
                         }
                     }
                 }
-                OutlinedTextField(
+                LedgerDateField(
                     value = draft.paymentDate,
                     onValueChange = { onDraftChange(draft.copy(paymentDate = it.lineSafe())) },
-                    label = { Text("Date YYYY-MM-DD") },
-                    singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
+                    label = "Date",
+                    allowFuture = false,
                 )
                 OutlinedTextField(
                     value = draft.amount,

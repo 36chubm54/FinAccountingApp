@@ -12,6 +12,7 @@ import app.ledgera.model.TransferDraft
 import app.ledgera.model.UpdateOperationRequest
 import app.ledgera.model.UpdateTransferRequest
 import app.ledgera.model.WalletOption
+import app.ledgera.validation.DateValidation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -64,14 +65,25 @@ class OperationsViewModel(
     }
 
     private fun refresh(filter: OperationFilter = mutableState.value.filter, notice: String?) {
+        val filterError = validateFilter(filter)
+        if (filterError != null) {
+            mutableState.value = mutableState.value.copy(
+                loading = false,
+                error = filterError,
+                notice = null,
+                filter = filter,
+            )
+            return
+        }
+        val engineFilter = filter.normalizedForStorage()
         mutableState.value = mutableState.value.copy(loading = true, error = null, notice = notice, filter = filter)
         launchSafely {
             runCatching {
                 val wallets = engine.walletBalances().ifEmpty { engine.listWallets() }
                 val baseCurrency = engine.baseCurrency()
-                val records = engine.listRecords(filter)
+                val records = engine.listRecords(engineFilter)
                 val tags = engine.listTags()
-                val categories = engine.listCategories(filter.recordType ?: "expense")
+                val categories = engine.listCategories(engineFilter.recordType ?: "expense")
                 mutableState.value = OperationsUiState(
                     loading = false,
                     records = records,
@@ -437,10 +449,11 @@ class OperationsViewModel(
             mutableState.value = mutableState.value.copy(error = validationError, notice = null)
             return
         }
+        val normalizedRequest = request.copy(date = request.date.toStorageDate())
         mutableState.value = mutableState.value.copy(loading = true, error = null, notice = null)
         launchSafely {
             runCatching {
-                engine.createRecord(request)
+                engine.createRecord(normalizedRequest)
                 refresh(notice = "Operation added")
             }.onFailure { error ->
                 mutableState.value = mutableState.value.copy(
@@ -458,11 +471,12 @@ class OperationsViewModel(
             mutableState.value = mutableState.value.copy(error = validationError, notice = null)
             return
         }
+        val normalizedRequest = request.copy(date = request.date.toStorageDate())
         mutableState.value = mutableState.value.copy(loading = true, error = null, notice = null)
         launchSafely {
             runCatching {
-                val result = engine.createTransfer(request)
-                refresh(notice = transferNotice(result.transferId, request, mutableState.value.wallets))
+                val result = engine.createTransfer(normalizedRequest)
+                refresh(notice = transferNotice(result.transferId, normalizedRequest, mutableState.value.wallets))
             }.onFailure { error ->
                 mutableState.value = mutableState.value.copy(
                     loading = false,
@@ -760,7 +774,7 @@ class OperationsViewModel(
     private fun OperationDraft.toUpdateRequest(): UpdateOperationRequest =
         UpdateOperationRequest(
             type = type,
-            date = date,
+            date = date.toStorageDate(),
             walletId = walletId,
             amountOriginal = amountOriginal,
             currency = currency,
@@ -775,7 +789,7 @@ class OperationsViewModel(
         UpdateTransferRequest(
             fromWalletId = fromWalletId,
             toWalletId = toWalletId,
-            date = date,
+            date = date.toStorageDate(),
             amount = amount,
             currency = currency,
             description = description,
@@ -793,6 +807,21 @@ class OperationsViewModel(
         }
     }
 }
+
+private fun validateFilter(filter: OperationFilter): String? {
+    filter.startDate?.let { DateValidation.validateOptionalDmy(it)?.let { error -> return "From: $error" } }
+    filter.endDate?.let { DateValidation.validateOptionalDmy(it)?.let { error -> return "To: $error" } }
+    return null
+}
+
+private fun OperationFilter.normalizedForStorage(): OperationFilter =
+    copy(
+        startDate = startDate?.toStorageDate(),
+        endDate = endDate?.toStorageDate(),
+    )
+
+private fun String.toStorageDate(): String =
+    DateValidation.formatGuiDateToYmd(this) ?: trim()
 
 private fun isTransferCommissionMarker(description: String): Boolean =
     Regex("""^\[transfer:\d+]$""").matches(description.trim())

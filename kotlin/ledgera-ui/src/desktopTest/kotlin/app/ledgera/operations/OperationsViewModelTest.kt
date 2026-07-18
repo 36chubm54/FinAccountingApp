@@ -79,7 +79,7 @@ class OperationsViewModelTest {
             )
         )
 
-        assertEquals("Date must use a valid YYYY-MM-DD value", viewModel.state.value.error)
+        assertEquals("Date must use a valid DD.MM.YYYY value", viewModel.state.value.error)
         assertEquals(0, adapter.createCalls)
     }
 
@@ -847,7 +847,7 @@ class OperationsViewModelTest {
         viewModel.updateDraft(viewModel.state.value.editDraft!!.copy(date = "2026-13-01"))
         viewModel.updateSelected()
 
-        assertEquals("Date must use a valid YYYY-MM-DD value", viewModel.state.value.error)
+        assertEquals("Date must use a valid DD.MM.YYYY value", viewModel.state.value.error)
         assertEquals(0, adapter.updateCalls)
     }
 

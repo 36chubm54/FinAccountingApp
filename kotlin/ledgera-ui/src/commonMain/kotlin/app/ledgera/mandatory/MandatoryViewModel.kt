@@ -11,6 +11,7 @@ import app.ledgera.model.MandatoryTemplateItem
 import app.ledgera.model.UpdateMandatoryTemplateRequest
 import app.ledgera.model.WalletOption
 import app.ledgera.operations.ImportFileSnapshotProvider
+import app.ledgera.validation.DateValidation
 import app.ledgera.validation.currentLedgerDate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -156,7 +157,7 @@ class MandatoryViewModel(
                             category = draft.category.trim(),
                             description = draft.description.trim(),
                             period = draft.period.trim().lowercase(),
-                            date = draft.date.trim(),
+                            date = draft.date.toStorageDate(),
                         )
                     )
                 } else {
@@ -166,7 +167,7 @@ class MandatoryViewModel(
                             walletId = draft.walletId,
                             amountBase = draft.amountBase.trim(),
                             period = draft.period.trim().lowercase(),
-                            date = draft.date.trim(),
+                            date = draft.date.toStorageDate(),
                         )
                     )
                 }
@@ -231,7 +232,7 @@ class MandatoryViewModel(
                 val record = engine.addMandatoryToRecords(
                     AddMandatoryToRecordsRequest(
                         templateId = draft.templateId,
-                        date = draft.date.trim(),
+                        date = draft.date.toStorageDate(),
                         walletId = draft.walletId,
                     )
                 )
@@ -559,6 +560,9 @@ class MandatoryViewModel(
 
     private fun todayText(): String =
         currentLedgerDate().let { "%04d-%02d-%02d".format(it.year, it.month, it.day) }
+
+    private fun String.toStorageDate(): String =
+        DateValidation.formatGuiDateToYmd(this) ?: trim()
 }
 
 private enum class MandatoryFileFormat {

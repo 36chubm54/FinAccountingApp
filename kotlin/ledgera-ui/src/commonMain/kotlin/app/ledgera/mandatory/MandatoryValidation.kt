@@ -36,7 +36,7 @@ object MandatoryValidation {
         if (draft.templateId <= 0) return "Mandatory template is required"
         if (draft.walletId <= 0) return "Wallet is required"
         if (draft.date.trim().isEmpty()) return "Date is required"
-        DateValidation.validateYmdNotFuture(draft.date.trim())?.let { return it }
+        DateValidation.validateDmyNotFuture(draft.date.trim())?.let { return it }
         return null
     }
 
@@ -49,8 +49,8 @@ object MandatoryValidation {
     private fun validateOptionalDate(value: String): String? {
         val normalized = value.trim()
         if (normalized.isEmpty()) return null
-        return if (DateValidation.parseYmd(normalized) == null) {
-            "Date must use a valid YYYY-MM-DD value"
+        return if (DateValidation.validateOptionalDmy(normalized) != null) {
+            "Date must use a valid DD.MM.YYYY value"
         } else {
             null
         }

@@ -8,6 +8,7 @@ import app.ledgera.model.DebtItem
 import app.ledgera.model.DebtPaymentItem
 import app.ledgera.model.RegisterDebtPaymentRequest
 import app.ledgera.model.WalletOption
+import app.ledgera.validation.DateValidation
 import app.ledgera.validation.currentLedgerDate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -158,7 +159,7 @@ class DebtsViewModel(
                         walletId = draft.walletId,
                         amount = draft.amount.trim(),
                         currency = draft.currency.trim().uppercase(),
-                        createdAt = draft.createdAt.trim(),
+                        createdAt = draft.createdAt.toStorageDate(),
                         description = draft.description.trim(),
                     )
                 )
@@ -230,7 +231,7 @@ class DebtsViewModel(
                     debtId = draft.debtId,
                     walletId = if (requiresWallet) draft.walletId else null,
                     amount = draft.amount.trim(),
-                    paymentDate = draft.paymentDate.trim(),
+                    paymentDate = draft.paymentDate.toStorageDate(),
                     description = draft.description.trim(),
                 )
                 val notice = when (draft.action) {
@@ -385,6 +386,9 @@ class DebtsViewModel(
         val today = currentLedgerDate()
         return "${today.year.toString().padStart(4, '0')}-${today.month.toString().padStart(2, '0')}-${today.day.toString().padStart(2, '0')}"
     }
+
+    private fun String.toStorageDate(): String =
+        DateValidation.formatGuiDateToYmd(this) ?: trim()
 
     private fun selectedDebt(state: DebtsUiState): DebtItem? =
         state.debts.firstOrNull { it.id == state.selectedDebtId }
