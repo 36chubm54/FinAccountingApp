@@ -22,7 +22,7 @@ object DateValidation {
     }
 
     fun validateDmyNotFuture(value: String, today: LedgerDate = currentLedgerDate()): String? {
-        val parsed = parseGuiDate(value) ?: return "Date must use a valid DD.MM.YYYY value"
+        val parsed = parseDmyStrict(value.trim()) ?: return "Date must use a valid DD.MM.YYYY value"
         return if (parsed > today) "Date cannot be in the future" else null
     }
 
@@ -31,7 +31,7 @@ object DateValidation {
         if (normalized.isEmpty()) {
             return null
         }
-        return if (parseGuiDate(normalized) == null) {
+        return if (parseDmyStrict(normalized) == null) {
             "Date must use a valid DD.MM.YYYY value"
         } else {
             null

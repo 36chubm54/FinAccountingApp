@@ -42,6 +42,7 @@ import app.ledgera.model.MandatoryTemplateDraft
 import app.ledgera.model.MandatoryTemplateItem
 import app.ledgera.model.WalletOption
 import app.ledgera.ui.LedgerDateField
+import app.ledgera.validation.DateValidation
 
 interface MandatoryFileActions {
     fun openImportPath(): String?
@@ -354,7 +355,7 @@ private fun MandatoryTemplateDialog(
                     if (draft.date.isBlank()) {
                         "Auto-pay disabled"
                     } else {
-                        "Auto-pay enabled from ${draft.date}"
+                        "Auto-pay enabled from ${formatDateForInputHint(draft.date)}"
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -537,6 +538,9 @@ private fun ImportMandatoryPreviewDialog(
         },
     )
 }
+
+private fun formatDateForInputHint(value: String): String =
+    DateValidation.formatYmdToDmy(value).ifBlank { value }
 
 @Composable
 private fun WalletChips(

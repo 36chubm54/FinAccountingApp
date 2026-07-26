@@ -45,7 +45,7 @@ class OperationsViewModelTest {
         viewModel.create(
             CreateOperationRequest(
                 type = "income",
-                date = "2026-01-01",
+                date = "01.01.2026",
                 walletId = 1,
                 amountOriginal = "10",
                 currency = "KZT",
@@ -68,7 +68,7 @@ class OperationsViewModelTest {
         viewModel.create(
             CreateOperationRequest(
                 type = "income",
-                date = "2026-13-32",
+                date = "32.13.2026",
                 walletId = 1,
                 amountOriginal = "10",
                 currency = "KZT",
@@ -91,7 +91,7 @@ class OperationsViewModelTest {
         viewModel.create(
             CreateOperationRequest(
                 type = "income",
-                date = "2999-01-01",
+                date = "01.01.2999",
                 walletId = 1,
                 amountOriginal = "10",
                 currency = "KZT",
@@ -114,7 +114,7 @@ class OperationsViewModelTest {
         viewModel.create(
             CreateOperationRequest(
                 type = "income",
-                date = "2026-01-01",
+                date = "01.01.2026",
                 walletId = 1,
                 amountOriginal = "10",
                 currency = "K1T",
@@ -137,7 +137,7 @@ class OperationsViewModelTest {
         viewModel.create(
             CreateOperationRequest(
                 type = "income",
-                date = "2026-01-01",
+                date = "01.01.2026",
                 walletId = 1,
                 amountOriginal = "ten",
                 currency = "KZT",
@@ -160,7 +160,7 @@ class OperationsViewModelTest {
         viewModel.create(
             CreateOperationRequest(
                 type = "income",
-                date = "2026-01-01",
+                date = "01.01.2026",
                 walletId = 1,
                 amountOriginal = "0.004",
                 currency = "KZT",
@@ -183,7 +183,7 @@ class OperationsViewModelTest {
         viewModel.create(
             CreateOperationRequest(
                 type = "income",
-                date = "2026-01-01",
+                date = "01.01.2026",
                 walletId = 1,
                 amountOriginal = "10",
                 currency = "AAA",
@@ -206,7 +206,7 @@ class OperationsViewModelTest {
         viewModel.create(
             CreateOperationRequest(
                 type = "income",
-                date = "2026-01-01",
+                date = "01.01.2026",
                 walletId = 1,
                 amountOriginal = "10",
                 currency = "USD",
@@ -232,7 +232,7 @@ class OperationsViewModelTest {
         viewModel.create(
             CreateOperationRequest(
                 type = "income",
-                date = "2026-01-01",
+                date = "01.01.2026",
                 walletId = 1,
                 amountOriginal = "10",
                 currency = "KZT",
@@ -259,7 +259,7 @@ class OperationsViewModelTest {
         viewModel.create(
             CreateOperationRequest(
                 type = "income",
-                date = "2026-01-01",
+                date = "01.01.2026",
                 walletId = 1,
                 amountOriginal = "10",
                 currency = "KZT",
@@ -271,6 +271,7 @@ class OperationsViewModelTest {
         )
 
         assertEquals(1, adapter.createCalls)
+        assertEquals("2026-01-01", adapter.lastCreateRequest?.date)
         assertEquals("Operation added", viewModel.state.value.notice)
     }
 
@@ -554,7 +555,7 @@ class OperationsViewModelTest {
         viewModel.create(
             CreateOperationRequest(
                 type = "income",
-                date = "2026-01-01",
+                date = "01.01.2026",
                 walletId = 1,
                 amountOriginal = "10",
                 currency = "KZT",
@@ -625,6 +626,7 @@ class OperationsViewModelTest {
         viewModel.createTransfer(validTransferRequest())
 
         assertEquals(1, adapter.createTransferCalls)
+        assertEquals("2026-01-01", adapter.lastCreateTransferRequest?.date)
         assertEquals("Transfer created (id=42): Cash -> Card, 10 KZT", viewModel.state.value.notice)
         assertEquals(
             listOf("90.00", "10.00"),
@@ -844,7 +846,7 @@ class OperationsViewModelTest {
 
         viewModel.refresh()
         viewModel.select(1)
-        viewModel.updateDraft(viewModel.state.value.editDraft!!.copy(date = "2026-13-01"))
+        viewModel.updateDraft(viewModel.state.value.editDraft!!.copy(date = "01.13.2026"))
         viewModel.updateSelected()
 
         assertEquals("Date must use a valid DD.MM.YYYY value", viewModel.state.value.error)
@@ -860,7 +862,7 @@ class OperationsViewModelTest {
 
         viewModel.refresh()
         viewModel.select(1)
-        viewModel.updateDraft(viewModel.state.value.editDraft!!.copy(date = "2999-01-01"))
+        viewModel.updateDraft(viewModel.state.value.editDraft!!.copy(date = "01.01.2999"))
         viewModel.updateSelected()
 
         assertEquals("Date cannot be in the future", viewModel.state.value.error)
@@ -1027,6 +1029,8 @@ private class FakeEngineAdapter(
     var refreshCalls = 0
     var lastDeletedRecordIds: List<Long> = emptyList()
     var lastDeletedTransferIds: List<Long> = emptyList()
+    var lastCreateRequest: CreateOperationRequest? = null
+    var lastCreateTransferRequest: CreateTransferRequest? = null
 
     override suspend fun status() = EngineStatus(true, "test.db", "ready")
 
@@ -1043,6 +1047,7 @@ private class FakeEngineAdapter(
     override suspend fun createRecord(request: CreateOperationRequest): OperationRecord {
         createError?.let { throw it }
         createCalls += 1
+        lastCreateRequest = request
         val record = OperationRecord(
             id = (records.maxOfOrNull { it.id } ?: 0) + 1,
             type = request.type,
@@ -1091,6 +1096,7 @@ private class FakeEngineAdapter(
     override suspend fun createTransfer(request: CreateTransferRequest): CreateTransferResult {
         transferError?.let { throw it }
         createTransferCalls += 1
+        lastCreateTransferRequest = request
         val transferId = 42L
         val amount = request.amount.toDouble()
         replaceWalletBalance(request.fromWalletId) { balance -> balance - amount }
@@ -1420,7 +1426,7 @@ private class MutableSnapshotProvider(var snapshot: String?) : ImportFileSnapsho
 private fun validTransferRequest(
     fromWalletId: Long = 1,
     toWalletId: Long = 2,
-    date: String = "2026-01-01",
+    date: String = "01.01.2026",
     amount: String = "10",
     currency: String = "KZT",
     commissionAmount: String = "0",

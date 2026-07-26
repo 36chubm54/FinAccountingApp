@@ -61,12 +61,7 @@ fun LedgerDateField(
         onValueChange = { raw ->
             val nextText = DateValidation.sanitizeDmyInput(raw)
             text = nextText
-            onValueChange(
-                when {
-                    nextText.isBlank() -> ""
-                    else -> DateValidation.formatDmyToYmd(nextText) ?: nextText
-                },
-            )
+            onValueChange(nextText)
         },
         label = { Text(label) },
         singleLine = true,
@@ -106,7 +101,7 @@ fun LedgerDateField(
                             ?.let(DateValidation::fromEpochMillisUtc)
                             ?: selectedDate
                         text = DateValidation.formatDmy(picked)
-                        onValueChange(DateValidation.formatYmd(picked))
+                        onValueChange(DateValidation.formatDmy(picked))
                         pickerOpen = false
                     },
                 ) {

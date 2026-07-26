@@ -204,7 +204,7 @@ class MandatoryViewModel(
             addToRecordsDraft = MandatoryAddToRecordsDraft(
                 templateId = templateId,
                 walletId = state.wallets.firstOrNull()?.id ?: 0,
-                date = todayText(),
+                date = todayDisplayText(),
             ),
             error = null,
             notice = null,
@@ -262,7 +262,7 @@ class MandatoryViewModel(
 
     private fun applyAutoPayments(showWhenEmpty: Boolean) {
         val state = mutableState.value
-        val today = todayText()
+        val today = todayStorageText()
         mutableState.value = state.copy(
             inProgress = true,
             editDraft = null,
@@ -555,14 +555,20 @@ class MandatoryViewModel(
             category = category,
             description = description,
             period = period,
-            date = date,
+            date = date.toDisplayDate(),
         )
 
-    private fun todayText(): String =
+    private fun todayDisplayText(): String =
+        currentLedgerDate().let { "%02d.%02d.%04d".format(it.day, it.month, it.year) }
+
+    private fun todayStorageText(): String =
         currentLedgerDate().let { "%04d-%02d-%02d".format(it.year, it.month, it.day) }
 
     private fun String.toStorageDate(): String =
         DateValidation.formatGuiDateToYmd(this) ?: trim()
+
+    private fun String.toDisplayDate(): String =
+        DateValidation.formatYmdToDmy(this).ifBlank { trim() }
 }
 
 private enum class MandatoryFileFormat {

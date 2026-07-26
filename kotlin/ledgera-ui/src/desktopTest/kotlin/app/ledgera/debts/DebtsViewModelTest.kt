@@ -66,12 +66,13 @@ class DebtsViewModelTest {
             viewModel.state.value.createDraft!!.copy(
                 contactName = "Bob",
                 amount = "25.00",
-                createdAt = "2026-03-01",
+                createdAt = "01.03.2026",
             )
         )
         viewModel.createDebt()
 
         assertEquals(1, engine.createCalls)
+        assertEquals("2026-03-01", engine.lastCreateRequest?.createdAt)
         assertNull(viewModel.state.value.createDraft)
         assertEquals("Loan created (id=1)", viewModel.state.value.notice)
         assertEquals(listOf("Bob"), viewModel.state.value.debts.map { it.contactName })
@@ -88,7 +89,7 @@ class DebtsViewModelTest {
             viewModel.state.value.createDraft!!.copy(
                 contactName = "Alice",
                 amount = "25.00",
-                createdAt = "2026-03-01",
+                createdAt = "01.03.2026",
             )
         )
         viewModel.createDebt()
@@ -120,11 +121,12 @@ class DebtsViewModelTest {
         viewModel.refresh()
         viewModel.openDebtAction("payment")
         viewModel.updateActionDraft(
-            viewModel.state.value.actionDraft!!.copy(amount = "10.00", paymentDate = "2026-03-05")
+            viewModel.state.value.actionDraft!!.copy(amount = "10.00", paymentDate = "05.03.2026")
         )
         viewModel.submitDebtAction()
 
         assertEquals(1, engine.paymentCalls)
+        assertEquals("2026-03-05", engine.lastPaymentRequest?.paymentDate)
         assertNull(viewModel.state.value.actionDraft)
         assertEquals("Payment registered (id=1)", viewModel.state.value.notice)
         assertEquals(listOf(1L), viewModel.state.value.selectedHistory.map { it.id })
@@ -138,7 +140,7 @@ class DebtsViewModelTest {
         viewModel.refresh()
         viewModel.openDebtAction("write_off")
         viewModel.updateActionDraft(
-            viewModel.state.value.actionDraft!!.copy(amount = "10.00", paymentDate = "2026-03-05")
+            viewModel.state.value.actionDraft!!.copy(amount = "10.00", paymentDate = "05.03.2026")
         )
         viewModel.submitDebtAction()
 
@@ -154,9 +156,11 @@ class DebtsViewModelTest {
 
         viewModel.refresh()
         viewModel.openDebtAction("close")
+        viewModel.updateActionDraft(viewModel.state.value.actionDraft!!.copy(paymentDate = "05.03.2026"))
         viewModel.submitDebtAction()
 
         assertEquals(1, engine.closeCalls)
+        assertEquals("2026-03-05", engine.lastCloseRequest?.paymentDate)
         assertNull(viewModel.state.value.actionDraft)
         assertEquals("Debt closed (id=1)", viewModel.state.value.notice)
         assertEquals("closed", viewModel.state.value.debts.single().status)
@@ -256,6 +260,9 @@ private class FakeDebtsEngine(
     var deleteDebtCalls = 0
     var deletePaymentCalls = 0
     var lastDeleteLinkedRecord: Boolean? = null
+    var lastCreateRequest: CreateDebtRequest? = null
+    var lastPaymentRequest: RegisterDebtPaymentRequest? = null
+    var lastCloseRequest: RegisterDebtPaymentRequest? = null
 
     override suspend fun baseCurrency(): String = "KZT"
 
@@ -270,6 +277,7 @@ private class FakeDebtsEngine(
     override suspend fun createDebt(request: CreateDebtRequest): DebtItem {
         createError?.let { throw it }
         createCalls += 1
+        lastCreateRequest = request
         val debt = debtItem(
             id = (mutableDebts.maxOfOrNull { it.id } ?: 0) + 1,
             contactName = request.contactName,
@@ -285,6 +293,7 @@ private class FakeDebtsEngine(
     override suspend fun registerDebtPayment(request: RegisterDebtPaymentRequest): DebtPaymentItem {
         actionError?.let { throw it }
         paymentCalls += 1
+        lastPaymentRequest = request
         val payment = paymentItem(id = nextPaymentId(request.debtId), debtId = request.debtId)
         mutableHistory.getOrPut(request.debtId) { mutableListOf() } += payment
         return payment
@@ -306,6 +315,7 @@ private class FakeDebtsEngine(
     override suspend fun closeDebt(request: RegisterDebtPaymentRequest): DebtItem {
         actionError?.let { throw it }
         closeCalls += 1
+        lastCloseRequest = request
         val index = mutableDebts.indexOfFirst { it.id == request.debtId }
         val closed = mutableDebts[index].copy(status = "closed", remainingAmount = "0.00", closedAt = request.paymentDate)
         mutableDebts[index] = closed

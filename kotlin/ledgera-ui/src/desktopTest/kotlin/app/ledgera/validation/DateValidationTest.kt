@@ -71,5 +71,13 @@ class DateValidationTest {
             "Date must use a valid DD.MM.YYYY value",
             DateValidation.validateDmyNotFuture("06/06/2026", today),
         )
+        assertEquals(
+            "Date must use a valid DD.MM.YYYY value",
+            DateValidation.validateDmyNotFuture("2026-06-06", today),
+        )
+        assertEquals(
+            "Date must use a valid DD.MM.YYYY value",
+            DateValidation.validateOptionalDmy("2026-06-06"),
+        )
     }
 }

@@ -79,12 +79,13 @@ class MandatoryViewModelTest {
                 amountOriginal = "25",
                 amountBase = "25",
                 description = "Internet",
-                date = "2099-01-01",
+                date = "01.01.2099",
             )
         )
         viewModel.saveTemplate()
 
         assertEquals(1, engine.createCalls)
+        assertEquals("2099-01-01", engine.lastCreateRequest?.date)
         assertNull(viewModel.state.value.error)
         assertEquals("2099-01-01", viewModel.state.value.templates.single().date)
     }
@@ -112,10 +113,11 @@ class MandatoryViewModelTest {
 
         viewModel.refresh()
         viewModel.selectTemplate(1)
-        viewModel.updateDraft(viewModel.state.value.editDraft!!.copy(date = "2099-01-01"))
+        viewModel.updateDraft(viewModel.state.value.editDraft!!.copy(date = "01.01.2099"))
         viewModel.saveTemplate()
 
         assertEquals(1, engine.updateCalls)
+        assertEquals("2099-01-01", engine.lastUpdateRequest?.date)
         assertNull(viewModel.state.value.error)
         assertEquals("2099-01-01", viewModel.state.value.templates.first().date)
     }
@@ -127,9 +129,11 @@ class MandatoryViewModelTest {
 
         viewModel.refresh()
         viewModel.openAddToRecordsDialog()
+        viewModel.updateAddToRecordsDraft(viewModel.state.value.addToRecordsDraft!!.copy(date = "05.03.2026"))
         viewModel.addToRecords()
 
         assertEquals(1, engine.addToRecordsCalls)
+        assertEquals("2026-03-05", engine.lastAddToRecordsRequest?.date)
         assertNull(viewModel.state.value.addToRecordsDraft)
         assertEquals("Mandatory record added (id=7)", viewModel.state.value.notice)
     }
@@ -141,7 +145,7 @@ class MandatoryViewModelTest {
 
         viewModel.refresh()
         viewModel.openAddToRecordsDialog()
-        viewModel.updateAddToRecordsDraft(viewModel.state.value.addToRecordsDraft!!.copy(date = "2099-01-01"))
+        viewModel.updateAddToRecordsDraft(viewModel.state.value.addToRecordsDraft!!.copy(date = "01.01.2099"))
         viewModel.addToRecords()
 
         assertEquals(0, engine.addToRecordsCalls)
@@ -356,6 +360,9 @@ private class FakeMandatoryEngine(
     var importXlsxCalls = 0
     var exportCsvCalls = 0
     var exportXlsxCalls = 0
+    var lastCreateRequest: CreateMandatoryTemplateRequest? = null
+    var lastUpdateRequest: UpdateMandatoryTemplateRequest? = null
+    var lastAddToRecordsRequest: AddMandatoryToRecordsRequest? = null
 
     override suspend fun baseCurrency(): String = "KZT"
 
@@ -370,6 +377,7 @@ private class FakeMandatoryEngine(
     override suspend fun createMandatoryTemplate(request: CreateMandatoryTemplateRequest): MandatoryTemplateItem {
         createCalls += 1
         createError?.let { throw it }
+        lastCreateRequest = request
         val template = mandatoryTemplate(
             id = (templates.maxOfOrNull { it.id } ?: 0) + 1,
             walletId = request.walletId,
@@ -389,6 +397,7 @@ private class FakeMandatoryEngine(
         request: UpdateMandatoryTemplateRequest,
     ): MandatoryTemplateItem {
         updateCalls += 1
+        lastUpdateRequest = request
         val updated = templates.first { it.id == templateId }.copy(
             walletId = request.walletId,
             amountBase = request.amountBase,
@@ -415,6 +424,7 @@ private class FakeMandatoryEngine(
 
     override suspend fun addMandatoryToRecords(request: AddMandatoryToRecordsRequest): OperationRecord {
         addToRecordsCalls += 1
+        lastAddToRecordsRequest = request
         return operationRecord(id = 7, date = request.date, walletId = request.walletId)
     }
 

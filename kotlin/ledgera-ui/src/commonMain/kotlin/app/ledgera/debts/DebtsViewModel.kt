@@ -128,7 +128,7 @@ class DebtsViewModel(
                 kind = kind,
                 walletId = state.wallets.firstOrNull()?.id ?: 0,
                 currency = state.baseCurrency,
-                createdAt = todayText(),
+                createdAt = todayDisplayText(),
             ),
             error = null,
             notice = null,
@@ -202,7 +202,7 @@ class DebtsViewModel(
                 debtId = debt.id,
                 walletId = state.wallets.firstOrNull()?.id ?: 0,
                 amount = if (action == "close") debt.remainingAmount else "",
-                paymentDate = todayText(),
+                paymentDate = todayDisplayText(),
             ),
             error = null,
             notice = null,
@@ -382,9 +382,9 @@ class DebtsViewModel(
         scope.launch { block() }
     }
 
-    private fun todayText(): String {
+    private fun todayDisplayText(): String {
         val today = currentLedgerDate()
-        return "${today.year.toString().padStart(4, '0')}-${today.month.toString().padStart(2, '0')}-${today.day.toString().padStart(2, '0')}"
+        return "${today.day.toString().padStart(2, '0')}.${today.month.toString().padStart(2, '0')}.${today.year.toString().padStart(4, '0')}"
     }
 
     private fun String.toStorageDate(): String =

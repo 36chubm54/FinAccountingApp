@@ -457,7 +457,7 @@ private fun CreateTransferDialog(
 ) {
     var fromWalletId by remember { mutableStateOf(wallets.firstOrNull()?.id ?: 0L) }
     var toWalletId by remember { mutableStateOf(wallets.drop(1).firstOrNull()?.id ?: 0L) }
-    var date by remember { mutableStateOf("2026-01-01") }
+    var date by remember { mutableStateOf(todayText()) }
     var amount by remember { mutableStateOf("") }
     var currency by remember { mutableStateOf(baseCurrency) }
     var commissionAmount by remember { mutableStateOf("0") }
@@ -710,7 +710,7 @@ private fun CreateOperationDialog(
 
 private fun todayText(): String {
     val today = currentLedgerDate()
-    return "${today.year.toString().padStart(4, '0')}-${today.month.toString().padStart(2, '0')}-${today.day.toString().padStart(2, '0')}"
+    return "${today.day.toString().padStart(2, '0')}.${today.month.toString().padStart(2, '0')}.${today.year.toString().padStart(4, '0')}"
 }
 
 @Composable

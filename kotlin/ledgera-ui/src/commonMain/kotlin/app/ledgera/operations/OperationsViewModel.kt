@@ -749,7 +749,7 @@ class OperationsViewModel(
         OperationDraft(
             id = id,
             type = type,
-            date = date,
+            date = date.toDisplayDate(),
             walletId = walletId,
             amountOriginal = amountOriginal,
             currency = currency,
@@ -765,7 +765,7 @@ class OperationsViewModel(
             id = id,
             fromWalletId = fromWalletId,
             toWalletId = toWalletId,
-            date = date,
+            date = date.toDisplayDate(),
             amount = amountOriginal,
             currency = currency,
             description = description,
@@ -822,6 +822,9 @@ private fun OperationFilter.normalizedForStorage(): OperationFilter =
 
 private fun String.toStorageDate(): String =
     DateValidation.formatGuiDateToYmd(this) ?: trim()
+
+private fun String.toDisplayDate(): String =
+    DateValidation.formatYmdToDmy(this).ifBlank { trim() }
 
 private fun isTransferCommissionMarker(description: String): Boolean =
     Regex("""^\[transfer:\d+]$""").matches(description.trim())
