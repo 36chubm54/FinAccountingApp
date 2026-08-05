@@ -10,15 +10,15 @@ use ledgera_engine_storage::{
     debt_close_validated, debt_create, debt_delete, debt_delete_payment, debt_payment_rows,
     debt_register_payment_validated, debt_register_write_off_validated, debt_rows,
     delete_all_operations, delete_operations_selection, delete_standalone_record, delete_transfer,
-    delete_wallet, distinct_record_categories, export_mandatory_csv, export_mandatory_xlsx,
-    export_records_csv, export_records_xlsx, filtered_record_list_rows, import_mandatory_csv,
-    import_mandatory_xlsx, import_records_csv, import_records_xlsx, mandatory_add_to_records,
-    mandatory_apply_auto_payments, mandatory_expense_row, mandatory_expense_rows,
-    mandatory_template_create, mandatory_template_delete, mandatory_template_delete_all,
-    mandatory_template_update, preview_import_mandatory_csv, preview_import_mandatory_xlsx,
-    preview_import_records_csv, preview_import_records_xlsx, standalone_record_get_row, tag_names,
-    transfer_get_row, update_standalone_record, update_transfer, wallet_balance_row,
-    wallet_balance_rows, wallet_list_rows,
+    delete_wallet, distinct_record_categories, distinct_record_descriptions, export_mandatory_csv,
+    export_mandatory_xlsx, export_records_csv, export_records_xlsx, filtered_record_list_rows,
+    import_mandatory_csv, import_mandatory_xlsx, import_records_csv, import_records_xlsx,
+    mandatory_add_to_records, mandatory_apply_auto_payments, mandatory_expense_row,
+    mandatory_expense_rows, mandatory_template_create, mandatory_template_delete,
+    mandatory_template_delete_all, mandatory_template_update, preview_import_mandatory_csv,
+    preview_import_mandatory_xlsx, preview_import_records_csv, preview_import_records_xlsx,
+    standalone_record_get_row, tag_names, transfer_get_row, update_standalone_record,
+    update_transfer, wallet_balance_row, wallet_balance_rows, wallet_list_rows,
 };
 use std::fmt;
 use std::path::Path;
@@ -546,6 +546,13 @@ impl LedgeraEngine {
 
     pub fn list_categories(&self, record_type: String) -> Result<Vec<String>, LedgeraEngineError> {
         distinct_record_categories(&self.db_path, &record_type).map_err(storage_error)
+    }
+
+    pub fn list_record_descriptions(
+        &self,
+        record_type: Option<String>,
+    ) -> Result<Vec<String>, LedgeraEngineError> {
+        distinct_record_descriptions(&self.db_path, record_type.as_deref()).map_err(storage_error)
     }
 
     pub fn list_wallets(&self) -> Result<Vec<WalletDto>, LedgeraEngineError> {
@@ -1430,6 +1437,21 @@ mod tests {
         assert_eq!(
             engine.list_categories("income".to_owned()).unwrap(),
             vec!["Bonus"]
+        );
+        assert_eq!(
+            engine.list_record_descriptions(None).unwrap(),
+            vec!["Updated"]
+        );
+        assert_eq!(
+            engine
+                .list_record_descriptions(Some("income".to_owned()))
+                .unwrap(),
+            vec!["Updated"]
+        );
+        assert!(
+            engine
+                .list_record_descriptions(Some("transfer".to_owned()))
+                .is_err()
         );
 
         assert!(engine.delete_record(created.id).unwrap());

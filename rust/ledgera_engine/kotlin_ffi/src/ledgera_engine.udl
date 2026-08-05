@@ -299,6 +299,8 @@ interface LedgeraEngine {
     [Throws=LedgeraEngineError]
     sequence<string> list_categories(string record_type);
     [Throws=LedgeraEngineError]
+    sequence<string> list_record_descriptions(string? record_type);
+    [Throws=LedgeraEngineError]
     sequence<WalletDto> list_wallets();
     [Throws=LedgeraEngineError]
     WalletDto create_wallet(CreateWalletRequest request);

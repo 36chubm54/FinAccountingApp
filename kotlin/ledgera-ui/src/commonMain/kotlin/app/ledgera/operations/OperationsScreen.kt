@@ -45,7 +45,9 @@ import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.TransferDraft
 import app.ledgera.model.WalletOption
+import app.ledgera.ui.AutocompleteTextField
 import app.ledgera.ui.LedgerDateField
+import app.ledgera.ui.TagAutocompleteField
 import app.ledgera.validation.currentLedgerDate
 
 interface OperationsFileActions {
@@ -178,6 +180,11 @@ fun OperationsScreen(
         CreateOperationDialog(
             wallets = state.wallets,
             baseCurrency = state.baseCurrency,
+            incomeCategorySuggestions = state.incomeCategories,
+            expenseCategorySuggestions = state.expenseCategories,
+            incomeDescriptionSuggestions = state.incomeDescriptionSuggestions,
+            expenseDescriptionSuggestions = state.expenseDescriptionSuggestions,
+            tagSuggestions = state.tags,
             engineError = state.error,
             submitting = state.loading,
             onSubmit = { request ->
@@ -190,6 +197,7 @@ fun OperationsScreen(
         CreateTransferDialog(
             wallets = state.wallets,
             baseCurrency = state.baseCurrency,
+            descriptionSuggestions = state.descriptionSuggestions,
             engineError = state.error,
             submitting = state.loading,
             onSubmit = viewModel::createTransfer,
@@ -201,6 +209,11 @@ fun OperationsScreen(
             draft = draft,
             wallets = state.wallets,
             baseCurrency = state.baseCurrency,
+            incomeCategorySuggestions = state.incomeCategories,
+            expenseCategorySuggestions = state.expenseCategories,
+            incomeDescriptionSuggestions = state.incomeDescriptionSuggestions,
+            expenseDescriptionSuggestions = state.expenseDescriptionSuggestions,
+            tagSuggestions = state.tags,
             onDraftChanged = viewModel::updateDraft,
             onSave = viewModel::updateSelected,
             onCancel = {
@@ -215,6 +228,7 @@ fun OperationsScreen(
             draft = draft,
             wallets = state.wallets,
             baseCurrency = state.baseCurrency,
+            descriptionSuggestions = state.descriptionSuggestions,
             engineError = state.error,
             submitting = state.loading,
             onDraftChanged = viewModel::updateTransferDraft,
@@ -450,6 +464,7 @@ private fun OperationFilters(
 private fun CreateTransferDialog(
     wallets: List<WalletOption>,
     baseCurrency: String,
+    descriptionSuggestions: List<String>,
     engineError: String?,
     submitting: Boolean,
     onSubmit: (CreateTransferRequest) -> Unit,
@@ -551,12 +566,13 @@ private fun CreateTransferDialog(
                     label = { Text("Commission currency") },
                     singleLine = true,
                 )
-                OutlinedTextField(
+                AutocompleteTextField(
                     modifier = dialogFieldModifier(),
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Description") },
-                    singleLine = true,
+                    label = "Description",
+                    suggestions = descriptionSuggestions,
+                    menuWidth = DialogContentWidth,
                 )
                 (validationError ?: engineError)?.let {
                     Text(it, color = MaterialTheme.colorScheme.error)
@@ -614,6 +630,11 @@ private fun WalletChips(
 private fun CreateOperationDialog(
     wallets: List<WalletOption>,
     baseCurrency: String,
+    incomeCategorySuggestions: List<String>,
+    expenseCategorySuggestions: List<String>,
+    incomeDescriptionSuggestions: List<String>,
+    expenseDescriptionSuggestions: List<String>,
+    tagSuggestions: List<String>,
     engineError: String?,
     submitting: Boolean,
     onSubmit: (CreateOperationRequest) -> Unit,
@@ -662,6 +683,13 @@ private fun CreateOperationDialog(
                 tags = tags,
                 walletId = walletId,
                 currency = currency,
+                categorySuggestions = if (type == "income") incomeCategorySuggestions else expenseCategorySuggestions,
+                descriptionSuggestions = if (type == "income") {
+                    incomeDescriptionSuggestions
+                } else {
+                    expenseDescriptionSuggestions
+                },
+                tagSuggestions = tagSuggestions,
                 validationError = validationError,
                 engineError = engineError,
                 onTypeChanged = { type = it },
@@ -724,6 +752,9 @@ private fun CreateOperationForm(
     tags: String,
     walletId: Long,
     currency: String,
+    categorySuggestions: List<String>,
+    descriptionSuggestions: List<String>,
+    tagSuggestions: List<String>,
     validationError: String?,
     engineError: String?,
     onTypeChanged: (String) -> Unit,
@@ -784,26 +815,28 @@ private fun CreateOperationForm(
             label = { Text("Currency") },
             singleLine = true,
         )
-        OutlinedTextField(
+        AutocompleteTextField(
             modifier = dialogFieldModifier(),
             value = category,
             onValueChange = onCategoryChanged,
-            label = { Text("Category") },
-            singleLine = true,
+            label = "Category",
+            suggestions = categorySuggestions,
+            menuWidth = DialogContentWidth,
         )
-        OutlinedTextField(
+        AutocompleteTextField(
             modifier = dialogFieldModifier(),
             value = description,
             onValueChange = onDescriptionChanged,
-            label = { Text("Description") },
-            singleLine = true,
+            label = "Description",
+            suggestions = descriptionSuggestions,
+            menuWidth = DialogContentWidth,
         )
-        OutlinedTextField(
+        TagAutocompleteField(
             modifier = dialogFieldModifier(),
             value = tags,
             onValueChange = onTagsChanged,
-            label = { Text("Tags, comma-separated") },
-            singleLine = true,
+            suggestions = tagSuggestions,
+            menuWidth = DialogContentWidth,
         )
         (validationError ?: engineError)?.let {
             Text(it, color = MaterialTheme.colorScheme.error)
@@ -816,6 +849,11 @@ private fun EditOperationDialog(
     draft: OperationDraft,
     wallets: List<WalletOption>,
     baseCurrency: String,
+    incomeCategorySuggestions: List<String>,
+    expenseCategorySuggestions: List<String>,
+    incomeDescriptionSuggestions: List<String>,
+    expenseDescriptionSuggestions: List<String>,
+    tagSuggestions: List<String>,
     onDraftChanged: (OperationDraft) -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit,
@@ -843,6 +881,17 @@ private fun EditOperationDialog(
                 EditOperationFields(
                     draft = draft,
                     wallets = wallets,
+                    categorySuggestions = if (draft.type == "income") {
+                        incomeCategorySuggestions
+                    } else {
+                        expenseCategorySuggestions
+                    },
+                    descriptionSuggestions = if (draft.type == "income") {
+                        incomeDescriptionSuggestions
+                    } else {
+                        expenseDescriptionSuggestions
+                    },
+                    tagSuggestions = tagSuggestions,
                     onDraftChanged = onDraftChanged,
                 )
                 validationError?.let {
@@ -866,6 +915,9 @@ private fun EditOperationDialog(
 private fun EditOperationFields(
     draft: OperationDraft,
     wallets: List<WalletOption>,
+    categorySuggestions: List<String>,
+    descriptionSuggestions: List<String>,
+    tagSuggestions: List<String>,
     onDraftChanged: (OperationDraft) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -908,26 +960,28 @@ private fun EditOperationFields(
             label = { Text("Currency") },
             singleLine = true,
         )
-        OutlinedTextField(
+        AutocompleteTextField(
             modifier = dialogFieldModifier(),
             value = draft.category,
             onValueChange = { onDraftChanged(draft.copy(category = it)) },
-            label = { Text("Category") },
-            singleLine = true,
+            label = "Category",
+            suggestions = categorySuggestions,
+            menuWidth = DialogContentWidth,
         )
-        OutlinedTextField(
+        AutocompleteTextField(
             modifier = dialogFieldModifier(),
             value = draft.description,
             onValueChange = { onDraftChanged(draft.copy(description = it)) },
-            label = { Text("Description") },
-            singleLine = true,
+            label = "Description",
+            suggestions = descriptionSuggestions,
+            menuWidth = DialogContentWidth,
         )
-        OutlinedTextField(
+        TagAutocompleteField(
             modifier = dialogFieldModifier(),
             value = draft.tagsText,
             onValueChange = { onDraftChanged(draft.copy(tagsText = it)) },
-            label = { Text("Tags, comma-separated") },
-            singleLine = true,
+            suggestions = tagSuggestions,
+            menuWidth = DialogContentWidth,
         )
     }
 }
@@ -937,6 +991,7 @@ private fun EditTransferDialog(
     draft: TransferDraft,
     wallets: List<WalletOption>,
     baseCurrency: String,
+    descriptionSuggestions: List<String>,
     engineError: String?,
     submitting: Boolean,
     onDraftChanged: (TransferDraft) -> Unit,
@@ -999,12 +1054,13 @@ private fun EditTransferDialog(
                     label = { Text("Currency") },
                     singleLine = true,
                 )
-                OutlinedTextField(
+                AutocompleteTextField(
                     modifier = dialogFieldModifier(),
                     value = draft.description,
                     onValueChange = { onDraftChanged(draft.copy(description = it)) },
-                    label = { Text("Description") },
-                    singleLine = true,
+                    label = "Description",
+                    suggestions = descriptionSuggestions,
+                    menuWidth = DialogContentWidth,
                 )
                 Text(
                     "Transfer commission is edited as a standalone operation and deleted with the transfer.",

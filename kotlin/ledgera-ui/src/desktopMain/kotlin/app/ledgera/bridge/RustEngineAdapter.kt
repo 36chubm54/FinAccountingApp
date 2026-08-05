@@ -224,6 +224,10 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
         engine.listCategories(recordType)
     }
 
+    override suspend fun listRecordDescriptions(recordType: String?): List<String> = withContext(Dispatchers.IO) {
+        engine.listRecordDescriptions(recordType)
+    }
+
     override suspend fun listWallets(): List<WalletOption> = withContext(Dispatchers.IO) {
         engine.listWallets().filter { it.isActive }.map {
             WalletOption(id = it.id, name = it.name, currency = it.currency)

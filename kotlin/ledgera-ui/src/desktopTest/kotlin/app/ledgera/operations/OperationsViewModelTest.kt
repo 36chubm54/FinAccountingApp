@@ -983,6 +983,17 @@ class OperationsViewModelTest {
 
         assertEquals("update failed", viewModel.state.value.error)
     }
+
+    @Test
+    fun refreshLoadsAutocompleteSuggestions() {
+        val viewModel = OperationsViewModel(FakeEngineAdapter(), CoroutineScope(Dispatchers.Unconfined))
+
+        viewModel.refresh()
+
+        assertEquals(listOf("home"), viewModel.state.value.tags)
+        assertEquals(listOf("Food"), viewModel.state.value.categories)
+        assertEquals(listOf("Lunch", "Salary"), viewModel.state.value.descriptionSuggestions)
+    }
 }
 
 private class FakeEngineAdapter(
@@ -1277,6 +1288,8 @@ private class FakeEngineAdapter(
     override suspend fun listTags(): List<String> = listOf("home")
 
     override suspend fun listCategories(recordType: String): List<String> = listOf("Food")
+
+    override suspend fun listRecordDescriptions(recordType: String?): List<String> = listOf("Lunch", "Salary")
 
     override suspend fun listWallets(): List<WalletOption> = emptyList()
 

@@ -55,6 +55,7 @@ interface OperationsEngine {
     suspend fun exportRecordsXlsx(path: String): OperationExportResult
     suspend fun listTags(): List<String>
     suspend fun listCategories(recordType: String): List<String>
+    suspend fun listRecordDescriptions(recordType: String? = null): List<String>
     suspend fun listWallets(): List<WalletOption>
     suspend fun walletBalances(): List<WalletOption>
 }

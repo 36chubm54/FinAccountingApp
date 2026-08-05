@@ -4014,6 +4014,56 @@ pub fn distinct_record_categories(db_path: &str, record_type: &str) -> StorageRe
     rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_err)
 }
 
+pub fn distinct_record_descriptions(
+    db_path: &str,
+    record_type: Option<&str>,
+) -> StorageResult<Vec<String>> {
+    let conn = open_sqlite_connection(db_path)?;
+    let normalized_type = record_type
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_lowercase);
+    if let Some(record_type) = normalized_type.as_deref() {
+        if record_type != "income" && record_type != "expense" {
+            return Err("record_type must be income or expense".to_owned());
+        }
+    }
+
+    let sql = if normalized_type.is_some() {
+        "SELECT DISTINCT TRIM(description) AS description
+         FROM records
+         WHERE type = ?1
+           AND transfer_id IS NULL
+           AND related_debt_id IS NULL
+           AND TRIM(description) <> ''
+           AND TRIM(description) NOT GLOB '[[]transfer:[0-9]*]'
+         ORDER BY description COLLATE NOCASE, description
+         LIMIT 200"
+    } else {
+        "SELECT DISTINCT TRIM(description) AS description
+         FROM records
+         WHERE type IN ('income', 'expense')
+           AND transfer_id IS NULL
+           AND related_debt_id IS NULL
+           AND TRIM(description) <> ''
+           AND TRIM(description) NOT GLOB '[[]transfer:[0-9]*]'
+         ORDER BY description COLLATE NOCASE, description
+         LIMIT 200"
+    };
+
+    let mut stmt = conn.prepare(sql).map_err(sqlite_err)?;
+    let rows = if let Some(record_type) = normalized_type.as_deref() {
+        stmt.query_map([record_type], |row| row.get::<_, String>(0))
+            .map_err(sqlite_err)?
+            .collect::<Result<Vec<_>, _>>()
+    } else {
+        stmt.query_map([], |row| row.get::<_, String>(0))
+            .map_err(sqlite_err)?
+            .collect::<Result<Vec<_>, _>>()
+    };
+    rows.map_err(sqlite_err)
+}
+
 fn ensure_standalone_record_exists_in_tx(
     tx: &rusqlite::Transaction<'_>,
     record_id: i64,
@@ -7172,6 +7222,50 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
             distinct_record_categories(&db_path, "expense").unwrap(),
             vec!["Dining".to_owned()]
         );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn distinct_record_descriptions_excludes_linked_rows_and_markers() {
+        let db_path = create_balance_test_db();
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute(
+            "UPDATE records SET description = '' WHERE transfer_id IS NULL",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE records SET description = 'Transfer mirror' WHERE id = 4",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO records
+                (id, type, date, wallet_id, amount_original, amount_original_minor, currency,
+                 rate_at_operation, rate_at_operation_text, amount_base, amount_base_minor,
+                 category, description)
+             VALUES
+                (100, 'income', '2026-02-01', 1, 10, 1000, 'KZT', 1, '1', 10, 1000, 'Salary', 'Payroll'),
+                (101, 'expense', '2026-02-02', 1, 5, 500, 'KZT', 1, '1', 5, 500, 'Food', 'Lunch'),
+                (102, 'expense', '2026-02-03', 1, 1, 100, 'KZT', 1, '1', 1, 100, 'Transfer', '[transfer:42]')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        assert_eq!(
+            distinct_record_descriptions(&db_path, None).unwrap(),
+            vec!["Lunch".to_owned(), "Payroll".to_owned()]
+        );
+        assert_eq!(
+            distinct_record_descriptions(&db_path, Some("income")).unwrap(),
+            vec!["Payroll".to_owned()]
+        );
+        assert_eq!(
+            distinct_record_descriptions(&db_path, Some("expense")).unwrap(),
+            vec!["Lunch".to_owned()]
+        );
+        assert!(distinct_record_descriptions(&db_path, Some("transfer")).is_err());
         remove_test_db(&db_path);
     }
 

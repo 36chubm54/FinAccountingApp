@@ -28,6 +28,11 @@ data class OperationsUiState(
     val baseCurrency: String = "KZT",
     val tags: List<String> = emptyList(),
     val categories: List<String> = emptyList(),
+    val descriptionSuggestions: List<String> = emptyList(),
+    val incomeCategories: List<String> = emptyList(),
+    val expenseCategories: List<String> = emptyList(),
+    val incomeDescriptionSuggestions: List<String> = emptyList(),
+    val expenseDescriptionSuggestions: List<String> = emptyList(),
     val filter: OperationFilter = OperationFilter(),
     val selectedRecordId: Long? = null,
     val selectiveDeleteMode: Boolean = false,
@@ -83,7 +88,16 @@ class OperationsViewModel(
                 val baseCurrency = engine.baseCurrency()
                 val records = engine.listRecords(engineFilter)
                 val tags = engine.listTags()
-                val categories = engine.listCategories(engineFilter.recordType ?: "expense")
+                val incomeCategories = engine.listCategories("income")
+                val expenseCategories = engine.listCategories("expense")
+                val descriptionSuggestions = engine.listRecordDescriptions(null)
+                val incomeDescriptionSuggestions = engine.listRecordDescriptions("income")
+                val expenseDescriptionSuggestions = engine.listRecordDescriptions("expense")
+                val categories = when (engineFilter.recordType) {
+                    "income" -> incomeCategories
+                    "expense" -> expenseCategories
+                    else -> (incomeCategories + expenseCategories).distinct()
+                }
                 mutableState.value = OperationsUiState(
                     loading = false,
                     records = records,
@@ -91,6 +105,11 @@ class OperationsViewModel(
                     baseCurrency = baseCurrency,
                     tags = tags,
                     categories = categories,
+                    descriptionSuggestions = descriptionSuggestions,
+                    incomeCategories = incomeCategories,
+                    expenseCategories = expenseCategories,
+                    incomeDescriptionSuggestions = incomeDescriptionSuggestions,
+                    expenseDescriptionSuggestions = expenseDescriptionSuggestions,
                     filter = filter,
                     selectedRecordId = mutableState.value.selectedRecordId?.takeIf { selectedId ->
                         records.any { it.id == selectedId }
