@@ -1,6 +1,8 @@
 package app.ledgera.operations
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,6 +38,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.ledgera.model.CreateOperationRequest
@@ -146,6 +151,7 @@ fun OperationsScreen(
                         selectedRecordId = state.selectedRecordId,
                         selectedBulkRecordIds = state.selectedBulkRecordIds,
                         selectedBulkTransferIds = state.selectedBulkTransferIds,
+                        tagColors = state.tagColors,
                     )
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
@@ -185,6 +191,8 @@ fun OperationsScreen(
             incomeDescriptionSuggestions = state.incomeDescriptionSuggestions,
             expenseDescriptionSuggestions = state.expenseDescriptionSuggestions,
             tagSuggestions = state.tags,
+            tagColors = state.tagColors,
+            tagPalette = state.tagPalette,
             engineError = state.error,
             submitting = state.loading,
             onSubmit = { request ->
@@ -214,6 +222,8 @@ fun OperationsScreen(
             incomeDescriptionSuggestions = state.incomeDescriptionSuggestions,
             expenseDescriptionSuggestions = state.expenseDescriptionSuggestions,
             tagSuggestions = state.tags,
+            tagColors = state.tagColors,
+            tagPalette = state.tagPalette,
             onDraftChanged = viewModel::updateDraft,
             onSave = viewModel::updateSelected,
             onCancel = {
@@ -636,6 +646,8 @@ private fun CreateOperationDialog(
     incomeDescriptionSuggestions: List<String>,
     expenseDescriptionSuggestions: List<String>,
     tagSuggestions: List<String>,
+    tagColors: Map<String, String>,
+    tagPalette: List<String>,
     engineError: String?,
     submitting: Boolean,
     onSubmit: (CreateOperationRequest) -> Unit,
@@ -647,6 +659,7 @@ private fun CreateOperationDialog(
     var category by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var tags by remember { mutableStateOf("") }
+    var selectedTagColors by remember { mutableStateOf(tagColors) }
     var walletId by remember { mutableStateOf(wallets.firstOrNull()?.id ?: 0L) }
     var currency by remember { mutableStateOf(baseCurrency) }
 
@@ -691,6 +704,8 @@ private fun CreateOperationDialog(
                     expenseDescriptionSuggestions
                 },
                 tagSuggestions = tagSuggestions,
+                tagColors = selectedTagColors,
+                tagPalette = tagPalette,
                 validationError = validationError,
                 engineError = engineError,
                 onTypeChanged = { type = it },
@@ -699,6 +714,9 @@ private fun CreateOperationDialog(
                 onCategoryChanged = { category = it },
                 onDescriptionChanged = { description = it },
                 onTagsChanged = { tags = it },
+                onTagColorChanged = { name, color ->
+                    selectedTagColors = selectedTagColors + (name.lowercase() to color)
+                },
                 onWalletChanged = { wallet ->
                     walletId = wallet.id
                     if (currency.isBlank()) {
@@ -723,6 +741,7 @@ private fun CreateOperationDialog(
                             category = category,
                             description = description,
                             tags = OperationValidation.parseTags(tags),
+                            tagColors = selectedTagColors,
                         )
                     )
                 },
@@ -756,6 +775,8 @@ private fun CreateOperationForm(
     categorySuggestions: List<String>,
     descriptionSuggestions: List<String>,
     tagSuggestions: List<String>,
+    tagColors: Map<String, String>,
+    tagPalette: List<String>,
     validationError: String?,
     engineError: String?,
     onTypeChanged: (String) -> Unit,
@@ -764,6 +785,7 @@ private fun CreateOperationForm(
     onCategoryChanged: (String) -> Unit,
     onDescriptionChanged: (String) -> Unit,
     onTagsChanged: (String) -> Unit,
+    onTagColorChanged: (String, String) -> Unit,
     onWalletChanged: (WalletOption) -> Unit,
     onCurrencyChanged: (String) -> Unit,
 ) {
@@ -839,6 +861,9 @@ private fun CreateOperationForm(
             onValueChange = onTagsChanged,
             suggestions = tagSuggestions,
             menuWidth = DialogContentWidth,
+            tagColors = tagColors,
+            palette = tagPalette,
+            onTagColorChanged = onTagColorChanged,
         )
         (validationError ?: engineError)?.let {
             Text(it, color = MaterialTheme.colorScheme.error)
@@ -856,6 +881,8 @@ private fun EditOperationDialog(
     incomeDescriptionSuggestions: List<String>,
     expenseDescriptionSuggestions: List<String>,
     tagSuggestions: List<String>,
+    tagColors: Map<String, String>,
+    tagPalette: List<String>,
     onDraftChanged: (OperationDraft) -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit,
@@ -894,6 +921,8 @@ private fun EditOperationDialog(
                         expenseDescriptionSuggestions
                     },
                     tagSuggestions = tagSuggestions,
+                    tagColors = draft.tagColors.ifEmpty { tagColors },
+                    tagPalette = tagPalette,
                     onDraftChanged = onDraftChanged,
                 )
                 validationError?.let {
@@ -920,6 +949,8 @@ private fun EditOperationFields(
     categorySuggestions: List<String>,
     descriptionSuggestions: List<String>,
     tagSuggestions: List<String>,
+    tagColors: Map<String, String>,
+    tagPalette: List<String>,
     onDraftChanged: (OperationDraft) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -985,6 +1016,11 @@ private fun EditOperationFields(
             onValueChange = { onDraftChanged(draft.copy(tagsText = it)) },
             suggestions = tagSuggestions,
             menuWidth = DialogContentWidth,
+            tagColors = tagColors,
+            palette = tagPalette,
+            onTagColorChanged = { name, color ->
+                onDraftChanged(draft.copy(tagColors = draft.tagColors + (name.lowercase() to color)))
+            },
         )
     }
 }
@@ -1286,9 +1322,42 @@ private fun OperationRow(
                     Text(item.description)
                 }
                 if (item.tags.isNotEmpty()) {
-                    Text(item.tags.joinToString(" ") { "#$it" }, color = MaterialTheme.colorScheme.secondary)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(top = 2.dp),
+                    ) {
+                        item.tags.forEach { tag ->
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(percent = 50))
+                                    .background(
+                                        item.tagColors[tag.lowercase()]
+                                            ?.toTagChipColor()
+                                            ?: MaterialTheme.colorScheme.outline,
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                            ) {
+                                Text(
+                                    "#$tag",
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
     }
+}
+
+private fun String.toTagChipColor(): Color? {
+    if (length != 7 || first() != '#') return null
+    return runCatching {
+        Color(
+            red = substring(1, 3).toInt(16) / 255f,
+            green = substring(3, 5).toInt(16) / 255f,
+            blue = substring(5, 7).toInt(16) / 255f,
+        )
+    }.getOrNull()
 }

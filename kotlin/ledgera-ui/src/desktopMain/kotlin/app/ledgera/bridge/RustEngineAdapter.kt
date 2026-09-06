@@ -16,6 +16,7 @@ import app.ledgera.engine.RegisterDebtPaymentRequest as NativeRegisterDebtPaymen
 import app.ledgera.engine.UpdateMandatoryTemplateRequest as NativeUpdateMandatoryTemplateRequest
 import app.ledgera.engine.UpdateRecordRequest as NativeUpdateRecordRequest
 import app.ledgera.engine.UpdateTransferRequest as NativeUpdateTransferRequest
+import app.ledgera.engine.TagColorAssignment as NativeTagColorAssignment
 import app.ledgera.model.AddMandatoryToRecordsRequest
 import app.ledgera.model.AuditFinding
 import app.ledgera.model.CreateDebtRequest
@@ -33,6 +34,7 @@ import app.ledgera.model.OperationExportResult
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
 import app.ledgera.model.OperationSuggestions
+import app.ledgera.model.TagColor
 import app.ledgera.model.MandatoryAutoPayResult
 import app.ledgera.model.MandatoryExportResult
 import app.ledgera.model.MandatoryImportResult
@@ -98,6 +100,27 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
             ).let(::toOperationRecord)
         }
 
+    override suspend fun createRecordWithTagColors(request: CreateOperationRequest): OperationRecord =
+        withContext(Dispatchers.IO) {
+            engine.createRecordWithTagColors(
+                NativeCreateRecordRequest(
+                    recordType = request.type,
+                    date = request.date,
+                    walletId = request.walletId,
+                    amountOriginal = request.amountOriginal,
+                    currency = request.currency,
+                    rateAtOperation = request.rateAtOperation,
+                    amountBase = request.amountBase,
+                    category = request.category,
+                    description = request.description,
+                    tags = request.tags,
+                ),
+                request.tagColors.map { (name, color) ->
+                    NativeTagColorAssignment(name = name, color = color)
+                },
+            ).let(::toOperationRecord)
+        }
+
     override suspend fun updateRecord(recordId: Long, request: UpdateOperationRequest): OperationRecord =
         withContext(Dispatchers.IO) {
             engine.updateRecord(
@@ -116,6 +139,30 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
                 )
             ).let(::toOperationRecord)
         }
+
+    override suspend fun updateRecordWithTagColors(
+        recordId: Long,
+        request: UpdateOperationRequest,
+    ): OperationRecord = withContext(Dispatchers.IO) {
+        engine.updateRecordWithTagColors(
+            recordId,
+            NativeUpdateRecordRequest(
+                recordType = request.type,
+                date = request.date,
+                walletId = request.walletId,
+                amountOriginal = request.amountOriginal,
+                currency = request.currency,
+                rateAtOperation = request.rateAtOperation,
+                amountBase = request.amountBase,
+                category = request.category,
+                description = request.description,
+                tags = request.tags,
+            ),
+            request.tagColors.map { (name, color) ->
+                NativeTagColorAssignment(name = name, color = color)
+            },
+        ).let(::toOperationRecord)
+    }
 
     override suspend fun deleteRecord(recordId: Long): Boolean = withContext(Dispatchers.IO) {
         engine.deleteRecord(recordId)
@@ -240,6 +287,14 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
                 expenseDescriptions = it.expenseDescriptions,
             )
         }
+    }
+
+    override suspend fun listTagColors(): List<TagColor> = withContext(Dispatchers.IO) {
+        engine.listTagColors().map { TagColor(name = it.name, color = it.color) }
+    }
+
+    override suspend fun tagColorPalette(): List<String> = withContext(Dispatchers.IO) {
+        engine.tagColorPalette()
     }
 
     override suspend fun listWallets(): List<WalletOption> = withContext(Dispatchers.IO) {

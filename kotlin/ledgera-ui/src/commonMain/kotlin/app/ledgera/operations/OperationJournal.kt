@@ -9,6 +9,7 @@ internal data class OperationJournalItem(
     val meta: String,
     val description: String,
     val tags: List<String>,
+    val tagColors: Map<String, String> = emptyMap(),
     val selectableRecordId: Long?,
     val transferId: Long?,
     val linkedLabel: String?,
@@ -21,13 +22,14 @@ internal fun operationJournalItems(
     selectedRecordId: Long?,
     selectedBulkRecordIds: Set<Long> = emptySet(),
     selectedBulkTransferIds: Set<Long> = emptySet(),
+    tagColors: Map<String, String> = emptyMap(),
 ): List<OperationJournalItem> {
     val consumedTransferIds = mutableSetOf<Long>()
     val result = mutableListOf<OperationJournalItem>()
     records.forEach { record ->
         val transferId = record.transferId
         if (transferId == null) {
-            result += standaloneJournalItem(record, selectedRecordId, selectedBulkRecordIds)
+            result += standaloneJournalItem(record, selectedRecordId, selectedBulkRecordIds, tagColors)
             return@forEach
         }
         if (!consumedTransferIds.add(transferId)) {
@@ -46,6 +48,7 @@ private fun standaloneJournalItem(
     record: OperationRecord,
     selectedRecordId: Long?,
     selectedBulkRecordIds: Set<Long>,
+    tagColors: Map<String, String>,
 ): OperationJournalItem {
     val bulkSelectable =
         (record.type == "income" || record.type == "expense" || record.type == "mandatory_expense") &&
@@ -62,6 +65,7 @@ private fun standaloneJournalItem(
         meta = "${record.date} · ${record.type} · wallet #${record.walletId}",
         description = record.description,
         tags = record.tags,
+        tagColors = tagColors,
         selectableRecordId = record.id,
         transferId = null,
         linkedLabel = if (record.relatedDebtId != null) "Debt-linked" else null,

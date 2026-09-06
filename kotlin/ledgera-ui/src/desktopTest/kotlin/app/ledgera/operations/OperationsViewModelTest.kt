@@ -18,6 +18,7 @@ import app.ledgera.model.OperationExportResult
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
 import app.ledgera.model.OperationSuggestions
+import app.ledgera.model.TagColor
 import app.ledgera.model.MandatoryAutoPayResult
 import app.ledgera.model.MandatoryExportResult
 import app.ledgera.model.MandatoryImportResult
@@ -1115,6 +1116,14 @@ private class FakeEngineAdapter(
         return updated
     }
 
+    override suspend fun createRecordWithTagColors(request: CreateOperationRequest): OperationRecord =
+        createRecord(request)
+
+    override suspend fun updateRecordWithTagColors(
+        recordId: Long,
+        request: UpdateOperationRequest,
+    ): OperationRecord = updateRecord(recordId, request)
+
     override suspend fun deleteRecord(recordId: Long): Boolean {
         deleteCalls += 1
         return records.removeIf { it.id == recordId }
@@ -1318,6 +1327,10 @@ private class FakeEngineAdapter(
             expenseDescriptions = listOf("Lunch"),
         )
     }
+
+    override suspend fun listTagColors(): List<TagColor> = listOf(TagColor("home", "#fc5c66"))
+
+    override suspend fun tagColorPalette(): List<String> = listOf("#fc5c66", "#ea3b5a")
 
     override suspend fun listWallets(): List<WalletOption> = emptyList()
 

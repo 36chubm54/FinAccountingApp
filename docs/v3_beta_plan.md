@@ -46,6 +46,9 @@ Current status:
   Transfer list parity,
   `.xls`/JSON/current-rate import, and commission editing remain later
   Operations slices.
+- Operations create/edit dialogs now use the fixed 32-color tag palette plus
+  `no color`; tag colors are persisted in SQLite and manual reassignment is
+  validated by Rust/Kotlin UniFFI without changing migration headers.
 - Settings wallet listing and active base-currency wallet creation are wired,
   which unlocks manual transfer-creator smoke testing on copied ledger DBs.
 - Debts wiring is moving in phased slices: Kotlin Desktop can list debts/loans,

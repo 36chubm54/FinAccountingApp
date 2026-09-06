@@ -47,6 +47,20 @@ class OperationJournalTest {
         assertEquals(4, items.single().selectableRecordId)
         assertEquals(true, items.single().bulkSelectable)
     }
+
+    @Test
+    fun standaloneRowsKeepTagColorAssignmentsForJournalRendering() {
+        val rows = listOf(operationRecord(id = 5, tags = listOf("food", "new")))
+
+        val items = operationJournalItems(
+            rows,
+            selectedRecordId = null,
+            tagColors = mapOf("food" to "#fc5c66"),
+        )
+
+        assertEquals("#fc5c66", items.single().tagColors["food"])
+        assertEquals(null, items.single().tagColors["new"])
+    }
 }
 
 private fun operationRecord(
@@ -56,6 +70,7 @@ private fun operationRecord(
     category: String = "Transfer",
     transferId: Long? = null,
     relatedDebtId: Long? = null,
+    tags: List<String> = emptyList(),
 ) = OperationRecord(
     id = id,
     type = type,
@@ -69,5 +84,5 @@ private fun operationRecord(
     amountBase = "10.00",
     category = category,
     description = "",
-    tags = emptyList(),
+    tags = tags,
 )

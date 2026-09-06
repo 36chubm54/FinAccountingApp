@@ -17,6 +17,7 @@ import app.ledgera.model.OperationExportResult
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
 import app.ledgera.model.OperationSuggestions
+import app.ledgera.model.TagColor
 import app.ledgera.model.MandatoryAutoPayResult
 import app.ledgera.model.MandatoryExportResult
 import app.ledgera.model.MandatoryImportResult
@@ -40,7 +41,9 @@ interface OperationsEngine {
     suspend fun listRecords(filter: OperationFilter): List<OperationRecord>
     suspend fun getRecord(recordId: Long): OperationRecord?
     suspend fun createRecord(request: CreateOperationRequest): OperationRecord
+    suspend fun createRecordWithTagColors(request: CreateOperationRequest): OperationRecord
     suspend fun updateRecord(recordId: Long, request: UpdateOperationRequest): OperationRecord
+    suspend fun updateRecordWithTagColors(recordId: Long, request: UpdateOperationRequest): OperationRecord
     suspend fun deleteRecord(recordId: Long): Boolean
     suspend fun createTransfer(request: CreateTransferRequest): CreateTransferResult
     suspend fun getTransfer(transferId: Long): TransferDetails?
@@ -58,6 +61,8 @@ interface OperationsEngine {
     suspend fun listCategories(recordType: String): List<String>
     suspend fun listRecordDescriptions(recordType: String? = null): List<String>
     suspend fun operationSuggestions(): OperationSuggestions
+    suspend fun listTagColors(): List<TagColor>
+    suspend fun tagColorPalette(): List<String>
     suspend fun listWallets(): List<WalletOption>
     suspend fun walletBalances(): List<WalletOption>
 }

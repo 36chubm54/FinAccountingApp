@@ -1,5 +1,6 @@
 mod csv;
 mod excel;
+mod tag_palette;
 
 use calamine::{Data, Reader, open_workbook_auto};
 use csv::{normalize_tabular_key, read_csv_rows, write_csv_rows};
@@ -14,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+pub use tag_palette::{NO_COLOR, TAG_PALETTE, is_valid_tag_color};
 #[cfg(windows)]
 use windows_sys::Win32::Storage::FileSystem::{
     MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
@@ -164,6 +166,18 @@ pub struct RecordFilterPayload {
     pub end_date: Option<String>,
     pub wallet_id: Option<i64>,
     pub record_type: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagColorAssignment {
+    pub name: String,
+    pub color: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagColorRow {
+    pub name: String,
+    pub color: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1562,7 +1576,7 @@ fn import_operation_plan(
             }
             ParsedOperationCsvRow::Record(record) => {
                 let record_id = insert_import_record_in_tx(&tx, record, &record.description)?;
-                replace_record_tags_in_tx(&tx, record_id, &record.tags)?;
+                replace_record_tags_in_tx(&tx, record_id, &record.tags, &[])?;
                 imported_records.push((record_id, record.description.clone()));
                 if let Some(debt_id) = record.related_debt_id
                     && let Some(source_record_id) = record.source_record_id
@@ -3747,10 +3761,19 @@ pub fn create_standalone_record(
     db_path: &str,
     payload: &StandaloneRecordCreatePayload,
 ) -> StorageResult<RecordRow> {
+    create_standalone_record_with_tag_colors(db_path, payload, &[])
+}
+
+pub fn create_standalone_record_with_tag_colors(
+    db_path: &str,
+    payload: &StandaloneRecordCreatePayload,
+    tag_colors: &[TagColorAssignment],
+) -> StorageResult<RecordRow> {
     let mut conn = open_sqlite_connection(db_path)?;
     conn.pragma_update(None, "foreign_keys", "ON")
         .map_err(sqlite_err)?;
     let tx = conn.transaction().map_err(sqlite_err)?;
+    normalize_tag_colors_in_tx(&tx)?;
 
     let record_type = payload.record_type.trim().to_lowercase();
     if record_type != "income" && record_type != "expense" {
@@ -3844,7 +3867,7 @@ pub fn create_standalone_record(
         return Err("Failed to insert record".to_owned());
     }
     let record_id = tx.last_insert_rowid();
-    replace_record_tags_in_tx(&tx, record_id, &payload.tags)?;
+    replace_record_tags_in_tx(&tx, record_id, &payload.tags, tag_colors)?;
     let record_id_map = normalize_record_ids_in_tx(&tx)?;
     let normalized_record_id = record_id_map.get(&record_id).copied().unwrap_or(record_id);
     tx.commit().map_err(sqlite_err)?;
@@ -3858,10 +3881,20 @@ pub fn update_standalone_record(
     record_id: i64,
     payload: &StandaloneRecordUpdatePayload,
 ) -> StorageResult<RecordRow> {
+    update_standalone_record_with_tag_colors(db_path, record_id, payload, &[])
+}
+
+pub fn update_standalone_record_with_tag_colors(
+    db_path: &str,
+    record_id: i64,
+    payload: &StandaloneRecordUpdatePayload,
+    tag_colors: &[TagColorAssignment],
+) -> StorageResult<RecordRow> {
     let mut conn = open_sqlite_connection(db_path)?;
     conn.pragma_update(None, "foreign_keys", "ON")
         .map_err(sqlite_err)?;
     let tx = conn.transaction().map_err(sqlite_err)?;
+    normalize_tag_colors_in_tx(&tx)?;
     ensure_standalone_record_exists_in_tx(&tx, record_id)?;
     if let Some(marker) = transfer_commission_marker_in_tx(&tx, record_id)? {
         validate_transfer_commission_update(&marker, payload)?;
@@ -3956,7 +3989,7 @@ pub fn update_standalone_record(
     if updated != 1 {
         return Err(format!("Record not found: {record_id}"));
     }
-    replace_record_tags_in_tx(&tx, record_id, &payload.tags)?;
+    replace_record_tags_in_tx(&tx, record_id, &payload.tags, tag_colors)?;
     tx.commit().map_err(sqlite_err)?;
     storage_clear_read_connection_cache();
     record_get_row(db_path, record_id)?.ok_or_else(|| format!("Record not found: {record_id}"))
@@ -3991,6 +4024,43 @@ pub fn tag_names(db_path: &str) -> StorageResult<Vec<String>> {
         .query_map([], |row| row.get::<_, String>(0))
         .map_err(sqlite_err)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_err)
+}
+
+pub fn tag_color_rows(db_path: &str) -> StorageResult<Vec<TagColorRow>> {
+    normalize_tag_colors(db_path)?;
+    let conn = open_sqlite_connection(db_path)?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT name, COALESCE(color, '')
+             FROM tags
+             ORDER BY usage_count DESC, name COLLATE NOCASE, name",
+        )
+        .map_err(sqlite_err)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(TagColorRow {
+                name: row.get(0)?,
+                color: row.get(1)?,
+            })
+        })
+        .map_err(sqlite_err)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_err)
+}
+
+pub fn tag_color_palette() -> Vec<String> {
+    TAG_PALETTE
+        .iter()
+        .map(|color| (*color).to_owned())
+        .collect()
+}
+
+pub fn normalize_tag_colors(db_path: &str) -> StorageResult<()> {
+    let mut conn = open_sqlite_connection(db_path)?;
+    let tx = conn.transaction().map_err(sqlite_err)?;
+    normalize_tag_colors_in_tx(&tx)?;
+    tx.commit().map_err(sqlite_err)?;
+    storage_clear_read_connection_cache();
+    Ok(())
 }
 
 pub fn distinct_record_categories(db_path: &str, record_type: &str) -> StorageResult<Vec<String>> {
@@ -5718,11 +5788,12 @@ fn replace_record_tags_in_tx(
     tx: &rusqlite::Transaction<'_>,
     record_id: i64,
     tags: &[String],
+    tag_colors: &[TagColorAssignment],
 ) -> StorageResult<()> {
     tx.execute("DELETE FROM record_tags WHERE record_id = ?1", [record_id])
         .map_err(sqlite_err)?;
     for tag_name in normalize_tag_names(tags) {
-        let tag_id = ensure_tag_id_in_tx(tx, &tag_name)?;
+        let tag_id = ensure_tag_id_in_tx(tx, &tag_name, tag_colors)?;
         tx.execute(
             "INSERT OR IGNORE INTO record_tags (record_id, tag_id) VALUES (?1, ?2)",
             (record_id, tag_id),
@@ -5734,7 +5805,11 @@ fn replace_record_tags_in_tx(
     Ok(())
 }
 
-fn ensure_tag_id_in_tx(tx: &rusqlite::Transaction<'_>, name: &str) -> StorageResult<i64> {
+fn ensure_tag_id_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    name: &str,
+    tag_colors: &[TagColorAssignment],
+) -> StorageResult<i64> {
     let normalized = normalize_tag_name(name);
     if normalized.is_empty() {
         return Err("Tag name must not be empty".to_owned());
@@ -5755,15 +5830,155 @@ fn ensure_tag_id_in_tx(tx: &rusqlite::Transaction<'_>, name: &str) -> StorageRes
             )
             .map_err(sqlite_err)?;
         }
+        let requested_color = requested_tag_color(tag_colors, &normalized)?;
+        if let Some(color) = requested_color {
+            validate_tag_color_assignment(tx, &normalized, &color)?;
+            tx.execute(
+                "UPDATE tags SET color = ?1 WHERE id = ?2",
+                (color.as_str(), tag_id),
+            )
+            .map_err(sqlite_err)?;
+        } else {
+            let color = ensure_existing_tag_color_in_tx(tx, tag_id)?;
+            if color.is_empty() {
+                let color = first_free_tag_color_in_tx(tx)?;
+                tx.execute(
+                    "UPDATE tags SET color = ?1 WHERE id = ?2",
+                    (color.as_str(), tag_id),
+                )
+                .map_err(sqlite_err)?;
+            }
+        }
         return Ok(tag_id);
     }
 
+    let color = match requested_tag_color(tag_colors, &normalized)? {
+        Some(color) => color,
+        None => first_free_tag_color_in_tx(tx)?,
+    };
+    validate_tag_color_assignment(tx, &normalized, &color)?;
     tx.execute(
         "INSERT INTO tags (name, color, usage_count, last_used_at) VALUES (?1, ?2, 0, '')",
-        (normalized.as_str(), tag_color(&normalized).as_str()),
+        (normalized.as_str(), color.as_str()),
     )
     .map_err(sqlite_err)?;
     Ok(tx.last_insert_rowid())
+}
+
+fn requested_tag_color(
+    assignments: &[TagColorAssignment],
+    name: &str,
+) -> StorageResult<Option<String>> {
+    let matches: Vec<&TagColorAssignment> = assignments
+        .iter()
+        .filter(|assignment| normalize_tag_name(&assignment.name) == name)
+        .collect();
+    if matches.len() > 1 {
+        return Err(format!("Duplicate color assignment for tag: {name}"));
+    }
+    matches
+        .first()
+        .map(|assignment| {
+            let color = assignment.color.trim().to_lowercase();
+            if !is_valid_tag_color(&color) {
+                return Err(format!("Unsupported tag color: {}", assignment.color));
+            }
+            Ok(color)
+        })
+        .transpose()
+}
+
+fn ensure_existing_tag_color_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    tag_id: i64,
+) -> StorageResult<String> {
+    tx.query_row(
+        "SELECT COALESCE(color, '') FROM tags WHERE id = ?1",
+        [tag_id],
+        |row| row.get::<_, String>(0),
+    )
+    .map_err(sqlite_err)
+}
+
+fn first_free_tag_color_in_tx(tx: &rusqlite::Transaction<'_>) -> StorageResult<String> {
+    let mut statement = tx
+        .prepare("SELECT color FROM tags WHERE color IS NOT NULL AND color <> ''")
+        .map_err(sqlite_err)?;
+    let used: HashSet<String> = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(sqlite_err)?
+        .collect::<Result<HashSet<_>, _>>()
+        .map_err(sqlite_err)?;
+    Ok(TAG_PALETTE
+        .iter()
+        .find(|color| !used.contains(**color))
+        .unwrap_or(&NO_COLOR)
+        .to_string())
+}
+
+fn validate_tag_color_assignment(
+    tx: &rusqlite::Transaction<'_>,
+    name: &str,
+    color: &str,
+) -> StorageResult<()> {
+    if !is_valid_tag_color(color) {
+        return Err(format!("Unsupported tag color: {color}"));
+    }
+    if color.is_empty() {
+        return Ok(());
+    }
+    let conflict = tx
+        .query_row(
+            "SELECT name FROM tags WHERE lower(color) = lower(?1) AND lower(name) <> lower(?2) LIMIT 1",
+            (color, name),
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(sqlite_err)?;
+    if let Some(conflict) = conflict {
+        return Err(format!(
+            "Tag color {color} is already assigned to {conflict}"
+        ));
+    }
+    Ok(())
+}
+
+fn normalize_tag_colors_in_tx(tx: &rusqlite::Transaction<'_>) -> StorageResult<()> {
+    let mut statement = tx
+        .prepare("SELECT id, color FROM tags ORDER BY id")
+        .map_err(sqlite_err)?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(sqlite_err)?;
+    let rows = rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_err)?;
+    drop(statement);
+
+    let mut used = HashSet::new();
+    for (tag_id, stored_color) in rows {
+        let normalized = stored_color.trim().to_lowercase();
+        let keep = is_valid_tag_color(&normalized)
+            && (normalized.is_empty() || used.insert(normalized.clone()));
+        let color = if keep {
+            normalized
+        } else {
+            let next = TAG_PALETTE
+                .iter()
+                .find(|candidate| !used.contains(**candidate))
+                .unwrap_or(&NO_COLOR)
+                .to_string();
+            if !next.is_empty() {
+                used.insert(next.clone());
+            }
+            next
+        };
+        if color != stored_color {
+            tx.execute("UPDATE tags SET color = ?1 WHERE id = ?2", (color, tag_id))
+                .map_err(sqlite_err)?;
+        }
+    }
+    Ok(())
 }
 
 fn refresh_tag_metrics_in_tx(tx: &rusqlite::Transaction<'_>) -> StorageResult<()> {
@@ -5822,14 +6037,6 @@ fn normalize_tag_name(value: &str) -> String {
     } else {
         cleaned
     }
-}
-
-fn tag_color(name: &str) -> String {
-    const PALETTE: [&str; 6] = [
-        "#5B8DEF", "#34A853", "#F2994A", "#EB5757", "#9B51E0", "#00A3A3",
-    ];
-    let checksum: usize = name.chars().map(|ch| ch as usize).sum();
-    PALETTE[checksum % PALETTE.len()].to_owned()
 }
 
 #[cfg(test)]
@@ -10143,6 +10350,144 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
                 running_delta: 125.0,
             }
         );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn tag_palette_assigns_first_free_color_and_allows_manual_reassignment() {
+        let db_path = create_balance_test_db();
+        assert_eq!(TAG_PALETTE.len(), 32);
+        assert!(TAG_PALETTE.iter().all(|color| is_valid_tag_color(color)));
+
+        let first = create_standalone_record(
+            &db_path,
+            &StandaloneRecordCreatePayload {
+                record_type: "expense".to_owned(),
+                date: "2026-02-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Food".to_owned(),
+                description: "First".to_owned(),
+                tags: vec!["alpha".to_owned()],
+            },
+        )
+        .unwrap();
+        create_standalone_record(
+            &db_path,
+            &StandaloneRecordCreatePayload {
+                record_type: "expense".to_owned(),
+                date: "2026-02-02".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Food".to_owned(),
+                description: "Second".to_owned(),
+                tags: vec!["beta".to_owned()],
+            },
+        )
+        .unwrap();
+        let initial = tag_color_rows(&db_path).unwrap();
+        let alpha_color = initial
+            .iter()
+            .find(|row| row.name == "alpha")
+            .unwrap()
+            .color
+            .clone();
+        let beta_color = initial
+            .iter()
+            .find(|row| row.name == "beta")
+            .unwrap()
+            .color
+            .clone();
+        assert!(!alpha_color.is_empty());
+        assert_ne!(alpha_color, beta_color);
+
+        update_standalone_record_with_tag_colors(
+            &db_path,
+            first.id,
+            &StandaloneRecordUpdatePayload {
+                record_type: "expense".to_owned(),
+                date: "2026-02-01".to_owned(),
+                wallet_id: 1,
+                amount_original: "10".to_owned(),
+                currency: "KZT".to_owned(),
+                rate_at_operation: "1".to_owned(),
+                amount_base: "10".to_owned(),
+                category: "Food".to_owned(),
+                description: "First".to_owned(),
+                tags: vec!["alpha".to_owned()],
+            },
+            &[TagColorAssignment {
+                name: "alpha".to_owned(),
+                color: TAG_PALETTE[10].to_owned(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(
+            tag_color_rows(&db_path)
+                .unwrap()
+                .into_iter()
+                .find(|row| row.name == "alpha")
+                .unwrap()
+                .color,
+            TAG_PALETTE[10]
+        );
+        remove_test_db(&db_path);
+    }
+
+    #[test]
+    fn tag_palette_rejects_color_conflicts_and_invalid_values() {
+        let db_path = create_balance_test_db();
+        let payload = StandaloneRecordCreatePayload {
+            record_type: "expense".to_owned(),
+            date: "2026-02-01".to_owned(),
+            wallet_id: 1,
+            amount_original: "10".to_owned(),
+            currency: "KZT".to_owned(),
+            rate_at_operation: "1".to_owned(),
+            amount_base: "10".to_owned(),
+            category: "Food".to_owned(),
+            description: "Tagged".to_owned(),
+            tags: vec!["alpha".to_owned()],
+        };
+        create_standalone_record_with_tag_colors(
+            &db_path,
+            &payload,
+            &[TagColorAssignment {
+                name: "alpha".to_owned(),
+                color: TAG_PALETTE[0].to_owned(),
+            }],
+        )
+        .unwrap();
+        let beta_payload = StandaloneRecordCreatePayload {
+            tags: vec!["beta".to_owned()],
+            ..payload.clone()
+        };
+        let conflict = create_standalone_record_with_tag_colors(
+            &db_path,
+            &beta_payload,
+            &[TagColorAssignment {
+                name: "beta".to_owned(),
+                color: TAG_PALETTE[0].to_owned(),
+            }],
+        )
+        .unwrap_err();
+        assert!(conflict.contains("already assigned"));
+        let invalid = create_standalone_record_with_tag_colors(
+            &db_path,
+            &payload,
+            &[TagColorAssignment {
+                name: "alpha".to_owned(),
+                color: "#ffffff".to_owned(),
+            }],
+        )
+        .unwrap_err();
+        assert!(invalid.contains("Unsupported tag color"));
         remove_test_db(&db_path);
     }
 }

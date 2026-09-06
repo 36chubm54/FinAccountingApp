@@ -28,6 +28,8 @@ data class OperationsUiState(
     val wallets: List<WalletOption> = emptyList(),
     val baseCurrency: String = "KZT",
     val tags: List<String> = emptyList(),
+    val tagColors: Map<String, String> = emptyMap(),
+    val tagPalette: List<String> = emptyList(),
     val categories: List<String> = emptyList(),
     val descriptionSuggestions: List<String> = emptyList(),
     val incomeCategories: List<String> = emptyList(),
@@ -91,6 +93,11 @@ class OperationsViewModel(
                 val currentState = mutableState.value
                 val suggestions = runCatching { engine.operationSuggestions() }
                     .getOrElse { currentState.toOperationSuggestions() }
+                val tagColors = runCatching { engine.listTagColors() }
+                    .getOrElse { currentState.tagColors.entries.map { app.ledgera.model.TagColor(it.key, it.value) } }
+                    .associate { it.name.lowercase() to it.color }
+                val tagPalette = runCatching { engine.tagColorPalette() }
+                    .getOrElse { currentState.tagPalette }
                 val categories = when (engineFilter.recordType) {
                     "income" -> suggestions.incomeCategories
                     "expense" -> suggestions.expenseCategories
@@ -102,6 +109,8 @@ class OperationsViewModel(
                     wallets = wallets,
                     baseCurrency = baseCurrency,
                     tags = suggestions.tags,
+                    tagColors = tagColors,
+                    tagPalette = tagPalette,
                     categories = categories,
                     descriptionSuggestions = suggestions.descriptions,
                     incomeCategories = suggestions.incomeCategories,
@@ -470,7 +479,7 @@ class OperationsViewModel(
         mutableState.value = mutableState.value.copy(loading = true, error = null, notice = null)
         launchSafely {
             runCatching {
-                engine.createRecord(normalizedRequest)
+                engine.createRecordWithTagColors(normalizedRequest)
                 refresh(notice = "Operation added")
             }.onFailure { error ->
                 mutableState.value = mutableState.value.copy(
@@ -519,7 +528,7 @@ class OperationsViewModel(
         mutableState.value = mutableState.value.copy(loading = true, error = null, notice = null)
         launchSafely {
             runCatching {
-                engine.updateRecord(draft.id, request)
+                engine.updateRecordWithTagColors(draft.id, request)
                 mutableState.value = mutableState.value.copy(selectedRecordId = null, editDraft = null)
                 refresh(notice = "Operation updated")
             }.onFailure { error ->
@@ -775,6 +784,7 @@ class OperationsViewModel(
             category = category,
             description = description,
             tagsText = tags.joinToString(", "),
+            tagColors = tags.associateWith { tag -> mutableState.value.tagColors[tag.lowercase()].orEmpty() },
         )
 
     private fun app.ledgera.model.TransferDetails.toDraft(): TransferDraft =
@@ -800,6 +810,7 @@ class OperationsViewModel(
             category = category,
             description = description,
             tags = OperationValidation.parseTags(tagsText),
+            tagColors = tagColors,
         )
 
     private fun TransferDraft.toUpdateRequest(): UpdateTransferRequest =

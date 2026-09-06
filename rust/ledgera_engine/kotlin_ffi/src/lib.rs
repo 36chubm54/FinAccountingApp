@@ -4,9 +4,10 @@ use ledgera_engine_storage::{
     MandatoryExportResult, MandatoryImportResult, MandatoryTemplateCreatePayload,
     MandatoryTemplateUpdatePayload, OperationDeleteResult, OperationExportResult,
     OperationImportResult, RecordFilterPayload, RecordRow, StandaloneRecordCreatePayload,
-    StandaloneRecordUpdatePayload, TransferCreatePayload, TransferRow, TransferUpdatePayload,
-    WalletBalanceRow, WalletCreatePayload, WalletRow, audit_run_for_date, base_currency_code,
-    create_standalone_record, create_transfer, create_wallet, current_local_date,
+    StandaloneRecordUpdatePayload, TagColorAssignment as StorageTagColorAssignment,
+    TransferCreatePayload, TransferRow, TransferUpdatePayload, WalletBalanceRow,
+    WalletCreatePayload, WalletRow, audit_run_for_date, base_currency_code,
+    create_standalone_record_with_tag_colors, create_transfer, create_wallet, current_local_date,
     debt_close_validated, debt_create, debt_delete, debt_delete_payment, debt_payment_rows,
     debt_register_payment_validated, debt_register_write_off_validated, debt_rows,
     delete_all_operations, delete_operations_selection, delete_standalone_record, delete_transfer,
@@ -17,9 +18,9 @@ use ledgera_engine_storage::{
     mandatory_expense_rows, mandatory_template_create, mandatory_template_delete,
     mandatory_template_delete_all, mandatory_template_update, operation_suggestions,
     preview_import_mandatory_csv, preview_import_mandatory_xlsx, preview_import_records_csv,
-    preview_import_records_xlsx, standalone_record_get_row, tag_names, transfer_get_row,
-    update_standalone_record, update_transfer, wallet_balance_row, wallet_balance_rows,
-    wallet_list_rows,
+    preview_import_records_xlsx, standalone_record_get_row, tag_color_palette, tag_color_rows,
+    tag_names, transfer_get_row, update_standalone_record_with_tag_colors, update_transfer,
+    wallet_balance_row, wallet_balance_rows, wallet_list_rows,
 };
 use std::fmt;
 use std::path::Path;
@@ -60,6 +61,18 @@ pub struct UpdateRecordRequest {
     pub category: String,
     pub description: String,
     pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagColorAssignment {
+    pub name: String,
+    pub color: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagColorDto {
+    pub name: String,
+    pub color: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -382,6 +395,14 @@ impl LedgeraEngine {
         &self,
         request: CreateRecordRequest,
     ) -> Result<RecordDto, LedgeraEngineError> {
+        self.create_record_with_tag_colors(request, Vec::new())
+    }
+
+    pub fn create_record_with_tag_colors(
+        &self,
+        request: CreateRecordRequest,
+        tag_colors: Vec<TagColorAssignment>,
+    ) -> Result<RecordDto, LedgeraEngineError> {
         validate_create_request(&request)?;
         let payload = StandaloneRecordCreatePayload {
             record_type: request.record_type,
@@ -395,7 +416,14 @@ impl LedgeraEngine {
             description: request.description,
             tags: request.tags,
         };
-        create_standalone_record(&self.db_path, &payload)
+        let assignments = tag_colors
+            .into_iter()
+            .map(|assignment| StorageTagColorAssignment {
+                name: assignment.name,
+                color: assignment.color,
+            })
+            .collect::<Vec<_>>();
+        create_standalone_record_with_tag_colors(&self.db_path, &payload, &assignments)
             .map(record_to_dto)
             .map_err(storage_error)
     }
@@ -404,6 +432,15 @@ impl LedgeraEngine {
         &self,
         record_id: i64,
         request: UpdateRecordRequest,
+    ) -> Result<RecordDto, LedgeraEngineError> {
+        self.update_record_with_tag_colors(record_id, request, Vec::new())
+    }
+
+    pub fn update_record_with_tag_colors(
+        &self,
+        record_id: i64,
+        request: UpdateRecordRequest,
+        tag_colors: Vec<TagColorAssignment>,
     ) -> Result<RecordDto, LedgeraEngineError> {
         validate_update_request(&request)?;
         let payload = StandaloneRecordUpdatePayload {
@@ -418,7 +455,14 @@ impl LedgeraEngine {
             description: request.description,
             tags: request.tags,
         };
-        update_standalone_record(&self.db_path, record_id, &payload)
+        let assignments = tag_colors
+            .into_iter()
+            .map(|assignment| StorageTagColorAssignment {
+                name: assignment.name,
+                color: assignment.color,
+            })
+            .collect::<Vec<_>>();
+        update_standalone_record_with_tag_colors(&self.db_path, record_id, &payload, &assignments)
             .map(record_to_dto)
             .map_err(storage_error)
     }
@@ -577,6 +621,23 @@ impl LedgeraEngine {
                 expense_descriptions: suggestions.expense_descriptions,
             })
             .map_err(storage_error)
+    }
+
+    pub fn list_tag_colors(&self) -> Result<Vec<TagColorDto>, LedgeraEngineError> {
+        tag_color_rows(&self.db_path)
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|row| TagColorDto {
+                        name: row.name,
+                        color: row.color,
+                    })
+                    .collect()
+            })
+            .map_err(storage_error)
+    }
+
+    pub fn tag_color_palette(&self) -> Vec<String> {
+        tag_color_palette()
     }
 
     pub fn list_wallets(&self) -> Result<Vec<WalletDto>, LedgeraEngineError> {
@@ -1492,6 +1553,45 @@ mod tests {
                 .list_records(RecordFilterDto::default())
                 .unwrap()
                 .is_empty()
+        );
+        fs::remove_file(db_path).ok();
+    }
+
+    #[test]
+    fn engine_maps_tag_palette_and_assignments() {
+        let db_path = fixture_db();
+        let engine = LedgeraEngine::new(db_path.clone());
+        let created = engine
+            .create_record_with_tag_colors(
+                CreateRecordRequest {
+                    record_type: "expense".to_owned(),
+                    date: "2026-01-01".to_owned(),
+                    wallet_id: 1,
+                    amount_original: "10".to_owned(),
+                    currency: "KZT".to_owned(),
+                    rate_at_operation: "1".to_owned(),
+                    amount_base: "10".to_owned(),
+                    category: "Food".to_owned(),
+                    description: "Colored".to_owned(),
+                    tags: vec!["colored".to_owned()],
+                },
+                vec![TagColorAssignment {
+                    name: "colored".to_owned(),
+                    color: "#ea3b5a".to_owned(),
+                }],
+            )
+            .unwrap();
+        assert_eq!(created.tags, vec!["colored"]);
+        assert_eq!(engine.tag_color_palette().len(), 32);
+        assert_eq!(
+            engine
+                .list_tag_colors()
+                .unwrap()
+                .into_iter()
+                .find(|tag| tag.name == "colored")
+                .unwrap()
+                .color,
+            "#ea3b5a"
         );
         fs::remove_file(db_path).ok();
     }

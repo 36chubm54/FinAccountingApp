@@ -28,6 +28,7 @@ data class OperationDraft(
     val category: String = "",
     val description: String = "",
     val tagsText: String = "",
+    val tagColors: Map<String, String> = emptyMap(),
 )
 
 data class OperationFilter(
@@ -48,6 +49,7 @@ data class CreateOperationRequest(
     val category: String,
     val description: String,
     val tags: List<String> = emptyList(),
+    val tagColors: Map<String, String> = emptyMap(),
 )
 
 data class UpdateOperationRequest(
@@ -63,6 +65,7 @@ data class UpdateOperationRequest(
     val category: String,
     val description: String,
     val tags: List<String> = emptyList(),
+    val tagColors: Map<String, String> = emptyMap(),
 )
 
 data class CreateTransferRequest(
@@ -142,6 +145,11 @@ data class OperationSuggestions(
     val descriptions: List<String> = emptyList(),
     val incomeDescriptions: List<String> = emptyList(),
     val expenseDescriptions: List<String> = emptyList(),
+)
+
+data class TagColor(
+    val name: String,
+    val color: String,
 )
 
 data class MandatoryImportResult(

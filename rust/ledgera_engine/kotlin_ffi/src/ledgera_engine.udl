@@ -151,6 +151,16 @@ dictionary OperationSuggestionsDto {
     sequence<string> expense_descriptions;
 };
 
+dictionary TagColorDto {
+    string name;
+    string color;
+};
+
+dictionary TagColorAssignment {
+    string name;
+    string color;
+};
+
 dictionary MandatoryImportResultDto {
     i64 imported;
     i64 skipped;
@@ -276,7 +286,11 @@ interface LedgeraEngine {
     [Throws=LedgeraEngineError]
     RecordDto create_record(CreateRecordRequest request);
     [Throws=LedgeraEngineError]
+    RecordDto create_record_with_tag_colors(CreateRecordRequest request, sequence<TagColorAssignment> tag_colors);
+    [Throws=LedgeraEngineError]
     RecordDto update_record(i64 record_id, UpdateRecordRequest request);
+    [Throws=LedgeraEngineError]
+    RecordDto update_record_with_tag_colors(i64 record_id, UpdateRecordRequest request, sequence<TagColorAssignment> tag_colors);
     [Throws=LedgeraEngineError]
     boolean delete_record(i64 record_id);
     [Throws=LedgeraEngineError]
@@ -311,6 +325,9 @@ interface LedgeraEngine {
     sequence<string> list_record_descriptions(string? record_type);
     [Throws=LedgeraEngineError]
     OperationSuggestionsDto operation_suggestions();
+    [Throws=LedgeraEngineError]
+    sequence<TagColorDto> list_tag_colors();
+    sequence<string> tag_color_palette();
     [Throws=LedgeraEngineError]
     sequence<WalletDto> list_wallets();
     [Throws=LedgeraEngineError]

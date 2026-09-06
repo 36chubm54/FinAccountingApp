@@ -18,6 +18,7 @@ This project adheres to Semantic Versioning.
 - Added beta.1 Kotlin Operations base-currency transfer create/edit/delete support through Rust/Kotlin UniFFI, including linked source/target record maintenance and preserved or removed commission marker records.
 - Added beta.1 Kotlin Operations safe bulk deletion through Rust/Kotlin UniFFI, including delete-all and selective delete for Operations-owned standalone records, generated mandatory rows, transfers, and debt-linked cashflow rows.
 - Added beta.1 Kotlin Operations CSV/XLSX import/export through Rust/Kotlin UniFFI, including previewed replace-import for Operations-owned standalone records, generated mandatory rows, transfers, and debt-linked records, Python-style XLSX `Data` sheet styling, and aggregate transfer rows.
+- Added a persistent Operations tag color palette with 32 fixed colors plus `no color`; create/edit dialogs reuse saved tag colors and support manual reassignment through Rust/Kotlin UniFFI.
 - Added beta.1 Kotlin Debts read/write slices through Rust/Kotlin UniFFI for listing debts/loans, viewing selected debt payment history, creating base-currency debts/loans with linked cashflow rows, registering payments, registering write-offs, closing debts/loans, deleting debt cards, and deleting payments.
 - Added beta.1 Kotlin Mandatory template CRUD, add-to-records, auto-pay application, and CSV/XLSX import/export through Rust/Kotlin UniFFI.
 - Added a beta.1 Kotlin Settings wallet slice for listing wallets and creating active base-currency wallets through Rust/Kotlin UniFFI.
@@ -30,6 +31,7 @@ This project adheres to Semantic Versioning.
 - Reorganized analytics, planning, import, shell, settings, report, operations, backup, export, spreadsheet, finance, and records helpers into clearer package clusters with narrower ownership boundaries.
 - Renamed the Kotlin Desktop runtime framing from alpha.4 to beta.1 and split the Kotlin adapter contract into runtime and operations capability groups so ViewModels depend only on the surfaces they use.
 - Extended the Kotlin UniFFI Operations contract with standalone record get/update/delete methods plus tag and category lookup surfaces.
+- Extended the Kotlin UniFFI Operations contract with persistent tag-color lookup, palette, and atomic create/update color assignments; Operations import/export row headers remain unchanged.
 - Extended the Kotlin UniFFI Operations contract with transfer create/get/update/delete, safe bulk delete, and CSV/XLSX records migration support for standalone, generated mandatory, transfer, and debt-linked rows; transfer list parity, `.xls`/JSON import/export, current-rate import, and commission editing remain pending beta.1 slices.
 - Extended the Kotlin adapter contract with a Debts capability group for debt/loan list, selected history, create, payment, write-off, close, delete debt, and delete payment flows; debt-card editing and import/export remain pending beta.1 slices.
 - Extended the Kotlin adapter contract with a Mandatory capability group for template list/create/update/delete/delete-all, generated record creation, auto-pay application, and previewed CSV/XLSX replace-import/export; `.xls`, JSON backup/export, current-rate import, and wallet creation from import remain pending beta.1 slices.
@@ -61,6 +63,7 @@ This project adheres to Semantic Versioning.
 - Updated v3 beta-cycle documentation: archived historical alpha readiness records under `docs/archive/v3-alpha/`, added `docs/v3_beta_plan.md` as the live beta entry point, and refreshed README/architecture wording for the post-alpha beta track.
 - Clarified the local sync documentation around fingerprint-based duplicate detection and record multiplicity.
 - Synced `README.md`, `README_EN.md`, and `docs/architecture.md` with the current package layout, direct import paths, and removal of legacy tab/app shim layers.
+- Documented the Operations-only fixed tag palette and its SQLite `tags.color` source of truth.
 
 ### Testing
 

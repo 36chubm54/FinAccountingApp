@@ -91,6 +91,9 @@ Current Kotlin/Rust contract:
   standalone/generated mandatory records, transfers, and debt-linked cashflow
   rows, and CSV/XLSX import/export for Operations-owned standalone, generated
   mandatory, transfer, and debt-linked records
+- Operations create/edit dialogs also use a persistent fixed tag palette stored in
+  `tags.color`; Rust assigns first-free colors and validates manual assignments,
+  while the existing CSV/XLSX row contract remains unchanged
 - Kotlin Settings supports wallet listing, active base-currency wallet
   creation/deletion, and read-only AuditEngine v2 report runs through
   Rust/Kotlin UniFFI; wallet edit, runtime currency, sync, updater controls,
