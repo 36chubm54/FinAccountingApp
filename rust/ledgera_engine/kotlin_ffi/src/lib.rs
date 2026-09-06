@@ -15,10 +15,11 @@ use ledgera_engine_storage::{
     import_mandatory_csv, import_mandatory_xlsx, import_records_csv, import_records_xlsx,
     mandatory_add_to_records, mandatory_apply_auto_payments, mandatory_expense_row,
     mandatory_expense_rows, mandatory_template_create, mandatory_template_delete,
-    mandatory_template_delete_all, mandatory_template_update, preview_import_mandatory_csv,
-    preview_import_mandatory_xlsx, preview_import_records_csv, preview_import_records_xlsx,
-    standalone_record_get_row, tag_names, transfer_get_row, update_standalone_record,
-    update_transfer, wallet_balance_row, wallet_balance_rows, wallet_list_rows,
+    mandatory_template_delete_all, mandatory_template_update, operation_suggestions,
+    preview_import_mandatory_csv, preview_import_mandatory_xlsx, preview_import_records_csv,
+    preview_import_records_xlsx, standalone_record_get_row, tag_names, transfer_get_row,
+    update_standalone_record, update_transfer, wallet_balance_row, wallet_balance_rows,
+    wallet_list_rows,
 };
 use std::fmt;
 use std::path::Path;
@@ -176,6 +177,16 @@ pub struct OperationImportResultDto {
 pub struct OperationExportResultDto {
     pub exported_rows: i64,
     pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OperationSuggestionsDto {
+    pub tags: Vec<String>,
+    pub income_categories: Vec<String>,
+    pub expense_categories: Vec<String>,
+    pub descriptions: Vec<String>,
+    pub income_descriptions: Vec<String>,
+    pub expense_descriptions: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -553,6 +564,19 @@ impl LedgeraEngine {
         record_type: Option<String>,
     ) -> Result<Vec<String>, LedgeraEngineError> {
         distinct_record_descriptions(&self.db_path, record_type.as_deref()).map_err(storage_error)
+    }
+
+    pub fn operation_suggestions(&self) -> Result<OperationSuggestionsDto, LedgeraEngineError> {
+        operation_suggestions(&self.db_path)
+            .map(|suggestions| OperationSuggestionsDto {
+                tags: suggestions.tags,
+                income_categories: suggestions.income_categories,
+                expense_categories: suggestions.expense_categories,
+                descriptions: suggestions.descriptions,
+                income_descriptions: suggestions.income_descriptions,
+                expense_descriptions: suggestions.expense_descriptions,
+            })
+            .map_err(storage_error)
     }
 
     pub fn list_wallets(&self) -> Result<Vec<WalletDto>, LedgeraEngineError> {
@@ -1453,6 +1477,13 @@ mod tests {
                 .list_record_descriptions(Some("transfer".to_owned()))
                 .is_err()
         );
+        let suggestions = engine.operation_suggestions().unwrap();
+        assert_eq!(suggestions.tags, vec!["food", "work"]);
+        assert_eq!(suggestions.income_categories, vec!["Bonus"]);
+        assert_eq!(suggestions.descriptions, vec!["Updated"]);
+        assert_eq!(suggestions.income_descriptions, vec!["Updated"]);
+        assert!(suggestions.expense_categories.is_empty());
+        assert!(suggestions.expense_descriptions.is_empty());
 
         assert!(engine.delete_record(created.id).unwrap());
         assert_eq!(engine.get_record(created.id).unwrap(), None);

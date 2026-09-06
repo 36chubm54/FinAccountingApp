@@ -16,6 +16,7 @@ import app.ledgera.model.OperationDeleteResult
 import app.ledgera.model.OperationExportResult
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
+import app.ledgera.model.OperationSuggestions
 import app.ledgera.model.MandatoryAutoPayResult
 import app.ledgera.model.MandatoryExportResult
 import app.ledgera.model.MandatoryImportResult
@@ -56,6 +57,7 @@ interface OperationsEngine {
     suspend fun listTags(): List<String>
     suspend fun listCategories(recordType: String): List<String>
     suspend fun listRecordDescriptions(recordType: String? = null): List<String>
+    suspend fun operationSuggestions(): OperationSuggestions
     suspend fun listWallets(): List<WalletOption>
     suspend fun walletBalances(): List<WalletOption>
 }

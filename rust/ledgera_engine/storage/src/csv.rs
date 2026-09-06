@@ -48,7 +48,9 @@ pub(crate) fn write_csv_rows(
         .write_record(headers)
         .map_err(|error| error.to_string())?;
     for row in rows {
-        writer.write_record(row).map_err(|error| error.to_string())?;
+        writer
+            .write_record(row)
+            .map_err(|error| error.to_string())?;
     }
     writer.flush().map_err(|error| error.to_string())?;
     Ok(i64::try_from(rows.len()).unwrap_or(i64::MAX))
@@ -65,7 +67,10 @@ pub(crate) fn normalize_tabular_key(value: &str) -> String {
 fn csv_row_values(headers: &[String], row: &csv::StringRecord) -> HashMap<String, String> {
     let mut values = HashMap::new();
     for (index, header) in headers.iter().enumerate() {
-        values.insert(header.clone(), row.get(index).unwrap_or("").trim().to_owned());
+        values.insert(
+            header.clone(),
+            row.get(index).unwrap_or("").trim().to_owned(),
+        );
     }
     values
 }

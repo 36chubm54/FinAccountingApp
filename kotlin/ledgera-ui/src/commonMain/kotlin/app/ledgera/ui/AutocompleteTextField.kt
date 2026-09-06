@@ -31,10 +31,11 @@ fun AutocompleteTextField(
     modifier: Modifier = Modifier,
     menuWidth: Dp? = null,
     maxSuggestions: Int = 6,
+    showSuggestionsOnBlank: Boolean = true,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val filteredSuggestions = remember(value, suggestions) {
-        filterSuggestions(value, suggestions, maxSuggestions)
+    val filteredSuggestions = remember(value, suggestions, showSuggestionsOnBlank) {
+        autocompleteSuggestions(value, suggestions, maxSuggestions, showSuggestionsOnBlank)
     }
     Box(modifier = modifier) {
         OutlinedTextField(
@@ -89,7 +90,7 @@ fun TagAutocompleteField(
     var expanded by remember { mutableStateOf(false) }
     val token = currentTagToken(value)
     val filteredSuggestions = remember(token, suggestions) {
-        filterSuggestions(token, suggestions, maxSuggestions)
+        autocompleteSuggestions(token, suggestions, maxSuggestions, showSuggestionsOnBlank = true)
     }
     Box(modifier = modifier) {
         OutlinedTextField(
@@ -125,7 +126,7 @@ fun TagAutocompleteField(
             menuWidth = menuWidth,
             onDismiss = { expanded = false },
             onSuggestionSelected = { suggestion ->
-                onValueChange(replaceCurrentTagToken(value, suggestion))
+                onValueChange(replaceCurrentTagTokenForAutocomplete(value, suggestion))
                 expanded = false
             },
         )
@@ -155,20 +156,23 @@ private fun SuggestionMenu(
     }
 }
 
-private fun filterSuggestions(
+internal fun autocompleteSuggestions(
     value: String,
     suggestions: List<String>,
     maxSuggestions: Int,
+    showSuggestionsOnBlank: Boolean,
 ): List<String> {
     val query = value.trim()
+    if (query.isEmpty() && !showSuggestionsOnBlank) {
+        return emptyList()
+    }
     return suggestions
         .asSequence()
         .map(String::trim)
         .filter(String::isNotEmpty)
         .distinctBy(String::lowercase)
         .filter { suggestion ->
-            query.isEmpty() ||
-                suggestion.contains(query, ignoreCase = true) &&
+            (query.isEmpty() || suggestion.contains(query, ignoreCase = true)) &&
                 !suggestion.equals(query, ignoreCase = true)
         }
         .take(maxSuggestions.coerceAtLeast(1))
@@ -178,7 +182,7 @@ private fun filterSuggestions(
 private fun currentTagToken(value: String): String =
     value.substringAfterLast(',').trim()
 
-private fun replaceCurrentTagToken(value: String, suggestion: String): String {
+internal fun replaceCurrentTagTokenForAutocomplete(value: String, suggestion: String): String {
     val separatorIndex = value.lastIndexOf(',')
     return if (separatorIndex < 0) {
         suggestion

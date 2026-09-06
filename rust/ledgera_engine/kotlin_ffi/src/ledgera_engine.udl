@@ -142,6 +142,15 @@ dictionary OperationExportResultDto {
     string path;
 };
 
+dictionary OperationSuggestionsDto {
+    sequence<string> tags;
+    sequence<string> income_categories;
+    sequence<string> expense_categories;
+    sequence<string> descriptions;
+    sequence<string> income_descriptions;
+    sequence<string> expense_descriptions;
+};
+
 dictionary MandatoryImportResultDto {
     i64 imported;
     i64 skipped;
@@ -300,6 +309,8 @@ interface LedgeraEngine {
     sequence<string> list_categories(string record_type);
     [Throws=LedgeraEngineError]
     sequence<string> list_record_descriptions(string? record_type);
+    [Throws=LedgeraEngineError]
+    OperationSuggestionsDto operation_suggestions();
     [Throws=LedgeraEngineError]
     sequence<WalletDto> list_wallets();
     [Throws=LedgeraEngineError]

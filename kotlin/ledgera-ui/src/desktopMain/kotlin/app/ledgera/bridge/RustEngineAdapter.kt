@@ -32,6 +32,7 @@ import app.ledgera.model.OperationDeleteResult
 import app.ledgera.model.OperationExportResult
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
+import app.ledgera.model.OperationSuggestions
 import app.ledgera.model.MandatoryAutoPayResult
 import app.ledgera.model.MandatoryExportResult
 import app.ledgera.model.MandatoryImportResult
@@ -226,6 +227,19 @@ class RustEngineAdapter(dbPath: String) : EngineAdapter {
 
     override suspend fun listRecordDescriptions(recordType: String?): List<String> = withContext(Dispatchers.IO) {
         engine.listRecordDescriptions(recordType)
+    }
+
+    override suspend fun operationSuggestions(): OperationSuggestions = withContext(Dispatchers.IO) {
+        engine.operationSuggestions().let {
+            OperationSuggestions(
+                tags = it.tags,
+                incomeCategories = it.incomeCategories,
+                expenseCategories = it.expenseCategories,
+                descriptions = it.descriptions,
+                incomeDescriptions = it.incomeDescriptions,
+                expenseDescriptions = it.expenseDescriptions,
+            )
+        }
     }
 
     override suspend fun listWallets(): List<WalletOption> = withContext(Dispatchers.IO) {

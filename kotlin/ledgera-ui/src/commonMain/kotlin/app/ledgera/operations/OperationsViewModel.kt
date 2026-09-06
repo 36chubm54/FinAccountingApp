@@ -8,6 +8,7 @@ import app.ledgera.model.OperationDeleteResult
 import app.ledgera.model.OperationFilter
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
+import app.ledgera.model.OperationSuggestions
 import app.ledgera.model.TransferDraft
 import app.ledgera.model.UpdateOperationRequest
 import app.ledgera.model.UpdateTransferRequest
@@ -87,49 +88,46 @@ class OperationsViewModel(
                 val wallets = engine.walletBalances().ifEmpty { engine.listWallets() }
                 val baseCurrency = engine.baseCurrency()
                 val records = engine.listRecords(engineFilter)
-                val tags = engine.listTags()
-                val incomeCategories = engine.listCategories("income")
-                val expenseCategories = engine.listCategories("expense")
-                val descriptionSuggestions = engine.listRecordDescriptions(null)
-                val incomeDescriptionSuggestions = engine.listRecordDescriptions("income")
-                val expenseDescriptionSuggestions = engine.listRecordDescriptions("expense")
+                val currentState = mutableState.value
+                val suggestions = runCatching { engine.operationSuggestions() }
+                    .getOrElse { currentState.toOperationSuggestions() }
                 val categories = when (engineFilter.recordType) {
-                    "income" -> incomeCategories
-                    "expense" -> expenseCategories
-                    else -> (incomeCategories + expenseCategories).distinct()
+                    "income" -> suggestions.incomeCategories
+                    "expense" -> suggestions.expenseCategories
+                    else -> (suggestions.incomeCategories + suggestions.expenseCategories).distinct()
                 }
                 mutableState.value = OperationsUiState(
                     loading = false,
                     records = records,
                     wallets = wallets,
                     baseCurrency = baseCurrency,
-                    tags = tags,
+                    tags = suggestions.tags,
                     categories = categories,
-                    descriptionSuggestions = descriptionSuggestions,
-                    incomeCategories = incomeCategories,
-                    expenseCategories = expenseCategories,
-                    incomeDescriptionSuggestions = incomeDescriptionSuggestions,
-                    expenseDescriptionSuggestions = expenseDescriptionSuggestions,
+                    descriptionSuggestions = suggestions.descriptions,
+                    incomeCategories = suggestions.incomeCategories,
+                    expenseCategories = suggestions.expenseCategories,
+                    incomeDescriptionSuggestions = suggestions.incomeDescriptions,
+                    expenseDescriptionSuggestions = suggestions.expenseDescriptions,
                     filter = filter,
-                    selectedRecordId = mutableState.value.selectedRecordId?.takeIf { selectedId ->
+                    selectedRecordId = currentState.selectedRecordId?.takeIf { selectedId ->
                         records.any { it.id == selectedId }
                     },
-                    selectiveDeleteMode = mutableState.value.selectiveDeleteMode,
-                    selectedBulkRecordIds = mutableState.value.selectedBulkRecordIds
+                    selectiveDeleteMode = currentState.selectiveDeleteMode,
+                    selectedBulkRecordIds = currentState.selectedBulkRecordIds
                         .filterTo(mutableSetOf()) { selectedId ->
                             records.any { it.id == selectedId }
                         },
-                    selectedBulkTransferIds = mutableState.value.selectedBulkTransferIds
+                    selectedBulkTransferIds = currentState.selectedBulkTransferIds
                         .filterTo(mutableSetOf()) { selectedId ->
                             records.any { it.transferId == selectedId }
                         },
-                    editDraft = mutableState.value.editDraft?.takeIf { draft ->
+                    editDraft = currentState.editDraft?.takeIf { draft ->
                         draft.id != null && records.any { it.id == draft.id }
                     },
-                    transferDraft = mutableState.value.transferDraft,
-                    importPreview = mutableState.value.importPreview,
-                    importPath = mutableState.value.importPath,
-                    importFileSnapshot = mutableState.value.importFileSnapshot,
+                    transferDraft = currentState.transferDraft,
+                    importPreview = currentState.importPreview,
+                    importPath = currentState.importPath,
+                    importFileSnapshot = currentState.importFileSnapshot,
                     notice = notice,
                 )
             }.onFailure { error ->
@@ -826,6 +824,16 @@ class OperationsViewModel(
         }
     }
 }
+
+private fun OperationsUiState.toOperationSuggestions(): OperationSuggestions =
+    OperationSuggestions(
+        tags = tags,
+        incomeCategories = incomeCategories,
+        expenseCategories = expenseCategories,
+        descriptions = descriptionSuggestions,
+        incomeDescriptions = incomeDescriptionSuggestions,
+        expenseDescriptions = expenseDescriptionSuggestions,
+    )
 
 private fun validateFilter(filter: OperationFilter): String? {
     filter.startDate?.let { DateValidation.validateOptionalDmy(it)?.let { error -> return "From: $error" } }

@@ -17,6 +17,7 @@ import app.ledgera.model.OperationDeleteResult
 import app.ledgera.model.OperationExportResult
 import app.ledgera.model.OperationImportResult
 import app.ledgera.model.OperationRecord
+import app.ledgera.model.OperationSuggestions
 import app.ledgera.model.MandatoryAutoPayResult
 import app.ledgera.model.MandatoryExportResult
 import app.ledgera.model.MandatoryImportResult
@@ -994,6 +995,20 @@ class OperationsViewModelTest {
         assertEquals(listOf("Food"), viewModel.state.value.categories)
         assertEquals(listOf("Lunch", "Salary"), viewModel.state.value.descriptionSuggestions)
     }
+
+    @Test
+    fun refreshKeepsRecordsWhenAutocompleteLookupFails() {
+        val viewModel = OperationsViewModel(
+            FakeEngineAdapter(suggestionError = IllegalStateException("lookup failed")),
+            CoroutineScope(Dispatchers.Unconfined),
+        )
+
+        viewModel.refresh()
+
+        assertEquals(listOf(1L), viewModel.state.value.records.map { it.id })
+        assertEquals(null, viewModel.state.value.error)
+        assertEquals(emptyList(), viewModel.state.value.descriptionSuggestions)
+    }
 }
 
 private class FakeEngineAdapter(
@@ -1005,6 +1020,7 @@ private class FakeEngineAdapter(
     private val deleteTransferError: Throwable? = null,
     private val deleteAllOperationsError: Throwable? = null,
     private val deleteSelectionError: Throwable? = null,
+    private val suggestionError: Throwable? = null,
     private val importPreview: OperationImportResult = OperationImportResult(
         imported = 2,
         skipped = 0,
@@ -1290,6 +1306,18 @@ private class FakeEngineAdapter(
     override suspend fun listCategories(recordType: String): List<String> = listOf("Food")
 
     override suspend fun listRecordDescriptions(recordType: String?): List<String> = listOf("Lunch", "Salary")
+
+    override suspend fun operationSuggestions(): OperationSuggestions {
+        suggestionError?.let { throw it }
+        return OperationSuggestions(
+            tags = listOf("home"),
+            incomeCategories = listOf("Salary"),
+            expenseCategories = listOf("Food"),
+            descriptions = listOf("Lunch", "Salary"),
+            incomeDescriptions = listOf("Salary"),
+            expenseDescriptions = listOf("Lunch"),
+        )
+    }
 
     override suspend fun listWallets(): List<WalletOption> = emptyList()
 

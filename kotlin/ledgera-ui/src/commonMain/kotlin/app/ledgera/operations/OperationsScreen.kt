@@ -573,6 +573,7 @@ private fun CreateTransferDialog(
                     label = "Description",
                     suggestions = descriptionSuggestions,
                     menuWidth = DialogContentWidth,
+                    showSuggestionsOnBlank = false,
                 )
                 (validationError ?: engineError)?.let {
                     Text(it, color = MaterialTheme.colorScheme.error)
@@ -830,6 +831,7 @@ private fun CreateOperationForm(
             label = "Description",
             suggestions = descriptionSuggestions,
             menuWidth = DialogContentWidth,
+            showSuggestionsOnBlank = false,
         )
         TagAutocompleteField(
             modifier = dialogFieldModifier(),
@@ -975,6 +977,7 @@ private fun EditOperationFields(
             label = "Description",
             suggestions = descriptionSuggestions,
             menuWidth = DialogContentWidth,
+            showSuggestionsOnBlank = false,
         )
         TagAutocompleteField(
             modifier = dialogFieldModifier(),
@@ -1061,6 +1064,7 @@ private fun EditTransferDialog(
                     label = "Description",
                     suggestions = descriptionSuggestions,
                     menuWidth = DialogContentWidth,
+                    showSuggestionsOnBlank = false,
                 )
                 Text(
                     "Transfer commission is edited as a standalone operation and deleted with the transfer.",

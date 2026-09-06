@@ -2188,7 +2188,9 @@ enum DebtLinkImportKind {
         payment_id: i64,
         previous_record_id: Option<i64>,
     },
-    RecreateDeletedPayment { operation_type: String },
+    RecreateDeletedPayment {
+        operation_type: String,
+    },
 }
 
 struct DebtRecordRemap {
@@ -3999,7 +4001,7 @@ pub fn distinct_record_categories(db_path: &str, record_type: &str) -> StorageRe
     }
     let mut stmt = conn
         .prepare(
-            "SELECT DISTINCT category
+            "SELECT DISTINCT TRIM(category) AS category
              FROM records
              WHERE type = ?1
                AND TRIM(category) <> ''
@@ -4012,6 +4014,27 @@ pub fn distinct_record_categories(db_path: &str, record_type: &str) -> StorageRe
         .query_map([normalized_type.as_str()], |row| row.get::<_, String>(0))
         .map_err(sqlite_err)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_err)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationSuggestions {
+    pub tags: Vec<String>,
+    pub income_categories: Vec<String>,
+    pub expense_categories: Vec<String>,
+    pub descriptions: Vec<String>,
+    pub income_descriptions: Vec<String>,
+    pub expense_descriptions: Vec<String>,
+}
+
+pub fn operation_suggestions(db_path: &str) -> StorageResult<OperationSuggestions> {
+    Ok(OperationSuggestions {
+        tags: tag_names(db_path)?,
+        income_categories: distinct_record_categories(db_path, "income")?,
+        expense_categories: distinct_record_categories(db_path, "expense")?,
+        descriptions: distinct_record_descriptions(db_path, None)?,
+        income_descriptions: distinct_record_descriptions(db_path, Some("income"))?,
+        expense_descriptions: distinct_record_descriptions(db_path, Some("expense"))?,
+    })
 }
 
 pub fn distinct_record_descriptions(
@@ -6854,9 +6877,11 @@ mod tests {
         );
 
         let duplicate = mandatory_apply_auto_payments(&db_path, "2026-06-21").unwrap();
-        assert!(!duplicate.created_records.iter().any(|record| {
-            record.category == monthly.category && record.date == "2026-06-13"
-        }));
+        assert!(
+            !duplicate.created_records.iter().any(|record| {
+                record.category == monthly.category && record.date == "2026-06-13"
+            })
+        );
         remove_test_db(&db_path);
     }
 
@@ -6880,28 +6905,36 @@ mod tests {
         .unwrap();
 
         let before_anchor = mandatory_apply_auto_payments(&db_path, "2026-06-19").unwrap();
-        assert!(!before_anchor
-            .created_records
-            .iter()
-            .any(|record| record.category == daily.category));
+        assert!(
+            !before_anchor
+                .created_records
+                .iter()
+                .any(|record| record.category == daily.category)
+        );
 
         let on_anchor = mandatory_apply_auto_payments(&db_path, "2026-06-20").unwrap();
-        assert!(on_anchor
-            .created_records
-            .iter()
-            .any(|record| record.category == daily.category && record.date == "2026-06-20"));
+        assert!(
+            on_anchor
+                .created_records
+                .iter()
+                .any(|record| record.category == daily.category && record.date == "2026-06-20")
+        );
 
         let next_day = mandatory_apply_auto_payments(&db_path, "2026-06-21").unwrap();
-        assert!(next_day
-            .created_records
-            .iter()
-            .any(|record| record.category == daily.category && record.date == "2026-06-21"));
+        assert!(
+            next_day
+                .created_records
+                .iter()
+                .any(|record| record.category == daily.category && record.date == "2026-06-21")
+        );
 
         let duplicate = mandatory_apply_auto_payments(&db_path, "2026-06-21").unwrap();
-        assert!(!duplicate
-            .created_records
-            .iter()
-            .any(|record| record.category == daily.category && record.date == "2026-06-21"));
+        assert!(
+            !duplicate
+                .created_records
+                .iter()
+                .any(|record| record.category == daily.category && record.date == "2026-06-21")
+        );
         remove_test_db(&db_path);
     }
 
@@ -6925,28 +6958,36 @@ mod tests {
         .unwrap();
 
         let before_anchor = mandatory_apply_auto_payments(&db_path, "2026-06-14").unwrap();
-        assert!(!before_anchor
-            .created_records
-            .iter()
-            .any(|record| record.category == weekly.category));
+        assert!(
+            !before_anchor
+                .created_records
+                .iter()
+                .any(|record| record.category == weekly.category)
+        );
 
         let on_anchor = mandatory_apply_auto_payments(&db_path, "2026-06-15").unwrap();
-        assert!(on_anchor
-            .created_records
-            .iter()
-            .any(|record| record.category == weekly.category && record.date == "2026-06-15"));
+        assert!(
+            on_anchor
+                .created_records
+                .iter()
+                .any(|record| record.category == weekly.category && record.date == "2026-06-15")
+        );
 
         let later_same_week = mandatory_apply_auto_payments(&db_path, "2026-06-18").unwrap();
-        assert!(!later_same_week
-            .created_records
-            .iter()
-            .any(|record| record.category == weekly.category && record.date == "2026-06-15"));
+        assert!(
+            !later_same_week
+                .created_records
+                .iter()
+                .any(|record| record.category == weekly.category && record.date == "2026-06-15")
+        );
 
         let next_week = mandatory_apply_auto_payments(&db_path, "2026-06-22").unwrap();
-        assert!(next_week
-            .created_records
-            .iter()
-            .any(|record| record.category == weekly.category && record.date == "2026-06-22"));
+        assert!(
+            next_week
+                .created_records
+                .iter()
+                .any(|record| record.category == weekly.category && record.date == "2026-06-22")
+        );
         remove_test_db(&db_path);
     }
 
@@ -6982,9 +7023,11 @@ mod tests {
         assert!(manual.contains("Insufficient funds in wallet"));
 
         let result = mandatory_apply_auto_payments(&db_path, "2026-06-02").unwrap();
-        assert!(result.created_records.iter().any(|record| {
-            record.category == "Large autopay" && record.date == "2026-06-02"
-        }));
+        assert!(
+            result.created_records.iter().any(|record| {
+                record.category == "Large autopay" && record.date == "2026-06-02"
+            })
+        );
         remove_test_db(&db_path);
     }
 
@@ -7152,10 +7195,12 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
         assert_eq!(preview.imported, 0);
         assert_eq!(preview.skipped, 0);
         assert!(preview.blocking_errors);
-        assert!(preview
-            .errors
-            .iter()
-            .any(|error| error.contains("Mandatory import contains no templates")));
+        assert!(
+            preview
+                .errors
+                .iter()
+                .any(|error| error.contains("Mandatory import contains no templates"))
+        );
 
         let error = import_mandatory_csv(&db_path, path.to_str().unwrap()).unwrap_err();
         assert!(error.contains("Mandatory import contains no templates"));
@@ -7218,9 +7263,31 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
             tag_names(&db_path).unwrap(),
             vec!["dining".to_owned(), "work".to_owned()]
         );
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute(
+            "INSERT INTO records
+                (type, date, wallet_id, amount_original, amount_original_minor, currency,
+                 rate_at_operation, rate_at_operation_text, amount_base, amount_base_minor,
+                 category, description)
+             VALUES
+                ('expense', '2026-02-11', 1, 1, 100, 'KZT', 1, '1', 1, 100, ' Dining ', 'Updated dinner')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
         assert_eq!(
             distinct_record_categories(&db_path, "expense").unwrap(),
             vec!["Dining".to_owned()]
+        );
+        let suggestions = operation_suggestions(&db_path).unwrap();
+        assert_eq!(
+            suggestions.tags,
+            vec!["dining".to_owned(), "work".to_owned()]
+        );
+        assert_eq!(suggestions.expense_categories, vec!["Dining".to_owned()]);
+        assert_eq!(
+            suggestions.expense_descriptions,
+            vec!["Updated dinner".to_owned()]
         );
         remove_test_db(&db_path);
     }
@@ -8632,9 +8699,11 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
         assert_eq!(result.imported, 1);
         let conn = Connection::open(&db_path).unwrap();
         let payment_record_id: i64 = conn
-            .query_row("SELECT record_id FROM debt_payments WHERE id = 1", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT record_id FROM debt_payments WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         let linked_record: (String, i64) = conn
             .query_row(
@@ -8707,16 +8776,21 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
         let preview = preview_import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
 
         assert!(preview.blocking_errors);
-        assert!(preview.errors.iter().any(|error| {
-            error.contains("is already linked to existing record 7")
-        }));
+        assert!(
+            preview
+                .errors
+                .iter()
+                .any(|error| { error.contains("is already linked to existing record 7") })
+        );
         let error = import_records_csv(&db_path, path.to_str().unwrap()).unwrap_err();
         assert!(error.contains("Operations import contains validation errors"));
         let payment_record_id: i64 = Connection::open(&db_path)
             .unwrap()
-            .query_row("SELECT record_id FROM debt_payments WHERE id = 1", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT record_id FROM debt_payments WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(payment_record_id, 7);
 
@@ -8758,9 +8832,12 @@ expense,,1,Food,10,KZT,1,10,Wrong,monthly\n",
         let preview = preview_import_records_csv(&db_path, path.to_str().unwrap()).unwrap();
 
         assert!(preview.blocking_errors);
-        assert!(preview.errors.iter().any(|error| {
-            error.contains("is not linked to payment history")
-        }));
+        assert!(
+            preview
+                .errors
+                .iter()
+                .any(|error| { error.contains("is not linked to payment history") })
+        );
         let payment_count: i64 = Connection::open(&db_path)
             .unwrap()
             .query_row("SELECT COUNT(*) FROM debt_payments", [], |row| row.get(0))

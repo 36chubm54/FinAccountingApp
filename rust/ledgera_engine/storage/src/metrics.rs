@@ -35,7 +35,11 @@ fn sum_expense_minor(conn: &Connection, start_date: &str, end_date: &str) -> Sto
         .map_err(sqlite_err)
 }
 
-fn savings_rate_for_conn(conn: &Connection, start_date: &str, end_date: &str) -> StorageResult<f64> {
+fn savings_rate_for_conn(
+    conn: &Connection,
+    start_date: &str,
+    end_date: &str,
+) -> StorageResult<f64> {
     let income = minor_to_money_value(sum_income_minor(conn, start_date, end_date)?);
     let expenses = minor_to_money_value(sum_expense_minor(conn, start_date, end_date)?);
     Ok(savings_rate_from_totals(income, expenses))
@@ -180,10 +184,7 @@ struct RefreshBaseRows {
     expenses_total: f64,
 }
 
-fn category_rows_from_totals(
-    totals: CategoryTotals,
-    limit: Option<i64>,
-) -> Vec<CategoryMetricRow> {
+fn category_rows_from_totals(totals: CategoryTotals, limit: Option<i64>) -> Vec<CategoryMetricRow> {
     let mut rows: Vec<(String, i64, i64, usize)> = totals
         .into_iter()
         .map(|(category, (total_minor, record_count, first_seen))| {
@@ -195,11 +196,13 @@ fn category_rows_from_totals(
         rows.truncate(max_len);
     }
     rows.into_iter()
-        .map(|(category, total_minor, record_count, _first_seen)| CategoryMetricRow {
-            category,
-            total_base: minor_to_money_value(total_minor),
-            record_count,
-        })
+        .map(
+            |(category, total_minor, record_count, _first_seen)| CategoryMetricRow {
+                category,
+                total_base: minor_to_money_value(total_minor),
+                record_count,
+            },
+        )
         .collect()
 }
 

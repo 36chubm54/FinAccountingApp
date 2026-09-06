@@ -135,6 +135,15 @@ data class OperationExportResult(
     val path: String,
 )
 
+data class OperationSuggestions(
+    val tags: List<String> = emptyList(),
+    val incomeCategories: List<String> = emptyList(),
+    val expenseCategories: List<String> = emptyList(),
+    val descriptions: List<String> = emptyList(),
+    val incomeDescriptions: List<String> = emptyList(),
+    val expenseDescriptions: List<String> = emptyList(),
+)
+
 data class MandatoryImportResult(
     val imported: Long,
     val skipped: Long,
